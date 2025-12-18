@@ -22,6 +22,16 @@ interface MatchResult {
   draw?: boolean;
 }
 
+interface EscrowPayout {
+  playerId: string;
+  amount: number;
+}
+
+interface EscrowResult {
+  payouts: EscrowPayout[];
+  fee: number;
+}
+
 interface GameState {
   matchId: string;
   game: string;
@@ -36,6 +46,7 @@ interface SocketContextValue {
   matchState: MatchState | null;
   gameState: GameState | null;
   matchResult: MatchResult | null;
+  escrowResult: EscrowResult | null;
   actionRejected: string | null;
   isWaitingForServer: boolean;
   isMatchFinished: boolean;
@@ -53,6 +64,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [matchState, setMatchState] = useState<MatchState | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
+  const [escrowResult, setEscrowResult] = useState<EscrowResult | null>(null);
   const [actionRejected, setActionRejected] = useState<string | null>(null);
   const [isWaitingForServer, setIsWaitingForServer] = useState(false);
   const [isMatchFinished, setIsMatchFinished] = useState(false);
@@ -118,6 +130,11 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       console.log('[Socket] match_found received:', data);
     });
 
+    newSocket.on('escrow_result', (data: EscrowResult) => {
+      console.log('[Socket] escrow_result received:', data);
+      setEscrowResult(data);
+    });
+
     newSocket.on('error', (error: { message: string }) => {
       console.error('[Socket] Error:', error.message);
     });
@@ -165,6 +182,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setMatchState(null);
       setGameState(null);
       setMatchResult(null);
+      setEscrowResult(null);
       setActionRejected(null);
       setIsWaitingForServer(false);
       setIsMatchFinished(false);
@@ -179,6 +197,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         matchState,
         gameState,
         matchResult,
+        escrowResult,
         actionRejected,
         isWaitingForServer,
         isMatchFinished,

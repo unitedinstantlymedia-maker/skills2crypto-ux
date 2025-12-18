@@ -2,7 +2,8 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server } from "http";
 import { log } from "../index";
 import { getAdapter } from "../adapters/registry";
-import type { GameAction } from "@shared/protocol";
+import type { GameAction, Asset } from "@shared/protocol";
+import { escrowEngine, type SettleResult } from "./escrow";
 
 export type MatchStatus = "waiting" | "active" | "paused" | "finished";
 
@@ -28,6 +29,8 @@ interface MatchState {
   status: MatchStatus;
   gameState: Record<string, unknown>;
   result?: MatchResult;
+  escrowLocked?: boolean;
+  escrowResult?: SettleResult;
 }
 
 const matches: Map<string, MatchState> = new Map();
@@ -139,6 +142,12 @@ function recalculateMatchStatus(match: MatchState): void {
     if (match.status !== "active") {
       match.status = "active";
       log(`Match ${match.id} is now active`, "socket.io");
+      
+      if (!match.escrowLocked) {
+        const playerIds = Object.keys(match.players);
+        escrowEngine.lock(match.id, match.asset as Asset, match.amount, playerIds);
+        match.escrowLocked = true;
+      }
     }
   } else if (totalPlayers >= 2 && connectedPlayers.length < 2) {
     if (match.status === "active") {
@@ -215,8 +224,18 @@ function handleGameAction(socket: Socket, action: GameAction): void {
     };
     log(`Match ${matchId} finished: ${JSON.stringify(match.result)}`, "socket.io");
     
+    const escrowResult = escrowEngine.settle({
+      matchId,
+      asset: match.asset as Asset,
+      amount: match.amount,
+      winner: result.winnerId,
+      draw: result.draw,
+    });
+    match.escrowResult = escrowResult;
+    
     emitGameState(matchId);
     emitMatchFinished(matchId);
+    emitEscrowResult(matchId);
     return;
   }
 
@@ -284,6 +303,14 @@ function emitMatchFinished(matchId: string): void {
 
   log(`Emitting match_finished for ${matchId}: ${JSON.stringify(match.result)}`, "socket.io");
   io.to(matchId).emit("match_finished", match.result);
+}
+
+function emitEscrowResult(matchId: string): void {
+  const match = matches.get(matchId);
+  if (!match || !io || !match.escrowResult) return;
+
+  log(`Emitting escrow_result for ${matchId}: ${JSON.stringify(match.escrowResult)}`, "socket.io");
+  io.to(matchId).emit("escrow_result", match.escrowResult);
 }
 
 export function initializeMatch(
