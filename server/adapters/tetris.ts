@@ -28,7 +28,7 @@ export interface TetrisState {
 }
 
 export interface TetrisMove {
-  action: "move_left" | "move_right" | "rotate" | "drop" | "soft_drop" | "spawn" | "resign";
+  action: "move_left" | "move_right" | "rotate" | "drop" | "soft_drop" | "resign";
   playerId?: string;
 }
 
@@ -194,9 +194,9 @@ export const tetrisAdapter: GameAdapter<TetrisState, TetrisMove> = {
 
     if (playerId !== players.whiteId) return false;
 
-    if (!state.currentPiece && move.action !== "spawn") return false;
+    if (!state.currentPiece) return false;
 
-    return ["move_left", "move_right", "rotate", "drop", "soft_drop", "spawn"].includes(move.action);
+    return ["move_left", "move_right", "rotate", "drop", "soft_drop"].includes(move.action);
   },
 
   applyMove(state: TetrisState, move: TetrisMove): TetrisState {
@@ -206,18 +206,6 @@ export const tetrisAdapter: GameAdapter<TetrisState, TetrisMove> = {
         gameOver: true,
         resigned: true,
         resignedBy: move.playerId,
-      };
-    }
-
-    if (move.action === "spawn") {
-      const newPiece = spawnPiece(state.nextPiece);
-      if (!canPlacePiece(state.board, newPiece)) {
-        return { ...state, gameOver: true, currentPiece: null };
-      }
-      return {
-        ...state,
-        currentPiece: newPiece,
-        nextPiece: getRandomTetromino(),
       };
     }
 

@@ -48,18 +48,14 @@ function isValidPosition(row: number, col: number): boolean {
 
 function getCaptureMoves(board: Piece[][], row: number, col: number, piece: NonNullable<Piece>): { to: { row: number; col: number }; captured: { row: number; col: number } }[] {
   const captures: { to: { row: number; col: number }; captured: { row: number; col: number } }[] = [];
+  
   const directions = piece.king 
     ? [[-1, -1], [-1, 1], [1, -1], [1, 1]]
     : piece.color === "red" 
       ? [[-1, -1], [-1, 1]]
       : [[1, -1], [1, 1]];
   
-  if (!piece.king) {
-    directions.push(...(piece.color === "red" ? [[1, -1], [1, 1]] : [[-1, -1], [-1, 1]]));
-  }
-  
-  const allDirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-  for (const [dr, dc] of allDirs) {
+  for (const [dr, dc] of directions) {
     const midRow = row + dr;
     const midCol = col + dc;
     const toRow = row + 2 * dr;
@@ -71,12 +67,6 @@ function getCaptureMoves(board: Piece[][], row: number, col: number, piece: NonN
     const toPiece = board[toRow][toCol];
     
     if (midPiece && midPiece.color !== piece.color && !toPiece) {
-      if (!piece.king) {
-        const forwardDir = piece.color === "red" ? -1 : 1;
-        if (dr === forwardDir || piece.king) {
-          captures.push({ to: { row: toRow, col: toCol }, captured: { row: midRow, col: midCol } });
-        }
-      }
       captures.push({ to: { row: toRow, col: toCol }, captured: { row: midRow, col: midCol } });
     }
   }
