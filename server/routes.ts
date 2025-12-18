@@ -2,14 +2,14 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { createMatch, getMatch, getOrCreateMatch, submitMove, resignMatch } from "./services/matchEngine";
 import { findMatch, getMatchById, getQueueStats, type Asset as MatchAsset } from "./services/matchmaking";
-import { setupWebSocket } from "./services/websocket";
+import { setupSocketIO, initializeMatch } from "./services/socketio";
 import type { Asset, ChessMove } from "@shared/protocol";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  setupWebSocket(httpServer);
+  setupSocketIO(httpServer);
 
   app.post("/api/find-match", (req: Request, res: Response) => {
     const { game, asset, amount, playerId } = req.body;

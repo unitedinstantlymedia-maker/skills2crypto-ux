@@ -1,13 +1,8 @@
 import { nanoid } from "nanoid";
-import { WebSocket as WsWebSocket } from "ws";
 import { log } from "../index";
+import { initializeMatch, getIO } from "./socketio";
 
 export type Asset = "USDT" | "ETH" | "TON";
-
-export interface Player {
-  id: string;
-  socket?: WsWebSocket;
-}
 
 export interface Match {
   id: string;
@@ -26,32 +21,18 @@ interface QueueEntry {
 
 const matchQueue: Map<string, QueueEntry> = new Map();
 const matches: Map<string, Match> = new Map();
-const playerSockets: Map<string, WsWebSocket> = new Map();
 
 function getQueueKey(game: string, asset: Asset, amount: number): string {
   return `${game}|${asset}|${amount}`;
 }
 
-export function registerPlayer(playerId: string, socket: WsWebSocket): void {
-  playerSockets.set(playerId, socket);
-  log(`Player registered: ${playerId}`, "matchmaking");
-}
-
-export function unregisterPlayer(playerId: string): void {
-  playerSockets.delete(playerId);
-  
+export function cancelQueueForPlayer(playerId: string): void {
   Array.from(matchQueue.entries()).forEach(([key, entry]) => {
     if (entry.playerId === playerId) {
       matchQueue.delete(key);
       log(`Player ${playerId} removed from queue: ${key}`, "matchmaking");
     }
   });
-  
-  log(`Player unregistered: ${playerId}`, "matchmaking");
-}
-
-export function getPlayerSocket(playerId: string): WsWebSocket | undefined {
-  return playerSockets.get(playerId);
 }
 
 export interface FindMatchResult {
@@ -87,6 +68,7 @@ export function findMatch(
     
     log(`Match created: ${matchId} | ${game} | ${asset} | ${amount} | Players: ${existingEntry.playerId} vs ${playerId}`, "matchmaking");
 
+    initializeMatch(matchId, game, asset, amount, [existingEntry.playerId, playerId]);
     notifyPlayers(match);
     
     return { status: "matched", matchId, match };
@@ -102,28 +84,24 @@ export function findMatch(
 }
 
 function notifyPlayers(match: Match): void {
+  const io = getIO();
+  if (!io) return;
+
   const [player1, player2] = match.players;
   
-  const socket1 = playerSockets.get(player1);
-  const socket2 = playerSockets.get(player2);
-  
   const baseMessage = {
-    type: "match_found",
     matchId: match.id,
     game: match.game,
     asset: match.asset,
     amount: match.amount,
   };
 
-  if (socket1 && socket1.readyState === 1) {
-    socket1.send(JSON.stringify({ ...baseMessage, opponentId: player2 }));
-    log(`Notified player ${player1} of match ${match.id}`, "matchmaking");
-  }
+  io.emit("match_found", {
+    ...baseMessage,
+    players: [player1, player2],
+  });
   
-  if (socket2 && socket2.readyState === 1) {
-    socket2.send(JSON.stringify({ ...baseMessage, opponentId: player1 }));
-    log(`Notified player ${player2} of match ${match.id}`, "matchmaking");
-  }
+  log(`Notified players of match ${match.id}`, "matchmaking");
 }
 
 export function getMatchById(matchId: string): Match | undefined {
