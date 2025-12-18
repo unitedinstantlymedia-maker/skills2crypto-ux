@@ -1,12 +1,72 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { createMatch, getMatch, getOrCreateMatch, submitMove, resignMatch } from "./services/matchEngine";
+import { findMatch, getMatchById, getQueueStats, type Asset as MatchAsset } from "./services/matchmaking";
+import { setupWebSocket } from "./services/websocket";
 import type { Asset, ChessMove } from "@shared/protocol";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  setupWebSocket(httpServer);
+
+  app.post("/api/find-match", (req: Request, res: Response) => {
+    const { game, asset, amount, playerId } = req.body;
+
+    if (!game || typeof game !== "string") {
+      res.status(400).json({ error: "Invalid game. Must be a non-empty string." });
+      return;
+    }
+
+    if (!["USDT", "ETH", "TON"].includes(asset)) {
+      res.status(400).json({ error: "Invalid asset. Must be USDT, ETH, or TON." });
+      return;
+    }
+
+    if (typeof amount !== "number" || amount <= 0) {
+      res.status(400).json({ error: "Invalid amount. Must be a positive number." });
+      return;
+    }
+
+    if (!playerId || typeof playerId !== "string") {
+      res.status(400).json({ error: "Invalid playerId. Must be a non-empty string." });
+      return;
+    }
+
+    const result = findMatch(game, asset as MatchAsset, amount, playerId);
+    
+    if (result.status === "matched") {
+      res.json({ status: "matched", matchId: result.matchId });
+    } else {
+      res.json({ status: "waiting" });
+    }
+  });
+
+  app.get("/api/matchmaking/match/:id", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const match = getMatchById(id);
+
+    if (!match) {
+      res.status(404).json({ error: "Match not found" });
+      return;
+    }
+
+    res.json({
+      id: match.id,
+      game: match.game,
+      asset: match.asset,
+      amount: match.amount,
+      players: match.players,
+      status: match.status,
+    });
+  });
+
+  app.get("/api/matchmaking/stats", (_req: Request, res: Response) => {
+    const stats = getQueueStats();
+    res.json(stats);
+  });
+
   app.post("/api/matches", (req: Request, res: Response) => {
     const { game, asset, stake, whiteId, blackId } = req.body;
 
