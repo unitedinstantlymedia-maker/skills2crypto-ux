@@ -18,8 +18,13 @@ export default function Play() {
     }
   }, [state.currentMatch, setLocation]);
 
-  const handleFinish = async (result: 'win' | 'loss' | 'draw') => {
-    await actions.finishMatch(result);
+  const handleFinish = async (result: 'win' | 'loss' | 'draw' | { winnerId?: string; loserId?: string; draw?: boolean; reason: string }) => {
+    if (typeof result === 'string') {
+      await actions.finishMatch(result);
+    } else {
+      const simpleResult = result.draw ? 'draw' : (result.winnerId ? 'win' : 'loss');
+      await actions.finishMatch(simpleResult);
+    }
     setLocation('/result');
   };
 
