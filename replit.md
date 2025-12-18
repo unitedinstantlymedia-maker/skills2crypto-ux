@@ -121,8 +121,32 @@ matches = {
 - Mock escrow ready for cold wallet integration
 - Multi-language support
 
+## Match Lifecycle (Server-Authoritative)
+
+### Match Status Flow
+- `waiting` → `active` when 2 players connected
+- `active` → `paused` when <2 players connected
+- `active` → `finished` when game ends (checkmate, resign, draw, stalemate)
+
+### Game Actions
+1. Client emits `game_action` → Server validates via GameAdapter
+2. Valid: Server updates state, broadcasts `game_state` to both players
+3. Invalid: Server emits `action_rejected` with reason
+4. Finished: Server emits `match_finished` with final result, blocks all further actions
+
+### MatchResult Type
+```typescript
+interface MatchResult {
+  status: "finished";
+  reason: "checkmate" | "resign" | "draw" | "stalemate" | "disconnect";
+  winner?: string;
+  draw?: boolean;
+}
+```
+
 ## Security Notes
 
 - The `getOrCreateMatch()` DEV fallback auto-creates matches for testing
 - In production, this should be removed and proper auth added
 - Escrow service uses placeholder addresses (PLATFORM_FEE_ADDRESS)
+- Server is the sole authority for game logic - NO client-side decisions
