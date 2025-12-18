@@ -61,12 +61,34 @@ Configurable fee and recipient for future cold wallet integration:
 - `release()` - Release funds to winner (minus fee)
 - `refundAll()` - Refund on draws
 
+### Matchmaking Service (Real-time)
+In-memory queue for real 1v1 matchmaking:
+- Queue grouped by `{game}|{asset}|{amount}` composite key
+- First player enters queue → status: "waiting"
+- Second player with same params → match created, both notified
+- WebSocket notifications for real-time match updates
+
+### WebSocket Server
+Real-time communication on `/ws`:
+- `register` - Map playerId to socket connection
+- `find_match` - Join matchmaking queue via WebSocket
+- `cancel_search` - Cancel matchmaking search
+- `match_found` - Server → Client notification when matched
+
 ## API Endpoints
 
+### Game Matches
 - `POST /api/matches` - Create a new match
 - `GET /api/matches/:id` - Get match by ID (auto-creates for DEV)
 - `POST /api/matches/:id/move` - Submit a move
 - `POST /api/matches/:id/resign` - Resign from match
+
+### Matchmaking
+- `POST /api/find-match` - Join matchmaking queue
+  - Body: `{ game, asset, amount, playerId }`
+  - Response: `{ status: "waiting" }` or `{ status: "matched", matchId }`
+- `GET /api/matchmaking/match/:id` - Get matchmaking match details
+- `GET /api/matchmaking/stats` - Get queue stats
 
 ## Key Features
 
