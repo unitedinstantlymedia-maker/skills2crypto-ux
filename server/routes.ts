@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
-import { createChessMatch, getMatch, applyChessMove, resignMatch } from "./matches";
+import { createChessMatch, getMatch, getOrCreateChessMatch, applyChessMove, resignMatch } from "./matches";
 import type { Asset, ChessMove } from "@shared/protocol";
 
 export async function registerRoutes(
@@ -47,13 +47,8 @@ export async function registerRoutes(
 
   app.get("/api/matches/:id", (req: Request, res: Response) => {
     const { id } = req.params;
-    const match = getMatch(id);
-
-    if (!match) {
-      res.status(404).json({ error: "Match not found" });
-      return;
-    }
-
+    
+    const match = getOrCreateChessMatch(id);
     res.json(match);
   });
 

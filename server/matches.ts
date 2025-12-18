@@ -59,6 +59,32 @@ export function getMatch(id: string): Match | undefined {
   return matches.get(id);
 }
 
+export function getOrCreateChessMatch(id: string): Match {
+  const existing = matches.get(id);
+  if (existing) return existing;
+
+  const chess = new Chess();
+  const now = Date.now();
+
+  const match: Match = {
+    id,
+    game: "chess",
+    asset: "USDT",
+    stake: 20,
+    pot: 40,
+    players: { whiteId: "playerA", blackId: "playerB" },
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+    state: buildChessState(chess, []),
+  };
+
+  matches.set(id, match);
+  chessInstances.set(id, chess);
+
+  return match;
+}
+
 function finishMatch(match: Match, chess: Chess, winnerId: string | undefined, reason: FinishReason): Match {
   match.status = "finished";
   match.updatedAt = Date.now();
