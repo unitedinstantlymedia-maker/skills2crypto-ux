@@ -3,10 +3,10 @@ import { Chessboard } from "react-chessboard";
 
 type Match = {
   id: string;
+  status: "active" | "finished" | "waiting" | "cancelled";
   state: {
     fen: string;
-    turn: "white" | "black";
-    status: "active" | "finished";
+    turn: "w" | "b";
   };
   result?: {
     winnerId?: string;
@@ -54,8 +54,9 @@ export function ChessGame({
     init();
   }, [matchId]);
 
-  function handlePieceDrop({ sourceSquare, targetSquare }: { piece: any; sourceSquare: string; targetSquare: string | null }): boolean {
-    if (!match || !targetSquare) return false;
+  function handlePieceDrop(args: any): boolean {
+    const { sourceSquare, targetSquare } = args;
+    if (!match) return false;
 
     fetch(`/api/matches/${match.id}/move`, {
       method: "POST",
@@ -75,7 +76,7 @@ export function ChessGame({
       .then((updated) => {
         if (!updated) return;
         setMatch(updated);
-        if (updated.state.status === "finished" && onFinish) {
+        if (updated.status === "finished" && onFinish) {
           onFinish(updated.result);
         }
       });
@@ -107,7 +108,6 @@ export function ChessGame({
         options={{
           position: match.state.fen,
           onPieceDrop: handlePieceDrop,
-          allowDragging: match.state.status === "active",
           darkSquareStyle: { backgroundColor: "#4a5568" },
           lightSquareStyle: { backgroundColor: "#718096" },
           boardStyle: {
@@ -118,10 +118,10 @@ export function ChessGame({
       />
 
       <div style={{ marginTop: 12, color: "#ccc" }}>
-        Turn: {match.state.turn}
+        Turn: {match.state.turn === "w" ? "White" : "Black"}
       </div>
 
-      {match.state.status === "finished" && (
+      {match.status === "finished" && (
         <div style={{ marginTop: 12, color: "#6f6" }}>
           Game finished
         </div>

@@ -1,0 +1,166 @@
+You are not fixing a bug.
+You are building a complete, production-grade skill-based wagering platform.
+
+Context (read carefully):
+This project is a crypto-first skill gaming platform (SkillBlitz / Skills2Crypto).
+Players wager crypto on games of skill.
+The server is the only source of truth.
+The client is a dumb UI.
+
+Your task:
+Design and implement the FULL system architecture end-to-end.
+
+========================
+CORE PRINCIPLES
+========================
+
+1. Server is authoritative:
+   - Server creates matches
+   - Server validates moves
+   - Server decides win / loss / draw
+   - Server controls escrow and payout logic
+
+2. Client NEVER decides outcomes.
+3. Games are pluggable modules.
+4. Cold wallet is NOT embedded.
+   - System must be ready to plug a cold wallet address later.
+   - No private keys in code.
+
+========================
+ARCHITECTURE TO BUILD
+========================
+
+A. SERVER (MANDATORY)
+
+Implement or refactor the server to include these layers:
+
+1. Match Engine
+   - POST /api/matches
+   - Creates a match with:
+     - id
+     - gameType (chess, tetris, checkers, etc.)
+     - players
+     - stake
+     - asset
+     - state:
+         - status: "pending" | "active" | "finished"
+         - fen / gameState (game-specific)
+   - For chess:
+     - Initialize FEN to standard starting position
+
+2. Game Adapters (Plugin System)
+   - Each game implements:
+     - initState()
+     - validateMove(state, move, playerId)
+     - applyMove(state, move)
+     - checkResult(state)
+   - Chess adapter uses chess.js
+   - Other games can be added later without touching core logic
+
+3. Move Validation
+   - POST /api/matches/:id/move
+   - Server:
+     - checks turn
+     - validates move
+     - updates state
+     - returns updated state
+   - Client only renders response
+
+4. Match Finalization
+   - Server detects:
+     - win
+     - loss
+     - draw
+     - resign
+     - disconnect timeout (future)
+   - Server sets:
+     - match.state.status = "finished"
+     - match.result = { winnerId, reason }
+
+5. Escrow Engine (NO REAL WALLET YET)
+   - Abstract EscrowService
+   - Responsibilities:
+     - lock funds (logical)
+     - calculate payout
+     - prepare payout transaction
+   - Must be written so that later we can plug:
+     - a cold wallet address
+     - on-chain transaction sender
+
+6. Payout Resolver
+   - When match finishes:
+     - winner receives stake * 2 minus fee
+     - fee is routed to a configurable fee address
+   - DO NOT hardcode addresses
+   - Use config placeholders
+
+========================
+CLIENT (SECONDARY)
+========================
+
+Client responsibilities:
+- Render game UI
+- Send user actions to server
+- Display server state
+
+Rules:
+- Client never computes results
+- Client never stores authoritative state
+
+Chess UI:
+- Renders only when server provides fen
+- Blocks moves if not player's turn
+- Shows status from server
+
+========================
+STATE & FLOW
+========================
+
+Full flow must work like this:
+
+1. User clicks "Find Player"
+2. Client calls POST /api/matches
+3. Server creates match + initializes game state
+4. Client receives match with state
+5. Game UI renders
+6. Player move → POST /api/matches/:id/move
+7. Server validates → returns updated state
+8. When finished:
+   - Server finalizes match
+   - Escrow resolves payout (logical)
+9. Client shows result screen
+
+========================
+IMPORTANT CONSTRAINTS
+========================
+
+DO NOT:
+- mock game results
+- generate random winners
+- move logic to client
+- embed private keys
+- break existing UI routes
+- break other games
+
+DO:
+- Refactor fearlessly
+- Remove dead code
+- Make the system deterministic
+- Make it extensible
+- Keep TypeScript clean
+
+========================
+DELIVERABLE
+========================
+
+After your work:
+- Chess match fully playable
+- Server controls everything
+- Escrow logic exists (logical, not on-chain yet)
+- Cold wallet can be connected later by adding an address
+- Codebase is clean and scalable
+
+Proceed step by step.
+Apply changes directly.
+Verify functionality.
+Do not ask the user questions.

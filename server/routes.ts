@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
-import { createChessMatch, getMatch, getOrCreateChessMatch, applyChessMove, resignMatch } from "./matches";
+import { createMatch, getMatch, getOrCreateMatch, submitMove, resignMatch } from "./services/matchEngine";
 import type { Asset, ChessMove } from "@shared/protocol";
 
 export async function registerRoutes(
@@ -35,20 +35,26 @@ export async function registerRoutes(
       return;
     }
 
-    const match = createChessMatch({
+    const result = createMatch({
+      game,
       stake,
       asset: asset as Asset,
       whiteId,
       blackId,
     });
 
-    res.status(201).json(match);
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.status(201).json(result);
   });
 
   app.get("/api/matches/:id", (req: Request, res: Response) => {
     const { id } = req.params;
     
-    const match = getOrCreateChessMatch(id);
+    const match = getOrCreateMatch(id);
     res.json(match);
   });
 
@@ -72,7 +78,7 @@ export async function registerRoutes(
       promotion: move.promotion,
     };
 
-    const result = applyChessMove(id, playerId, chessMove);
+    const result = submitMove(id, playerId, chessMove);
 
     if (!result.success) {
       if (result.error === "Match not found") {
