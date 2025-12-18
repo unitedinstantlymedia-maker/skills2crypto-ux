@@ -1,0 +1,59 @@
+Implement a feature that lets the user create a challenge link to invite a specific friend to a match, as an alternative to the normal random matchmaking.
+
+Challenge Link Generation:
+
+After the user selects the game, network/asset, and stake amount, there should be TWO buttons:
+
+One to start searching for a random opponent (as now).
+
+One to create a challenge link for a friend ("Challenge Friend" or "Create Link").
+
+If the user clicks the “Create Link” button, prompt them with an input field to enter their name or nickname (e.g., “Enter your name or nickname”).
+
+Once entered, generate a unique challenge link (can be a URL with parameters, or any challenge object).
+
+Store the nickname in localStorage, so next time it is auto-filled.
+
+Accepting a Challenge:
+
+When the recipient opens the challenge link, they should see on the screen:
+
+“Challenge from [nickname]” (using the nickname that was entered by the challenger).
+
+There should be a button “Accept Challenge”.
+
+If the recipient has not connected their wallet yet, show a modal or section to connect or paste their wallet address before accepting. There must be a “Save” button and then a button to continue.
+
+If the wallet is already connected, pressing “Accept Challenge” immediately freezes the stake and starts the game.
+
+Stake Logic:
+
+When a user sends a challenge link, only their own stake is locked at this step (after pressing the button).
+
+When the recipient presses “Accept Challenge”, their stake is locked automatically and the match begins.
+
+The recipient should not see or have to press any extra “Lock stake” buttons — just “Accept Challenge” (if wallet is connected) or “Save Wallet” and then “Accept Challenge” (if not).
+
+User Experience:
+
+The user never has to register or provide more info than their nickname.
+
+Everything happens in a single flow, without unnecessary extra screens or reloads.
+
+If possible, make sure that the “nickname” is saved for future challenges.
+
+Short version for Replit’s working prompt:
+
+Add “Challenge Friend” flow:
+
+On the asset/stake selection screen, add two buttons: “Find Match” (random) and “Challenge Friend” (create a link).
+
+When clicking “Challenge Friend”, prompt for nickname, generate a unique link including the nickname, and save it in localStorage.
+
+When recipient opens the link, show “Challenge from [nickname]” and an “Accept Challenge” button.
+
+If wallet is not connected, prompt for wallet and then proceed.
+
+Lock stakes automatically on each side at the right time (sender on create, recipient on accept).
+
+No registration. Flow must be as simple and direct as possible.

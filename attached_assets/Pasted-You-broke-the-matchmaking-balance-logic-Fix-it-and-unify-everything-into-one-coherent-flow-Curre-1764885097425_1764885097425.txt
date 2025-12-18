@@ -1,0 +1,100 @@
+You broke the matchmaking + balance logic. Fix it and unify everything into one coherent flow. Current bugs:
+
+USDT/ETH always show “Insufficient Funds”
+
+USDT searches opponent forever (it used to match before)
+
+ETH matches are not recorded in history
+
+Network fee gets deducted even when match does not start / never finds opponent
+
+Goal
+
+Restore working matchmaking + correct balance checks + correct match recording for BOTH USDT and ETH, and only deduct network fee when a match is actually created/joined and stake is locked.
+
+Hard rules
+
+Use ONE canonical Asset type everywhere: "USDT" | "ETH" | "TON".
+
+Store balances as Record<Asset, number> and never as mixed labels.
+
+Use ONE canonical queue key: ${game}:${asset}:${amountFixed} where amountFixed = Number(amount).toFixed(2).
+
+Do NOT deduct any fee (network or platform) in UI. All deductions happen inside escrow adapter logic.
+
+Network fee must be deducted ONLY after a match is successfully formed (i.e., second player joins and match becomes ACTIVE) OR at least after a successful “lock” step that guarantees the user is in a match. If searching/cancelled/fails -> no deduction.
+
+Match history must be recorded for both assets, from one place in code, right after settlement (or after simulated outcome), not scattered across UI.
+
+Implementation to do (minimal changes, but correct)
+
+A) Create/ensure these files exist:
+
+src/core/types.ts (defines Asset, Game, Match structures, helper functions)
+
+src/config/economy.ts (FEE_RATE = 0.03, NETWORK_FEE_USD_PER_PLAYER = 0.25)
+
+src/core/wallet/WalletStore.ts (single source of truth for balances + deduct/credit)
+
+src/core/matchmaking/MatchmakingService.ts (queue + pairing)
+
+src/core/escrow/MockEscrowAdapter.ts (in-memory escrow)
+
+keep EvmEscrowAdapter as stub only
+
+B) Fix Insufficient Funds
+
+When user clicks Start Match, compute required = stake + networkFee (for now, treat networkFee as deducted from SAME selected asset, but since it’s USD-like, for ETH use a small fixed ETH fee OR simply charge network fee only when asset=USDT; pick one approach and apply consistently).
+
+Ensure lookup uses balances[selectedAsset] exactly. No casing mismatches.
+
+C) Fix matchmaking “never finds opponent”
+
+Ensure both players with same game/asset/amount land on same queue key.
+
+When there is already a waiting player, match immediately and return ACTIVE match with both players.
+
+Add a “Cancel Search” that removes the user from queue (if exists). (Simple UI button is fine.)
+
+D) Fix network fee deduction bug
+
+Deduct network fee only when match becomes ACTIVE (paired). If user is just waiting in queue, do NOT deduct yet.
+
+If you currently deduct on Start Match click, move it out.
+
+E) Fix history recording (ETH included)
+
+Create a HistoryStore that records all matches regardless of asset.
+
+Ensure history entry includes: id, game, asset, amount, result, fee, payout, timestamp.
+
+Add after settle: history.add(entry).
+
+F) Logging/debug (temporary)
+Add console logs (or a debug panel) that prints:
+
+selectedAsset, stake, balanceBefore, required, canonicalQueueKey
+
+queue state: waiting count per key
+
+escrow events: paired/active/settled
+
+Expected behavior
+
+With ONE tab only: Start Match should enter “Searching…” and NOT deduct any fee.
+
+With TWO tabs with identical params: match should form within seconds, then fee deducted correctly, then settle + history recorded.
+
+Insufficient Funds should only appear when balance < required.
+
+ETH history must appear same as USDT.
+
+Deliverables
+
+Provide a summary of changed files
+
+Confirm the four bugs are fixed
+
+App must run without errors
+
+Proceed now.

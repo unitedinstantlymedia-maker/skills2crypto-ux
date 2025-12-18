@@ -1,0 +1,84 @@
+PROMPT:
+
+Implement an Escrow layer refactor in the existing SkillBlitzWager web app (current prototype in this Replit). Keep all current UI screens and flows working (Chess / Block Stack / Checkers, assets USDT/ETH/TON currently, stake presets 5/20/50/100 + Custom, matchmaking by (game+asset+amount), 3% fee calc, match history).
+Now update architecture to 3 explicit layers with adapters (final interfaces now, mock impl first), and prepare for real on-chain escrow later.
+
+Desired final architecture (create these modules):
+
+src/core/wallet/WalletAdapter.ts
+
+src/core/matchmaking/MatchmakingService.ts
+
+src/core/escrow/EscrowAdapter.ts
+
+Requirements:
+
+Add EscrowAdapter interface with methods:
+
+createOrJoinMatch(params) → returns matchId, txRef (string)
+
+settleMatch({ matchId, winnerAddress }) → returns payoutTxRef, feeTxRef
+
+getMatch(matchId)
+
+Add two implementations:
+
+MockEscrowAdapter (in-memory, deterministic, uses current simulated wallet balances)
+
+EvmEscrowAdapter (skeleton only; include placeholders for contractAddress, abi, chainId, and method stubs throwing “Not implemented”)
+
+Update app logic so the current “stake / fee / payout” is produced ONLY via EscrowAdapter (even in mock). No direct fee calculations in UI.
+
+Escrow rules:
+
+pot = 2 * stake
+
+platform fee = 3% of pot
+
+winner payout = pot - fee
+
+fee is sent to FEE_ADDRESS (config)
+
+Choose assets now:
+
+Keep UI able to show USDT and ETH as selectable assets (TON can remain in UI for now, but mark TON as “coming soon” in the escrow adapter; do not break the UI)
+
+Add fixed network fee estimate:
+
+NETWORK_FEE_USD_PER_PLAYER = 0.25 (example “a few десятков центов”)
+
+show it in UI as “Estimated network fee (paid by you)” AND deduct it from the player’s displayed balance before allowing the match to start (Mock adapter only).
+
+This fee is NOT part of pot calculation and NOT part of 3% platform fee.
+
+Preserve the existing queue matchmaking by (game+asset+amount). The matchmaking service should return a matchId and then call escrow adapter to “lock” stake.
+
+Maintain “non-custodial” UI narrative:
+
+remove any Deposit/Withdraw UI if it exists
+
+wallet shows “connected address” and balances (mock)
+
+do not display platform cold wallet address in UI, but keep it in config/env.
+
+Add config file:
+
+src/config/escrow.ts with FEE_ADDRESS, supported assets, chain placeholders.
+
+FEE_ADDRESS reads from .env (VITE_FEE_ADDRESS or similar).
+
+Update README with a short section “Architecture: WalletAdapter / MatchmakingService / EscrowAdapter (Mock → EVM)”.
+
+Ensure app builds and runs.
+
+Deliverables:
+
+New folder structure as above
+
+Refactor existing code to use new services
+
+Keep UI behavior same (except adding fee estimate display + TON “coming soon”)
+
+No regressions: matchmaking, history, insufficient balance check must still work.
+
+Proceed step-by-step and show changed files summary at the end.

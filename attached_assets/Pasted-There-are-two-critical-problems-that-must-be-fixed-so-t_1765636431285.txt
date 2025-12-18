@@ -1,0 +1,49 @@
+There are two critical problems that must be fixed so the site loads properly and every push from GitHub instantly updates the live site on Vercel.
+
+First, .gitignore currently ignores the dist directory. This is a blocking issue: the dist folder is the actual frontend build output that must be present for Vercel to serve a static site, unless Vercel runs the build command itself on every deployment (which is the preferred modern method). Make sure the .gitignore does NOT block the frontend build output for the deployment path used by Vercel. If the build is always done during deployment, it’s fine to ignore dist, but if you want to keep artifacts, remove dist from .gitignore.
+
+Second, the .replit configuration and the Vercel output directory are mismatched. .replit specifies publicDir = "dist/public", but the actual Vite build output is simply dist (or, if using a monorepo, it might be client/dist). There is no dist/public. This causes both Replit and Vercel to look for non-existent or empty directories, breaking the deployment.
+
+How to fix:
+
+In .gitignore, make sure dist is NOT ignored, unless you always run the frontend build during Vercel deploy (preferred). If you deploy from the client folder, make sure .gitignore in both root and /client are correct.
+
+In .replit, use:
+
+[deployment]
+deploymentTarget = "static"
+build = ["npm", "run", "build"]
+publicDir = "dist"
+
+
+Or, if you deploy from client:
+
+[deployment]
+deploymentTarget = "static"
+build = ["cd client && npm install && npm run build"]
+publicDir = "client/dist"
+
+
+In Vercel, set:
+
+Framework: Vite
+
+Build command: npm run build (or cd client && npm install && npm run build for monorepo)
+
+Output directory: dist (or client/dist)
+
+Ensure all deploy-related scripts in package.json match these settings.
+
+After pushing changes to GitHub, Vercel will pull the repo, run the build (producing dist or client/dist), and instantly update the site. Nothing else needs to be committed except the code; build artifacts do NOT need to be in Git if Vercel runs the build step.
+
+Test deployment: push a simple change, wait for the Vercel build, and check the live site.
+
+Summary:
+
+.gitignore must not interfere with deployment output.
+
+Build/output directory in all configs must match the real frontend build output.
+
+Vercel must be set to build and deploy the frontend, not the server.
+
+Every push to GitHub triggers a fresh build and updates the site.
