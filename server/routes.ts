@@ -1,16 +1,118 @@
-import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import type { Express, Request, Response } from "express";
+import type { Server } from "http";
+import { createChessMatch, getMatch, applyChessMove, resignMatch } from "./matches";
+import type { Asset, ChessMove } from "@shared/protocol";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  app.post("/api/matches", (req: Request, res: Response) => {
+    const { game, asset, stake, whiteId, blackId } = req.body;
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+    if (game !== "chess") {
+      res.status(400).json({ error: "Invalid game type. Only 'chess' is supported." });
+      return;
+    }
+
+    if (!["USDT", "ETH", "TON"].includes(asset)) {
+      res.status(400).json({ error: "Invalid asset. Must be USDT, ETH, or TON." });
+      return;
+    }
+
+    if (typeof stake !== "number" || stake <= 0) {
+      res.status(400).json({ error: "Invalid stake. Must be a positive number." });
+      return;
+    }
+
+    if (!whiteId || typeof whiteId !== "string") {
+      res.status(400).json({ error: "Invalid whiteId. Must be a non-empty string." });
+      return;
+    }
+
+    if (!blackId || typeof blackId !== "string") {
+      res.status(400).json({ error: "Invalid blackId. Must be a non-empty string." });
+      return;
+    }
+
+    const match = createChessMatch({
+      stake,
+      asset: asset as Asset,
+      whiteId,
+      blackId,
+    });
+
+    res.status(201).json(match);
+  });
+
+  app.get("/api/matches/:id", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const match = getMatch(id);
+
+    if (!match) {
+      res.status(404).json({ error: "Match not found" });
+      return;
+    }
+
+    res.json(match);
+  });
+
+  app.post("/api/matches/:id/move", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { playerId, move } = req.body;
+
+    if (!playerId || typeof playerId !== "string") {
+      res.status(400).json({ error: "Invalid playerId. Must be a non-empty string." });
+      return;
+    }
+
+    if (!move || typeof move.from !== "string" || typeof move.to !== "string") {
+      res.status(400).json({ error: "Invalid move. Must have 'from' and 'to' fields." });
+      return;
+    }
+
+    const chessMove: ChessMove = {
+      from: move.from,
+      to: move.to,
+      promotion: move.promotion,
+    };
+
+    const result = applyChessMove(id, playerId, chessMove);
+
+    if (!result.success) {
+      if (result.error === "Match not found") {
+        res.status(404).json({ error: result.error });
+        return;
+      }
+      res.status(409).json({ error: result.error });
+      return;
+    }
+
+    res.json(result.match);
+  });
+
+  app.post("/api/matches/:id/resign", (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { playerId } = req.body;
+
+    if (!playerId || typeof playerId !== "string") {
+      res.status(400).json({ error: "Invalid playerId. Must be a non-empty string." });
+      return;
+    }
+
+    const result = resignMatch(id, playerId);
+
+    if (!result.success) {
+      if (result.error === "Match not found") {
+        res.status(404).json({ error: result.error });
+        return;
+      }
+      res.status(409).json({ error: result.error });
+      return;
+    }
+
+    res.json(result.match);
+  });
 
   return httpServer;
 }
