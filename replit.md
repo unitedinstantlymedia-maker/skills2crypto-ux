@@ -4,26 +4,28 @@ Mobile-first web app prototype for 1v1 skill games with crypto-only wagers.
 
 ## Overview
 
-This is a React + Express full-stack application that allows users to play 1v1 skill games (Chess, Tetris, Checkers) with crypto wagers. The app uses a 3-layer architecture to separate UI from logic and prepare for Web3 integration.
+This is a React + Express full-stack application that allows users to play 1v1 skill games (Chess, Tetris, Checkers) with crypto wagers. The server is the authoritative source of truth for all game logic, move validation, and match outcomes.
 
 ## Project Structure
 
 - `client/` - React frontend with Vite
   - `src/components/` - UI components (shadcn/ui based)
+  - `src/components/games/` - Game-specific UI (ChessGame, TetrisGame, etc.)
   - `src/pages/` - Route pages
   - `src/core/` - Core business logic (wallet, escrow, matchmaking)
   - `src/context/` - React contexts (Game, Language)
 - `server/` - Express backend
   - `index.ts` - Server entry point
   - `routes.ts` - API routes
-  - `storage.ts` - In-memory storage (MemStorage)
-- `shared/` - Shared types and schema
+  - `adapters/` - Game adapter framework (pluggable game modules)
+  - `services/` - Core services (matchEngine, escrow)
+- `shared/` - Shared types and schema (protocol.ts)
 - `attached_assets/` - Images and assets
 
 ## Tech Stack
 
-- **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion
-- **Backend**: Express, TypeScript
+- **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion, react-chessboard
+- **Backend**: Express, TypeScript, chess.js
 - **Database**: PostgreSQL with Drizzle ORM (in-memory storage for prototype)
 - **UI Components**: shadcn/ui (Radix UI based)
 
@@ -36,17 +38,49 @@ npm run start       # Start production server
 npm run db:push     # Push database schema
 ```
 
+## Server Architecture
+
+### Game Adapter Framework
+Each game implements the `GameAdapter` interface:
+- `initState()` - Initialize game state
+- `validateMove(state, move, playerId, players)` - Validate a move
+- `applyMove(state, move)` - Apply a move to state
+- `checkResult(state, players)` - Check for game end
+- `getCurrentPlayer(state, players)` - Get current player
+
+### Match Engine
+Handles match lifecycle:
+- `createMatch()` - Create a new match with escrow lock
+- `submitMove()` - Validate and apply a move
+- `resignMatch()` - Handle resignation
+- `getMatch()` / `getOrCreateMatch()` - Retrieve match state
+
+### Escrow Service
+Configurable fee and recipient for future cold wallet integration:
+- `lock()` - Lock funds for a match
+- `release()` - Release funds to winner (minus fee)
+- `refundAll()` - Refund on draws
+
+## API Endpoints
+
+- `POST /api/matches` - Create a new match
+- `GET /api/matches/:id` - Get match by ID (auto-creates for DEV)
+- `POST /api/matches/:id/move` - Submit a move
+- `POST /api/matches/:id/resign` - Resign from match
+
 ## Key Features
 
-- Games: Chess, Tetris (Block Stack), Checkers
+- Games: Chess (server-validated), Tetris (Block Stack), Checkers
 - Assets: USDT, ETH, TON
 - Stake presets: 5 / 20 / 50 / 100 + Custom
-- Fee: 3% of total pot
-- Non-custodial concept (prototype simulates wallet state)
+- Fee: 3% of total pot (configurable)
+- Server-authoritative game logic
+- Pluggable game adapter system
+- Mock escrow ready for cold wallet integration
 - Multi-language support
 
-## Architecture
+## Security Notes
 
-1. **WalletAdapter** (`src/core/wallet`): Manages wallet connection and balance reading
-2. **MatchmakingService** (`src/core/matchmaking`): Handles finding opponents
-3. **EscrowAdapter** (`src/core/escrow`): Core logic for locking funds, fees, and settlements
+- The `getOrCreateMatch()` DEV fallback auto-creates matches for testing
+- In production, this should be removed and proper auth added
+- Escrow service uses placeholder addresses (PLATFORM_FEE_ADDRESS)
