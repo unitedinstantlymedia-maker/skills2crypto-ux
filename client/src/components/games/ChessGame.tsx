@@ -1,135 +1,125 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Chessboard } from "react-chessboard";
+import { useSocket } from "@/context/SocketContext";
 
-type Match = {
-  id: string;
-  status: "active" | "finished" | "waiting" | "cancelled";
-  state: {
-    fen: string;
-    turn: "w" | "b";
-  };
-  result?: {
-    winnerId?: string;
-    reason?: string;
-  };
-};
+interface ChessState {
+  fen: string;
+  turn: "w" | "b";
+  isCheck?: boolean;
+  isCheckmate?: boolean;
+  isDraw?: boolean;
+  isStalemate?: boolean;
+}
 
 type Props = {
-  matchId?: string;
-  playerId?: string;
-  onFinish?: (result: any) => void;
+  matchId: string;
+  playerId: string;
+  onFinish?: (result: { winnerId?: string; draw?: boolean; reason?: string }) => void;
 };
 
-export function ChessGame({
-  matchId,
-  playerId = "playerA",
-  onFinish
-}: Props) {
-  const [match, setMatch] = useState<Match | null>(null);
+export function ChessGame({ matchId, playerId, onFinish }: Props) {
+  const { gameState, sendGameAction, isWaitingForServer, actionRejected } = useSocket();
+
+  const chessState = useMemo<ChessState | null>(() => {
+    if (!gameState?.gameState) return null;
+    return gameState.gameState as unknown as ChessState;
+  }, [gameState]);
 
   useEffect(() => {
-    async function init() {
-      if (!matchId) {
-        const res = await fetch("/api/matches", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            game: "chess",
-            asset: "USDT",
-            stake: 20,
-            whiteId: "playerA",
-            blackId: "playerB"
-          })
-        });
-        const created = await res.json();
-        setMatch(created);
-        return;
-      }
-
-      const res = await fetch(`/api/matches/${matchId}`);
-      const loaded = await res.json();
-      setMatch(loaded);
-    }
-
-    init();
-  }, [matchId]);
-
-  function handlePieceDrop(args: any): boolean {
-    const { sourceSquare, targetSquare } = args;
-    if (!match) return false;
-
-    fetch(`/api/matches/${match.id}/move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        playerId,
-        move: { from: sourceSquare, to: targetSquare }
-      })
-    })
-      .then((res) => {
-        if (!res.ok) {
-          fetch(`/api/matches/${match.id}`).then(r => r.json()).then(setMatch);
-          return;
-        }
-        return res.json();
-      })
-      .then((updated) => {
-        if (!updated) return;
-        setMatch(updated);
-        if (updated.status === "finished" && onFinish) {
-          onFinish(updated.result);
-        }
+    if (gameState?.result?.finished && onFinish) {
+      onFinish({
+        winnerId: gameState.result.winnerId,
+        draw: gameState.result.draw,
+        reason: gameState.result.reason,
       });
+    }
+  }, [gameState?.result, onFinish]);
+
+  function handlePieceDrop(sourceSquare: string, targetSquare: string): boolean {
+    if (isWaitingForServer) return false;
+    if (!chessState) return false;
+
+    sendGameAction({
+      matchId,
+      playerId,
+      type: "move",
+      payload: { from: sourceSquare, to: targetSquare },
+    });
 
     return true;
   }
 
-  async function resign() {
-    if (!match) return;
+  function resign() {
+    if (isWaitingForServer) return;
 
-    const res = await fetch(`/api/matches/${match.id}/resign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerId })
+    sendGameAction({
+      matchId,
+      playerId,
+      type: "resign",
     });
-
-    const updated = await res.json();
-    setMatch(updated);
-    onFinish?.(updated.result);
   }
 
-  if (!match || !match.state || !match.state.fen) {
-    return <div style={{ color: "#888", textAlign: "center", padding: 40 }}>Creating match…</div>;
+  if (!chessState || !chessState.fen) {
+    return (
+      <div style={{ color: "#888", textAlign: "center", padding: 40 }}>
+        Waiting for game state...
+      </div>
+    );
   }
 
   return (
     <div style={{ maxWidth: 420, margin: "0 auto" }}>
       <Chessboard
         options={{
-          position: match.state.fen,
+          position: chessState.fen,
           onPieceDrop: handlePieceDrop,
+          arePiecesDraggable: !isWaitingForServer,
           darkSquareStyle: { backgroundColor: "#4a5568" },
           lightSquareStyle: { backgroundColor: "#718096" },
           boardStyle: {
             borderRadius: "8px",
-            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)"
-          }
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+          },
         }}
       />
 
       <div style={{ marginTop: 12, color: "#ccc" }}>
-        Turn: {match.state.turn === "w" ? "White" : "Black"}
+        Turn: {chessState.turn === "w" ? "White" : "Black"}
+        {chessState.isCheck && " (Check)"}
       </div>
 
-      {match.status === "finished" && (
+      {isWaitingForServer && (
+        <div style={{ marginTop: 8, color: "#888" }}>Processing...</div>
+      )}
+
+      {actionRejected && (
+        <div style={{ marginTop: 8, color: "#f66" }}>
+          Move rejected: {actionRejected}
+        </div>
+      )}
+
+      {gameState?.status === "finished" && (
         <div style={{ marginTop: 12, color: "#6f6" }}>
           Game finished
+          {chessState.isCheckmate && " - Checkmate!"}
+          {chessState.isDraw && " - Draw"}
+          {chessState.isStalemate && " - Stalemate"}
         </div>
       )}
 
       <button
-        style={{ marginTop: 12 }}
+        style={{
+          marginTop: 12,
+          padding: "8px 16px",
+          backgroundColor: "#c53030",
+          color: "white",
+          border: "none",
+          borderRadius: "4px",
+          cursor: isWaitingForServer ? "not-allowed" : "pointer",
+          opacity: isWaitingForServer ? 0.5 : 1,
+        }}
         onClick={resign}
+        disabled={isWaitingForServer || gameState?.status === "finished"}
       >
         Resign
       </button>

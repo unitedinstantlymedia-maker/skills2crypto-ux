@@ -1,6 +1,13 @@
 export type Asset = "USDT" | "ETH" | "TON";
 
-export type GameId = "chess";
+export type GameId = "chess" | "tetris" | "checkers" | "battleship";
+
+export interface GameAction {
+  matchId: string;
+  playerId: string;
+  type: string;
+  payload?: unknown;
+}
 
 export type MatchStatus = "waiting" | "active" | "finished" | "cancelled";
 

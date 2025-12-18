@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import type { GameAction } from '@shared/protocol';
 
 export type MatchStatus = 'waiting' | 'active' | 'paused' | 'finished';
 
@@ -11,14 +12,32 @@ interface MatchState {
   matchId: string;
   status: MatchStatus;
   players: Record<string, PlayerState>;
+  gameState?: Record<string, unknown>;
+}
+
+interface GameState {
+  matchId: string;
+  game: string;
+  status: MatchStatus;
+  gameState: Record<string, unknown>;
+  result?: {
+    finished: boolean;
+    winnerId?: string;
+    draw?: boolean;
+    reason?: string;
+  };
 }
 
 interface SocketContextValue {
   socket: Socket | null;
   isConnected: boolean;
   matchState: MatchState | null;
+  gameState: GameState | null;
+  actionRejected: string | null;
+  isWaitingForServer: boolean;
   joinMatch: (matchId: string, playerId: string) => void;
   leaveMatch: (matchId: string, playerId: string) => void;
+  sendGameAction: (action: GameAction) => void;
   disconnect: () => void;
 }
 
@@ -28,6 +47,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [matchState, setMatchState] = useState<MatchState | null>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [actionRejected, setActionRejected] = useState<string | null>(null);
+  const [isWaitingForServer, setIsWaitingForServer] = useState(false);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -62,6 +84,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setMatchState(data);
     });
 
+    newSocket.on('game_state', (data: GameState) => {
+      console.log('[Socket] game_state received:', data);
+      setGameState(data);
+      setIsWaitingForServer(false);
+      setActionRejected(null);
+    });
+
+    newSocket.on('action_rejected', (data: { reason: string }) => {
+      console.log('[Socket] action_rejected:', data.reason);
+      setActionRejected(data.reason);
+      setIsWaitingForServer(false);
+    });
+
     newSocket.on('match_found', (data: { matchId: string; game: string; players: string[] }) => {
       console.log('[Socket] match_found received:', data);
     });
@@ -90,6 +125,16 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const sendGameAction = useCallback((action: GameAction) => {
+    const sock = connect();
+    if (sock) {
+      console.log(`[Socket] Sending game_action:`, action);
+      setIsWaitingForServer(true);
+      setActionRejected(null);
+      sock.emit('game_action', action);
+    }
+  }, [connect]);
+
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.disconnect();
@@ -97,6 +142,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setSocket(null);
       setIsConnected(false);
       setMatchState(null);
+      setGameState(null);
+      setActionRejected(null);
+      setIsWaitingForServer(false);
     }
   }, []);
 
@@ -106,8 +154,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         socket,
         isConnected,
         matchState,
+        gameState,
+        actionRejected,
+        isWaitingForServer,
         joinMatch,
         leaveMatch,
+        sendGameAction,
         disconnect,
       }}
     >

@@ -2,10 +2,20 @@ import { Chess } from "chess.js";
 import type { ChessState, ChessMove } from "@shared/protocol";
 import type { GameAdapter, GameResult } from "./types";
 
-export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
+interface ChessAction extends ChessMove {
+  action?: "resign";
+  playerId?: string;
+}
+
+interface ExtendedChessState extends ChessState {
+  resigned?: boolean;
+  resignedBy?: string;
+}
+
+export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
   gameType: "chess",
 
-  initState(): ChessState {
+  initState(): ExtendedChessState {
     const chess = new Chess();
     return {
       fen: chess.fen(),
@@ -19,11 +29,17 @@ export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
   },
 
   validateMove(
-    state: ChessState,
-    move: ChessMove,
+    state: ExtendedChessState,
+    move: ChessAction,
     playerId: string,
     players: { whiteId: string; blackId: string }
   ): boolean {
+    if (state.resigned) return false;
+
+    if (move.action === "resign") {
+      return playerId === players.whiteId || playerId === players.blackId;
+    }
+
     const expectedPlayer = state.turn === "w" ? players.whiteId : players.blackId;
     if (playerId !== expectedPlayer) return false;
 
@@ -40,7 +56,15 @@ export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
     }
   },
 
-  applyMove(state: ChessState, move: ChessMove): ChessState {
+  applyMove(state: ExtendedChessState, move: ChessAction): ExtendedChessState {
+    if (move.action === "resign") {
+      return {
+        ...state,
+        resigned: true,
+        resignedBy: move.playerId,
+      };
+    }
+
     const chess = new Chess(state.fen);
     chess.move({
       from: move.from,
@@ -49,9 +73,10 @@ export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
     });
 
     return {
+      ...state,
       fen: chess.fen(),
       turn: chess.turn() as "w" | "b",
-      moves: [...state.moves, move],
+      moves: [...state.moves, { from: move.from, to: move.to, promotion: move.promotion }],
       isCheck: chess.isCheck(),
       isCheckmate: chess.isCheckmate(),
       isDraw: chess.isDraw(),
@@ -60,9 +85,13 @@ export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
   },
 
   checkResult(
-    state: ChessState,
+    state: ExtendedChessState,
     players: { whiteId: string; blackId: string }
   ): GameResult {
+    if (state.resigned && state.resignedBy) {
+      const winnerId = state.resignedBy === players.whiteId ? players.blackId : players.whiteId;
+      return { finished: true, winnerId, reason: "resign" };
+    }
     if (state.isCheckmate) {
       const winnerId = state.turn === "w" ? players.blackId : players.whiteId;
       return { finished: true, winnerId, reason: "checkmate" };
@@ -74,7 +103,7 @@ export const chessAdapter: GameAdapter<ChessState, ChessMove> = {
   },
 
   getCurrentPlayer(
-    state: ChessState,
+    state: ExtendedChessState,
     players: { whiteId: string; blackId: string }
   ): string {
     return state.turn === "w" ? players.whiteId : players.blackId;
