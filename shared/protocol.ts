@@ -27,6 +27,8 @@ export interface ChessState {
   isCheckmate: boolean;
   isDraw: boolean;
   isStalemate: boolean;
+  resigned?: boolean;
+  resignedBy?: string;
 }
 
 export interface Match {

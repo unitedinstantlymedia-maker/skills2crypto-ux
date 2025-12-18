@@ -7,15 +7,10 @@ interface ChessAction extends ChessMove {
   playerId?: string;
 }
 
-interface ExtendedChessState extends ChessState {
-  resigned?: boolean;
-  resignedBy?: string;
-}
-
-export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
+export const chessAdapter: GameAdapter<ChessState, ChessAction> = {
   gameType: "chess",
 
-  initState(): ExtendedChessState {
+  initState(): ChessState {
     const chess = new Chess();
     return {
       fen: chess.fen(),
@@ -29,7 +24,7 @@ export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
   },
 
   validateMove(
-    state: ExtendedChessState,
+    state: ChessState,
     move: ChessAction,
     playerId: string,
     players: { whiteId: string; blackId: string }
@@ -56,7 +51,7 @@ export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
     }
   },
 
-  applyMove(state: ExtendedChessState, move: ChessAction): ExtendedChessState {
+  applyMove(state: ChessState, move: ChessAction): ChessState {
     if (move.action === "resign") {
       return {
         ...state,
@@ -85,7 +80,7 @@ export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
   },
 
   checkResult(
-    state: ExtendedChessState,
+    state: ChessState,
     players: { whiteId: string; blackId: string }
   ): GameResult {
     if (state.resigned && state.resignedBy) {
@@ -103,7 +98,7 @@ export const chessAdapter: GameAdapter<ExtendedChessState, ChessAction> = {
   },
 
   getCurrentPlayer(
-    state: ExtendedChessState,
+    state: ChessState,
     players: { whiteId: string; blackId: string }
   ): string {
     return state.turn === "w" ? players.whiteId : players.blackId;

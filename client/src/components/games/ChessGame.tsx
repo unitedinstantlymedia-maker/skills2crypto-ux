@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Chessboard } from "react-chessboard";
+import type { ChessboardProps } from "react-chessboard/dist/chessboard/types";
 import { useSocket } from "@/context/SocketContext";
 
 interface ChessState {
@@ -70,17 +71,17 @@ export function ChessGame({ matchId, playerId, onFinish }: Props) {
   return (
     <div style={{ maxWidth: 420, margin: "0 auto" }}>
       <Chessboard
-        options={{
+        {...{
           position: chessState.fen,
           onPieceDrop: handlePieceDrop,
           arePiecesDraggable: !isWaitingForServer,
-          darkSquareStyle: { backgroundColor: "#4a5568" },
-          lightSquareStyle: { backgroundColor: "#718096" },
-          boardStyle: {
+          customDarkSquareStyle: { backgroundColor: "#4a5568" },
+          customLightSquareStyle: { backgroundColor: "#718096" },
+          customBoardStyle: {
             borderRadius: "8px",
             boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
           },
-        }}
+        } as ChessboardProps}
       />
 
       <div style={{ marginTop: 12, color: "#ccc" }}>
