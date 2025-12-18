@@ -5,8 +5,8 @@ import { useGame } from "@/context/GameContext";
 import { useLanguage } from "@/context/LanguageContext";
 
 import ChessGame from "@/components/games/ChessGame";
-import TetrisGame from "@/components/games/TetrisGame";
-import CheckersGame from "@/components/games/CheckersGame";
+import { TetrisGame } from "@/components/games/TetrisGame";
+import { CheckersGame } from "@/components/games/CheckersGame";
 
 import { Button } from "@/components/ui/button";
 
@@ -15,7 +15,6 @@ export default function Play() {
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
 
-  // если матча нет — возвращаем в лобби
   useEffect(() => {
     if (!state.currentMatch) {
       setLocation("/");
@@ -26,7 +25,8 @@ export default function Play() {
     return null;
   }
 
-  const { game, id: matchId, playerId } = state.currentMatch;
+  const { game, id: matchId } = state.currentMatch;
+  const playerId = state.currentMatch.players?.[0] || "player1";
 
   const handleFinish = async (
     result:
@@ -70,7 +70,7 @@ export default function Play() {
         </Button>
       </div>
 
-      {game === "chess" && (
+      {game === "Chess" && (
         <ChessGame
           matchId={matchId}
           playerId={playerId}
@@ -78,20 +78,12 @@ export default function Play() {
         />
       )}
 
-      {game === "tetris" && (
-        <TetrisGame
-          matchId={matchId}
-          playerId={playerId}
-          onFinish={handleFinish}
-        />
+      {game === "Tetris" && (
+        <TetrisGame onFinish={(r) => handleFinish(r)} />
       )}
 
-      {game === "checkers" && (
-        <CheckersGame
-          matchId={matchId}
-          playerId={playerId}
-          onFinish={handleFinish}
-        />
+      {game === "Checkers" && (
+        <CheckersGame onFinish={(r) => handleFinish(r)} />
       )}
     </div>
   );

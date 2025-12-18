@@ -20,14 +20,13 @@ type Props = {
   onFinish?: (result: any) => void;
 };
 
-export default function ChessGame({
+export function ChessGame({
   matchId,
   playerId = "playerA",
   onFinish
 }: Props) {
   const [match, setMatch] = useState<Match | null>(null);
 
-  // DEV: автосоздание матча
   useEffect(() => {
     async function init() {
       if (!matchId) {
@@ -55,26 +54,31 @@ export default function ChessGame({
     init();
   }, [matchId]);
 
-  async function onDrop(from: string, to: string) {
-    if (!match) return false;
+  function handlePieceDrop({ sourceSquare, targetSquare }: { piece: any; sourceSquare: string; targetSquare: string | null }): boolean {
+    if (!match || !targetSquare) return false;
 
-    const res = await fetch(`/api/matches/${match.id}/move`, {
+    fetch(`/api/matches/${match.id}/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         playerId,
-        move: { from, to }
+        move: { from: sourceSquare, to: targetSquare }
       })
-    });
-
-    if (!res.ok) return false;
-
-    const updated = await res.json();
-    setMatch(updated);
-
-    if (updated.state.status === "finished" && onFinish) {
-      onFinish(updated.result);
-    }
+    })
+      .then((res) => {
+        if (!res.ok) {
+          fetch(`/api/matches/${match.id}`).then(r => r.json()).then(setMatch);
+          return;
+        }
+        return res.json();
+      })
+      .then((updated) => {
+        if (!updated) return;
+        setMatch(updated);
+        if (updated.state.status === "finished" && onFinish) {
+          onFinish(updated.result);
+        }
+      });
 
     return true;
   }
@@ -100,8 +104,17 @@ export default function ChessGame({
   return (
     <div style={{ maxWidth: 420, margin: "0 auto" }}>
       <Chessboard
-        position={match.state.fen}
-        onPieceDrop={onDrop}
+        options={{
+          position: match.state.fen,
+          onPieceDrop: handlePieceDrop,
+          allowDragging: match.state.status === "active",
+          darkSquareStyle: { backgroundColor: "#4a5568" },
+          lightSquareStyle: { backgroundColor: "#718096" },
+          boardStyle: {
+            borderRadius: "8px",
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)"
+          }
+        }}
       />
 
       <div style={{ marginTop: 12, color: "#ccc" }}>
@@ -123,3 +136,5 @@ export default function ChessGame({
     </div>
   );
 }
+
+export default ChessGame;
