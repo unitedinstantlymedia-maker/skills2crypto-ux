@@ -1,13 +1,22 @@
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
 
-export function CheckersGame({ onFinish }: { onFinish: (result: 'win' | 'loss') => void }) {
+interface CheckersGameProps {
+  matchId: string;
+  playerId: string;
+  onFinish: (result: "win" | "loss" | "draw") => void;
+}
+
+export function CheckersGame({ matchId, playerId, onFinish }: CheckersGameProps) {
   const { t } = useLanguage();
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8">
+      <div className="text-xs text-muted-foreground mb-2">
+        Match: {matchId} | Player: {playerId}
+      </div>
+
       <div className="w-full aspect-square bg-black/40 border-2 border-white/10 rounded-lg grid grid-cols-8 grid-rows-8 relative overflow-hidden">
-         {/* Checkered background */}
          {Array.from({ length: 64 }).map((_, i) => {
           const x = i % 8;
           const y = Math.floor(i / 8);
@@ -35,3 +44,5 @@ export function CheckersGame({ onFinish }: { onFinish: (result: 'win' | 'loss') 
     </div>
   );
 }
+
+export default CheckersGame;

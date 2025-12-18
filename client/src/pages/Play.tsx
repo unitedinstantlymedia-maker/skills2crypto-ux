@@ -4,10 +4,7 @@ import { useLocation } from "wouter";
 import { useGame } from "@/context/GameContext";
 import { useLanguage } from "@/context/LanguageContext";
 
-import ChessGame from "@/components/games/ChessGame";
-import { TetrisGame } from "@/components/games/TetrisGame";
-import { CheckersGame } from "@/components/games/CheckersGame";
-
+import { GameRenderer } from "@/components/games/GameRenderer";
 import { Button } from "@/components/ui/button";
 
 export default function Play() {
@@ -25,33 +22,10 @@ export default function Play() {
     return null;
   }
 
-  const { game, id: matchId } = state.currentMatch;
-  const playerId = state.currentMatch.players?.[0] || "player1";
+  const match = state.currentMatch;
 
-  const handleFinish = async (
-    result:
-      | "win"
-      | "loss"
-      | "draw"
-      | {
-          winnerId?: string;
-          loserId?: string;
-          draw?: boolean;
-          reason?: string;
-        }
-  ) => {
-    if (typeof result === "string") {
-      await actions.finishMatch(result);
-    } else {
-      const simpleResult = result.draw
-        ? "draw"
-        : result.winnerId === playerId
-        ? "win"
-        : "loss";
-
-      await actions.finishMatch(simpleResult);
-    }
-
+  const handleFinish = async (result: "win" | "loss" | "draw") => {
+    await actions.finishMatch(result);
     setLocation("/result");
   };
 
@@ -59,7 +33,7 @@ export default function Play() {
     <div className="flex flex-col gap-4 p-4">
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-bold">
-          {t("game.playing")} — {game.toUpperCase()}
+          {t("game.playing")} — {match.game.toUpperCase()}
         </h1>
 
         <Button
@@ -70,21 +44,10 @@ export default function Play() {
         </Button>
       </div>
 
-      {game === "Chess" && (
-        <ChessGame
-          matchId={matchId}
-          playerId={playerId}
-          onFinish={handleFinish}
-        />
-      )}
-
-      {game === "Tetris" && (
-        <TetrisGame onFinish={(r) => handleFinish(r)} />
-      )}
-
-      {game === "Checkers" && (
-        <CheckersGame onFinish={(r) => handleFinish(r)} />
-      )}
+      <GameRenderer
+        match={match}
+        onFinish={handleFinish}
+      />
     </div>
   );
 }
