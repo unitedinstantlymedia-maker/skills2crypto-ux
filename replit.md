@@ -132,9 +132,19 @@ matches = {
 ### Matchmaking
 - `POST /api/find-match` - Join matchmaking queue
   - Body: `{ game, asset, amount, playerId }`
-  - Response: `{ status: "waiting" }` or `{ status: "matched", matchId }`
+  - Response (waiting): `{ status: "waiting" }`
+  - Response (matched): `{ status: "matched", matchId, game, asset, amount, players }`
 - `GET /api/matchmaking/match/:id` - Get matchmaking match details
 - `GET /api/matchmaking/stats` - Get queue stats
+
+### Matchmaking Flow (Server-Synchronized)
+1. Client calls `POST /api/find-match` with game params
+2. Server checks queue for matching opponent
+3. If no match: returns `{ status: "waiting" }`, player added to queue
+4. If match found: creates match, calls `initializeMatch()`, broadcasts `match_found`
+5. Both clients receive `match_found` via socket and emit `join_match`
+6. Server joins both sockets to matchId room, transitions match to "active"
+7. Clients receive `match_state` with status "active" and game can begin
 
 ## Key Features
 
