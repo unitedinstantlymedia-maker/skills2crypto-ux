@@ -166,7 +166,7 @@ function handleGameAction(socket: Socket, action: GameAction): void {
     return;
   }
 
-  if (match.status === "finished") {
+  if (match.status === "finished" || match.result?.status === "finished") {
     socket.emit("action_rejected", { reason: "match_finished" });
     return;
   }

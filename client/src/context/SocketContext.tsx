@@ -95,6 +95,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setGameState(data);
       setIsWaitingForServer(false);
       setActionRejected(null);
+      if (data.result?.status === "finished") {
+        setMatchResult(data.result);
+        setIsMatchFinished(true);
+      }
     });
 
     newSocket.on('action_rejected', (data: { reason: string }) => {
