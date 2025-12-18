@@ -34,6 +34,13 @@ export default function Lobby() {
     }
   }, [state.selectedGame, setLocation]);
 
+  useEffect(() => {
+    if (state.currentMatch && state.currentMatch.status === 'active') {
+      console.log("[Lobby] Match active, redirecting to Play");
+      setLocation(`/play/${state.selectedGame?.toLowerCase()}`);
+    }
+  }, [state.currentMatch, state.selectedGame, setLocation]);
+
   const handleAssetChange = (value: string) => {
     if (value) actions.selectAsset(value as Asset);
   };
@@ -115,10 +122,7 @@ export default function Lobby() {
     actions.cancelSearch();
   };
 
-  // Navigate to play if match active
   if (state.currentMatch && state.currentMatch.status === 'active') {
-    console.log("[Lobby] Match active, redirecting to Play");
-    setLocation(`/play/${state.selectedGame?.toLowerCase()}`);
     return null; 
   }
 

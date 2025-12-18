@@ -1,6 +1,7 @@
 import ChessGame from "./ChessGame";
 import { TetrisGame } from "./TetrisGame";
 import { CheckersGame } from "./CheckersGame";
+import { BattleshipGame } from "./BattleshipGame";
 import { useLanguage } from "@/context/LanguageContext";
 import type { Match } from "@/core/types";
 
@@ -17,8 +18,9 @@ type GameComponent = React.ComponentType<{
 
 const gameRegistry: Record<string, GameComponent> = {
   chess: ChessGame as GameComponent,
-  tetris: TetrisGame as unknown as GameComponent,
-  checkers: CheckersGame as unknown as GameComponent,
+  tetris: TetrisGame as GameComponent,
+  checkers: CheckersGame as GameComponent,
+  battleship: BattleshipGame as GameComponent,
 };
 
 export function GameRenderer({ match, onFinish }: GameRendererProps) {
