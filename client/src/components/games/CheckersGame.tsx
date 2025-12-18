@@ -12,10 +12,6 @@ export function CheckersGame({ matchId, playerId, onFinish }: CheckersGameProps)
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8">
-      <div className="text-xs text-muted-foreground mb-2">
-        Match: {matchId} | Player: {playerId}
-      </div>
-
       <h2 className="text-2xl font-bold text-primary">CHECKERS</h2>
 
       <div className="w-full aspect-square max-w-xs bg-black/40 border-2 border-white/10 rounded-lg grid grid-cols-8 grid-rows-8 relative overflow-hidden">

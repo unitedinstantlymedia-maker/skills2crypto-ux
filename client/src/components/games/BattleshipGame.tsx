@@ -12,10 +12,6 @@ export function BattleshipGame({ matchId, playerId, onFinish }: BattleshipGamePr
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8">
-      <div className="text-xs text-muted-foreground mb-2">
-        Match: {matchId} | Player: {playerId}
-      </div>
-
       <h2 className="text-2xl font-bold text-primary">BATTLESHIP</h2>
 
       <div className="w-full aspect-square max-w-xs bg-blue-900/30 border-2 border-blue-500/30 rounded-lg grid grid-cols-10 grid-rows-10 relative overflow-hidden">

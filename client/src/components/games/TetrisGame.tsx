@@ -12,10 +12,6 @@ export function TetrisGame({ matchId, playerId, onFinish }: TetrisGameProps) {
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8">
-      <div className="text-xs text-muted-foreground mb-2">
-        Match: {matchId} | Player: {playerId}
-      </div>
-
       <h2 className="text-2xl font-bold text-primary">TETRIS</h2>
       
       <div className="w-64 h-96 bg-black/40 border-2 border-white/10 rounded-lg relative overflow-hidden p-4">
