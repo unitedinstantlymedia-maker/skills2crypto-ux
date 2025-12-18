@@ -13,7 +13,7 @@ This is a React + Express full-stack application that allows users to play 1v1 s
   - `src/components/games/` - Game-specific UI (ChessGame, TetrisGame, etc.)
   - `src/pages/` - Route pages
   - `src/core/` - Core business logic (wallet, escrow, matchmaking)
-  - `src/context/` - React contexts (Game, Language)
+  - `src/context/` - React contexts (Game, Language, Socket)
 - `server/` - Express backend
   - `index.ts` - Server entry point
   - `routes.ts` - API routes
@@ -24,8 +24,8 @@ This is a React + Express full-stack application that allows users to play 1v1 s
 
 ## Tech Stack
 
-- **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion, react-chessboard
-- **Backend**: Express, TypeScript, chess.js
+- **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion, react-chessboard, socket.io-client
+- **Backend**: Express, TypeScript, chess.js, socket.io
 - **Database**: PostgreSQL with Drizzle ORM (in-memory storage for prototype)
 - **UI Components**: shadcn/ui (Radix UI based)
 
@@ -68,12 +68,32 @@ In-memory queue for real 1v1 matchmaking:
 - Second player with same params → match created, both notified
 - WebSocket notifications for real-time match updates
 
-### WebSocket Server
-Real-time communication on `/ws`:
-- `register` - Map playerId to socket connection
-- `find_match` - Join matchmaking queue via WebSocket
-- `cancel_search` - Cancel matchmaking search
-- `match_found` - Server → Client notification when matched
+### Socket.IO Server (Real-time Match Lifecycle)
+Server-authoritative real-time communication:
+
+**Match Registry** (in-memory):
+```typescript
+matches = {
+  [matchId]: {
+    id, game, asset, amount,
+    players: { [playerId]: { socketId, connected } },
+    status: "waiting" | "active" | "paused" | "finished",
+    state: {}
+  }
+}
+```
+
+**Socket Events**:
+- `join_match` - Player joins match (validates authorization)
+- `leave_match` - Player leaves match (transitions to paused)
+- `disconnect` - Handle socket disconnect (pauses match)
+- `match_state` - Server → Client: `{ matchId, status, players }`
+- `match_found` - Server → Client: Match created notification
+
+**Status Transitions**:
+- `waiting` → `active` when 2 players connected
+- `active` → `paused` when <2 players connected
+- Reconnect resumes `paused` → `active`
 
 ## API Endpoints
 
