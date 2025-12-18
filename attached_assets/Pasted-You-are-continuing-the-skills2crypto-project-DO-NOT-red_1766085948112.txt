@@ -1,0 +1,262 @@
+You are continuing the skills2crypto project.
+
+DO NOT redesign UI.
+DO NOT add escrow or blockchain logic.
+DO NOT add mock win/lose buttons.
+DO NOT resolve games on the client.
+
+This is STEP 5.
+
+🎯 GOAL
+
+Integrate real server-side game engines behind the existing server-authoritative architecture.
+
+All games must:
+
+receive player actions from the client
+
+validate actions on the server
+
+mutate game state on the server
+
+broadcast updated state to both players via socket.io
+
+determine game-over conditions on the server
+
+The server is the only authority.
+
+🚫 HARD CONSTRAINTS
+
+NO client-side game logic
+
+NO demo or fake results
+
+NO escrow
+
+NO blockchain
+
+NO payouts
+
+NO UI redesign
+
+Client renders ONLY from game_state
+
+🧩 SHARED PROTOCOL
+
+Ensure a shared type exists:
+
+type GameAction = {
+  matchId: string
+  playerId: string
+  type: string
+  payload?: any
+}
+
+🧠 SERVER SIDE
+1️⃣ GameAdapter Interface
+
+Create / extend a common interface:
+
+interface GameAdapter {
+  getInitialState(): any
+
+  validateAction(
+    action: GameAction,
+    state: any
+  ): { valid: boolean; reason?: string }
+
+  applyAction(
+    action: GameAction,
+    state: any
+  ): any
+
+  isGameOver(state: any): {
+    over: boolean
+    result?: {
+      winner?: string
+      draw?: boolean
+      reason?: string
+    }
+  }
+}
+
+
+All games MUST implement this interface.
+
+♟️ 2️⃣ ChessAdapter (REAL, FULLY VALIDATED)
+
+Use chess.js on the server only.
+
+State
+{
+  fen: string,
+  turn: "w" | "b"
+}
+
+validateAction
+
+Verify correct turn
+
+Verify move legality using chess.js
+
+applyAction
+
+Apply move via chess.js
+
+Update FEN
+
+isGameOver
+
+Detect and return:
+
+checkmate
+
+draw
+
+stalemate
+
+threefold repetition
+
+insufficient material
+
+⚠️ The client must NOT know chess rules.
+
+♟️ 3️⃣ CheckersAdapter (REAL RULES, NO PAYOUT)
+
+Implement real checkers logic server-side.
+
+State
+
+board
+
+current turn
+
+validateAction
+
+verify turn
+
+verify legal move / capture
+
+applyAction
+
+move pieces
+
+remove captured pieces
+
+isGameOver
+
+no pieces left
+
+no legal moves
+
+🚢 4️⃣ BattleshipAdapter (SERVER GRID)
+State
+
+grid per player
+
+hits / misses
+
+ships remaining
+
+Action
+{ type: "fire", payload: { x: number, y: number } }
+
+validateAction
+
+verify turn
+
+verify cell not already fired
+
+isGameOver
+
+all ships destroyed
+
+🧱 5️⃣ TetrisAdapter (BASIC SERVER ENGINE)
+
+Minimal implementation is sufficient.
+
+State
+
+board
+
+active piece
+
+Actions
+
+move_left
+
+move_right
+
+rotate
+
+drop
+
+Rules
+
+server applies moves
+
+no timer yet (tick per action)
+
+isGameOver
+
+stack overflow / no space for new piece
+
+🔁 SOCKET FLOW (MANDATORY)
+
+Update the server socket handler:
+
+socket.on("game_action", (action: GameAction) => {
+  const match = getMatch(action.matchId)
+  if (!match || match.status !== "active") return
+
+  const adapter = adapters[match.game]
+
+  const validation = adapter.validateAction(action, match.state)
+  if (!validation.valid) {
+    socket.emit("action_rejected", validation.reason)
+    return
+  }
+
+  match.state = adapter.applyAction(action, match.state)
+
+  const gameOver = adapter.isGameOver(match.state)
+  if (gameOver.over) {
+    match.status = "finished"
+    match.result = gameOver.result
+  }
+
+  io.to(match.id).emit("game_state", match)
+})
+
+🖥 CLIENT SIDE
+Client MUST:
+
+emit game_action
+
+wait for game_state
+
+render ONLY from server state
+
+disable inputs while awaiting response
+
+Client MUST NOT:
+
+mutate state
+
+resolve game logic
+
+detect winners
+
+✅ SUCCESS CRITERIA
+
+Chess works fully server-authoritative
+
+Illegal actions are rejected
+
+Valid actions update server state
+
+Both players see identical state
+
+All games use GameAdapter
+
+No fake logic, no payouts
