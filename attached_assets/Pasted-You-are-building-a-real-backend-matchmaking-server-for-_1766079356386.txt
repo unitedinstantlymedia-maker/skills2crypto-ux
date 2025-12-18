@@ -1,0 +1,151 @@
+You are building a real backend matchmaking server for a 1v1 crypto skill gaming platform.
+
+Tech stack (fixed, do not change):
+
+Node.js
+
+Express
+
+WebSocket (ws)
+
+TypeScript
+
+In-memory storage (no DB yet)
+
+CORE REQUIREMENTS
+1. Server structure
+
+Create a backend server with:
+
+Express HTTP server
+
+WebSocket server attached to it
+
+Folder: server/
+
+2. Domain models
+Player
+interface Player {
+  id: string
+  socket: WebSocket
+}
+
+Match
+interface Match {
+  id: string
+  game: string
+  asset: "USDT" | "ETH" | "TON"
+  amount: number
+  players: [string, string]
+  status: "waiting" | "active" | "finished"
+}
+
+3. Matchmaking Queue
+
+Create an in-memory queue grouped by:
+
+{ game, asset, amount }
+
+
+Example key:
+
+chess|USDT|20
+
+
+Logic:
+
+First player → enters queue
+
+Second player with same params → match is created
+
+Queue entry is removed
+
+Match status becomes active
+
+4. HTTP API
+POST /api/find-match
+
+Body:
+
+{
+  "game": "chess",
+  "asset": "USDT",
+  "amount": 20,
+  "playerId": "player123"
+}
+
+
+Behavior:
+
+If no waiting opponent → respond { status: "waiting" }
+
+If matched → respond { status: "matched", matchId }
+
+GET /api/match/:id
+
+Returns:
+
+{
+  "id": "...",
+  "game": "...",
+  "asset": "...",
+  "amount": 20,
+  "players": ["p1","p2"],
+  "status": "active"
+}
+
+5. WebSocket events
+
+When client connects via WebSocket:
+
+client sends { type: "register", playerId }
+
+server maps playerId → socket
+
+When match is created:
+
+server sends BOTH players:
+
+{
+  "type": "match_found",
+  "matchId": "...",
+  "game": "...",
+  "asset": "...",
+  "amount": 20,
+  "opponentId": "..."
+}
+
+6. Rules (IMPORTANT)
+
+NO demo mode
+
+NO mock match
+
+NO auto-start if only one player
+
+Match only starts when two real players exist
+
+No blockchain logic
+
+No escrow logic yet
+
+Clean, deterministic, server-authoritative logic
+
+7. Output
+
+Server runs on port 5000
+
+Log every:
+
+player registration
+
+queue join
+
+match creation
+
+Code must compile and run cleanly
+
+Build this as production-grade backend foundation.
+Do not implement games.
+Do not implement blockchain.
+Do not simplify logic.
