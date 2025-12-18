@@ -97,8 +97,8 @@ export function ChessGame({
     onFinish?.(updated.result);
   }
 
-  if (!match) {
-    return <div style={{ color: "#888" }}>Loading match…</div>;
+  if (!match || !match.state || !match.state.fen) {
+    return <div style={{ color: "#888", textAlign: "center", padding: 40 }}>Creating match…</div>;
   }
 
   return (
