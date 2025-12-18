@@ -1,0 +1,114 @@
+You are continuing the skills2crypto project.
+
+ABSOLUTE RULES
+- Do NOT redesign UI
+- Do NOT add escrow, payments, balances, or blockchain logic
+- Do NOT add rematch, invite, or demo buttons
+- Do NOT allow the client to decide game completion
+- Server is the only authority
+
+THIS IS STEP 4: Match completion & final state
+
+GOAL
+
+The server must:
+- Decide when a match is finished
+- Decide the reason
+- Decide the winner (if any)
+- Broadcast the final result to both players
+- Reject any further game actions after completion
+
+SHARED TYPES
+
+Extend shared match/game types to include a final result:
+
+type MatchResult = {
+  status: "finished"
+  reason: "checkmate" | "draw" | "stalemate" | "resign" | "disconnect"
+  winner?: string
+}
+
+Match must have:
+- status: "waiting" | "active" | "finished"
+- result?: MatchResult
+
+SERVER SIDE
+
+1. Detect game completion
+
+After every validated game_action:
+
+- Call adapter.isGameOver(matchState)
+- If true:
+  - Determine reason (for Chess: checkmate, draw, stalemate)
+  - Determine winner if applicable
+  - Set match.status = "finished"
+  - Set match.result accordingly
+
+2. Emit match_finished event
+
+When a match finishes:
+
+socket.to(matchId).emit("match_finished", match.result)
+
+This must be a separate event (NOT game_state).
+
+3. Block further actions
+
+If match.status === "finished":
+- Reject ALL incoming game_action events
+- Emit action_rejected with reason: "match_finished"
+
+4. Handle resignation
+
+If a player sends action type "resign":
+- Server marks match as finished
+- Winner is the other player
+- Reason = "resign"
+- Emit match_finished
+
+CLIENT SIDE
+
+5. Listen for match_finished
+
+Client must:
+- Listen for "match_finished"
+- Store final result
+- Stop sending any game_action
+- Disable all game inputs
+
+6. Rendering
+
+Client must:
+- Render final state ONLY from server result
+- Show:
+  - Game finished
+  - Winner OR draw
+  - Reason
+
+NO buttons for:
+- win
+- lose
+- draw
+- rematch
+- continue
+
+CONSTRAINTS (STRICT)
+
+- NO escrow
+- NO payments
+- NO blockchain
+- NO client-side win detection
+- NO fake results
+- NO demo logic
+
+SUCCESS CRITERIA
+
+- Server alone decides when the match ends
+- Both players receive identical match_finished data
+- No actions are possible after completion
+- Match result is stable and authoritative
+- This result can later be used for escrow (but not now)
+
+Implement ONLY what is described above.
+Do NOT go beyond STEP 4.

@@ -11,7 +11,14 @@ export interface GameAction {
 
 export type MatchStatus = "waiting" | "active" | "finished" | "cancelled";
 
-export type FinishReason = "checkmate" | "resign" | "timeout" | "draw" | "invalid";
+export type FinishReason = "checkmate" | "resign" | "timeout" | "draw" | "stalemate" | "disconnect";
+
+export interface MatchResult {
+  status: "finished";
+  reason: FinishReason;
+  winner?: string;
+  draw?: boolean;
+}
 
 export interface ChessMove {
   from: string;

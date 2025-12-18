@@ -11,6 +11,13 @@ interface PlayerState {
   connected: boolean;
 }
 
+interface MatchResult {
+  status: "finished";
+  reason: string;
+  winner?: string;
+  draw?: boolean;
+}
+
 interface MatchState {
   id: string;
   game: string;
@@ -20,6 +27,7 @@ interface MatchState {
   playerMapping: { whiteId: string; blackId: string };
   status: MatchStatus;
   gameState: Record<string, unknown>;
+  result?: MatchResult;
 }
 
 const matches: Map<string, MatchState> = new Map();
@@ -158,6 +166,11 @@ function handleGameAction(socket: Socket, action: GameAction): void {
     return;
   }
 
+  if (match.status === "finished") {
+    socket.emit("action_rejected", { reason: "match_finished" });
+    return;
+  }
+
   if (match.status !== "active") {
     socket.emit("action_rejected", { reason: `Match is not active (status: ${match.status})` });
     return;
@@ -194,7 +207,17 @@ function handleGameAction(socket: Socket, action: GameAction): void {
   const result = adapter.checkResult(match.gameState, match.playerMapping);
   if (result.finished) {
     match.status = "finished";
-    log(`Match ${matchId} finished: ${JSON.stringify(result)}`, "socket.io");
+    match.result = {
+      status: "finished",
+      reason: result.reason || "unknown",
+      winner: result.winnerId,
+      draw: result.draw,
+    };
+    log(`Match ${matchId} finished: ${JSON.stringify(match.result)}`, "socket.io");
+    
+    emitGameState(matchId);
+    emitMatchFinished(matchId);
+    return;
   }
 
   emitGameState(matchId);
@@ -243,19 +266,24 @@ function emitGameState(matchId: string): void {
   const match = matches.get(matchId);
   if (!match || !io) return;
 
-  const adapter = getAdapter(match.game);
-  const result = adapter ? adapter.checkResult(match.gameState, match.playerMapping) : { finished: false };
-
   const payload = {
     matchId: match.id,
     game: match.game,
     status: match.status,
     gameState: match.gameState,
-    result: result.finished ? result : undefined,
+    result: match.result,
   };
 
   log(`Emitting game_state for ${matchId}`, "socket.io");
   io.to(matchId).emit("game_state", payload);
+}
+
+function emitMatchFinished(matchId: string): void {
+  const match = matches.get(matchId);
+  if (!match || !io || !match.result) return;
+
+  log(`Emitting match_finished for ${matchId}: ${JSON.stringify(match.result)}`, "socket.io");
+  io.to(matchId).emit("match_finished", match.result);
 }
 
 export function initializeMatch(
