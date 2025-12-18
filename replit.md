@@ -48,6 +48,32 @@ Each game implements the `GameAdapter` interface:
 - `checkResult(state, players)` - Check for game end
 - `getCurrentPlayer(state, players)` - Get current player
 
+### Game Engines (All Server-Authoritative)
+
+**Chess** (`server/adapters/chess.ts`):
+- Uses chess.js for full rule validation
+- Detects checkmate, stalemate, draw, threefold repetition, insufficient material
+
+**Checkers** (`server/adapters/checkers.ts`):
+- 8x8 board with red/black pieces
+- Forward-only moves for men, multi-direction for kings
+- Mandatory captures, multi-jump sequences
+- King promotion at opposite end
+- Game ends when player has no pieces or no legal moves
+
+**Battleship** (`server/adapters/battleship.ts`):
+- 10x10 grids per player, 5 ships randomly placed
+- Fire action with hit/miss tracking
+- Extra turn on hit, turn switches on miss
+- Game ends when all ships sunk
+
+**Tetris** (`server/adapters/tetris.ts`):
+- 10x20 board with 7 tetromino types
+- Actions: move_left, move_right, rotate, drop, soft_drop
+- Server controls piece spawning (no client-triggered spawn)
+- Line clearing with scoring (100/300/500/800)
+- Game over when piece cannot spawn
+
 ### Match Engine
 Handles match lifecycle:
 - `createMatch()` - Create a new match with escrow lock
@@ -112,7 +138,7 @@ matches = {
 
 ## Key Features
 
-- Games: Chess (server-validated), Tetris (Block Stack), Checkers
+- Games: Chess, Tetris, Checkers, Battleship (all server-validated)
 - Assets: USDT, ETH, TON
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot (configurable)
