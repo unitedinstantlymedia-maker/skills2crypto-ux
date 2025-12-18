@@ -40,6 +40,14 @@ interface GameState {
   result?: MatchResult;
 }
 
+interface MatchFoundData {
+  matchId: string;
+  game: string;
+  asset: string;
+  amount: number;
+  players: string[];
+}
+
 interface SocketContextValue {
   socket: Socket | null;
   isConnected: boolean;
@@ -47,12 +55,15 @@ interface SocketContextValue {
   gameState: GameState | null;
   matchResult: MatchResult | null;
   escrowResult: EscrowResult | null;
+  matchFound: MatchFoundData | null;
   actionRejected: string | null;
   isWaitingForServer: boolean;
   isMatchFinished: boolean;
   joinMatch: (matchId: string, playerId: string) => void;
   leaveMatch: (matchId: string, playerId: string) => void;
   sendGameAction: (action: GameAction) => void;
+  findMatch: (game: string, asset: string, amount: number, playerId: string) => void;
+  clearMatchFound: () => void;
   disconnect: () => void;
 }
 
@@ -65,6 +76,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [escrowResult, setEscrowResult] = useState<EscrowResult | null>(null);
+  const [matchFound, setMatchFound] = useState<MatchFoundData | null>(null);
   const [actionRejected, setActionRejected] = useState<string | null>(null);
   const [isWaitingForServer, setIsWaitingForServer] = useState(false);
   const [isMatchFinished, setIsMatchFinished] = useState(false);
@@ -126,8 +138,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setIsWaitingForServer(false);
     });
 
-    newSocket.on('match_found', (data: { matchId: string; game: string; players: string[] }) => {
+    newSocket.on('match_found', (data: MatchFoundData) => {
       console.log('[Socket] match_found received:', data);
+      setMatchFound(data);
     });
 
     newSocket.on('escrow_result', (data: EscrowResult) => {
@@ -173,6 +186,41 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     }
   }, [connect, isMatchFinished]);
 
+  const findMatch = useCallback(async (game: string, asset: string, amount: number, playerId: string) => {
+    const sock = connect();
+    if (!sock) return;
+    
+    console.log(`[Socket] Finding match: ${game} ${asset} ${amount} for ${playerId}`);
+    
+    try {
+      const response = await fetch('/api/find-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game, asset, amount, playerId }),
+      });
+      
+      const result = await response.json();
+      console.log('[Socket] find-match response:', result);
+      
+      if (result.status === 'matched' && result.matchId) {
+        setMatchFound({
+          matchId: result.matchId,
+          game: result.game || game,
+          asset: result.asset || asset,
+          amount: result.amount || amount,
+          players: result.players || [],
+        });
+      }
+      // If status is "waiting", the socket will receive match_found when opponent joins
+    } catch (error) {
+      console.error('[Socket] find-match error:', error);
+    }
+  }, [connect]);
+
+  const clearMatchFound = useCallback(() => {
+    setMatchFound(null);
+  }, []);
+
   const disconnect = useCallback(() => {
     if (socketRef.current) {
       socketRef.current.disconnect();
@@ -183,6 +231,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setGameState(null);
       setMatchResult(null);
       setEscrowResult(null);
+      setMatchFound(null);
       setActionRejected(null);
       setIsWaitingForServer(false);
       setIsMatchFinished(false);
@@ -198,12 +247,15 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         gameState,
         matchResult,
         escrowResult,
+        matchFound,
         actionRejected,
         isWaitingForServer,
         isMatchFinished,
         joinMatch,
         leaveMatch,
         sendGameAction,
+        findMatch,
+        clearMatchFound,
         disconnect,
       }}
     >

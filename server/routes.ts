@@ -36,8 +36,15 @@ export async function registerRoutes(
 
     const result = findMatch(game, asset as MatchAsset, amount, playerId);
     
-    if (result.status === "matched") {
-      res.json({ status: "matched", matchId: result.matchId });
+    if (result.status === "matched" && result.match) {
+      res.json({ 
+        status: "matched", 
+        matchId: result.matchId,
+        game: result.match.game,
+        asset: result.match.asset,
+        amount: result.match.amount,
+        players: result.match.players
+      });
     } else {
       res.json({ status: "waiting" });
     }
