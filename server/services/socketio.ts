@@ -148,6 +148,7 @@ function recalculateMatchStatus(match: MatchState): void {
         escrowEngine.lock(match.id, match.asset as Asset, match.amount, playerIds);
         match.escrowLocked = true;
       }
+      emitGameState(match.id);
     }
   } else if (totalPlayers >= 2 && connectedPlayers.length < 2) {
     if (match.status === "active") {
