@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Chessboard } from "react-chessboard";
-import { useSocket } from "@/context/SocketContext";
+import { useSocket } from "@/context/useSocket";
 
 interface ChessState {
   fen: string;

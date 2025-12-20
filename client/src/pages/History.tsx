@@ -1,4 +1,4 @@
-import { useGame } from "@/context/GameContext";
+import { useGame } from "@/context/useGame";
 import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
 import { Trophy, XCircle, Handshake } from "lucide-react";

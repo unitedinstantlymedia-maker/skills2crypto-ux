@@ -1,4 +1,4 @@
-import { useGame } from "@/context/GameContext";
+import { useGame } from "@/context/useGame";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";

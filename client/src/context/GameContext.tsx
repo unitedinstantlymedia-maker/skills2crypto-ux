@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Asset, 
   Game, 
@@ -10,31 +10,8 @@ import { walletAdapter } from '@/core/wallet/WalletAdapter';
 import { walletStore } from '@/core/wallet/WalletStore';
 import { mockEscrowAdapter } from '@/core/escrow/MockEscrowAdapter';
 import { historyStore } from '@/core/history/HistoryStore';
-import { useSocket } from './SocketContext';
-
-interface GameContextValue {
-  state: {
-    selectedGame: Game | null;
-    selectedAsset: Asset;
-    stakeAmount: number;
-    wallet: WalletState;
-    currentMatch: Match | null;
-    history: HistoryEntry[];
-    isFinding: boolean;
-  };
-  actions: {
-    connectWallet: () => Promise<void>;
-    selectGame: (game: Game) => void;
-    selectAsset: (asset: Asset) => void;
-    setStake: (amount: number) => void;
-    startSearch: () => Promise<void>;
-    cancelSearch: () => void;
-    finishMatch: (result: 'win' | 'loss' | 'draw') => Promise<void>;
-  };
-  dispatch: React.Dispatch<any>; // Deprecated
-}
-
-const GameContext = createContext<GameContextValue | undefined>(undefined);
+import { useSocket } from './useSocket';
+import { GameContext, GameContextValue } from './useGame';
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const { matchFound, findMatch: socketFindMatch, clearMatchFound, joinMatch } = useSocket();
@@ -50,26 +27,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [history, setHistory] = useState(historyStore.getHistory());
   const [isFinding, setIsFinding] = useState(false);
 
-  // Persist selectedGame
   useEffect(() => {
     if (selectedGame) {
       localStorage.setItem('skills2crypto_selected_game', selectedGame);
     }
   }, [selectedGame]);
 
-  // Subscribe to wallet changes
   useEffect(() => {
     return walletStore.subscribe((newState) => {
       setWalletState(newState);
     });
   }, []);
 
-  // Listen for matchFound from socket and set currentMatch
   useEffect(() => {
     if (matchFound && isFinding && walletState.address) {
       console.log("[GameContext] matchFound received from socket:", matchFound);
       
-      // SECURITY: Only accept match if current wallet is a participant
       const isParticipant = matchFound.players.includes(walletState.address);
       if (!isParticipant && matchFound.players.length > 0) {
         console.warn("[GameContext] Ignoring match_found - wallet not a participant:", walletState.address, matchFound.players);
@@ -90,10 +63,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setCurrentMatch(match);
       clearMatchFound();
       
-      // Join the socket room for real-time game updates
       joinMatch(matchFound.matchId, walletState.address);
       
-      // Lock funds now that match is active
       mockEscrowAdapter.lockFunds(match.id, match.asset, match.stake).then(success => {
         if (!success) {
           console.error("Failed to lock funds, aborting match");
@@ -114,7 +85,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 1. Check Balance via Adapter
     const networkFee = mockEscrowAdapter.getEstimatedNetworkFee(selectedAsset);
     const required = stakeAmount + networkFee;
     
@@ -127,16 +97,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setIsFinding(true);
     console.log("[GameContext] Set isFinding = true");
     
-    // Clear any existing stale match in context before starting search
     setCurrentMatch(null);
 
-    // Call server API to find/join matchmaking queue
     console.log(`[GameContext] Calling server find-match API: ${selectedGame} ${selectedAsset} ${stakeAmount}`);
     socketFindMatch(selectedGame, selectedAsset, stakeAmount, walletState.address);
   };
 
   const cancelSearch = () => {
-    // TODO: Add server-side cancel endpoint
     setIsFinding(false);
     clearMatchFound();
   };
@@ -144,7 +111,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const finishMatch = async (result: 'win' | 'loss' | 'draw') => {
     if (!currentMatch) return;
 
-    // Settle
     const { payout, fee } = await mockEscrowAdapter.settleMatch(
       currentMatch.id, 
       currentMatch.asset, 
@@ -152,7 +118,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       result
     );
 
-    // Record History with EXPLICIT number conversion to prevent any string/stale data issues
     const safeStake = Number(currentMatch.stake);
     const safePayout = Number(payout);
     const safeFee = Number(fee);
@@ -175,7 +140,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     historyStore.addEntry(entry);
     setHistory(historyStore.getHistory());
     
-    // Update match status locally to finished
     setCurrentMatch({
       ...currentMatch,
       status: 'finished',
@@ -215,12 +179,4 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       {children}
     </GameContext.Provider>
   );
-}
-
-export function useGame() {
-  const context = useContext(GameContext);
-  if (context === undefined) {
-    throw new Error('useGame must be used within a GameProvider');
-  }
-  return context;
 }

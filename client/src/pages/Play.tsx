@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 
-import { useGame } from "@/context/GameContext";
-import { useSocket, MatchStatus } from "@/context/SocketContext";
+import { useGame } from "@/context/useGame";
+import { useSocket } from "@/context/useSocket";
 import { GameRenderer } from "@/components/games/GameRenderer";
+
+type MatchStatus = 'waiting' | 'active' | 'paused' | 'finished';
 
 export default function Play() {
   const { state, actions } = useGame();

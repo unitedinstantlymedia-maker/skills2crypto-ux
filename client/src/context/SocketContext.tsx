@@ -1,73 +1,14 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { GameAction } from '@shared/protocol';
-
-export type MatchStatus = 'waiting' | 'active' | 'paused' | 'finished';
-
-interface PlayerState {
-  connected: boolean;
-}
-
-interface MatchState {
-  matchId: string;
-  status: MatchStatus;
-  players: Record<string, PlayerState>;
-  gameState?: Record<string, unknown>;
-}
-
-interface MatchResult {
-  status: "finished";
-  reason: string;
-  winner?: string;
-  draw?: boolean;
-}
-
-interface EscrowPayout {
-  playerId: string;
-  amount: number;
-}
-
-interface EscrowResult {
-  payouts: EscrowPayout[];
-  fee: number;
-}
-
-interface GameState {
-  matchId: string;
-  game: string;
-  status: MatchStatus;
-  gameState: Record<string, unknown>;
-  result?: MatchResult;
-}
-
-interface MatchFoundData {
-  matchId: string;
-  game: string;
-  asset: string;
-  amount: number;
-  players: string[];
-}
-
-interface SocketContextValue {
-  socket: Socket | null;
-  isConnected: boolean;
-  matchState: MatchState | null;
-  gameState: GameState | null;
-  matchResult: MatchResult | null;
-  escrowResult: EscrowResult | null;
-  matchFound: MatchFoundData | null;
-  actionRejected: string | null;
-  isWaitingForServer: boolean;
-  isMatchFinished: boolean;
-  joinMatch: (matchId: string, playerId: string) => void;
-  leaveMatch: (matchId: string, playerId: string) => void;
-  sendGameAction: (action: GameAction) => void;
-  findMatch: (game: string, asset: string, amount: number, playerId: string) => void;
-  clearMatchFound: () => void;
-  disconnect: () => void;
-}
-
-const SocketContext = createContext<SocketContextValue | undefined>(undefined);
+import { 
+  SocketContext, 
+  MatchState, 
+  MatchResult, 
+  EscrowResult, 
+  GameState, 
+  MatchFoundData 
+} from './useSocket';
 
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -110,12 +51,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('match_state', (data: MatchState) => {
-  console.log('[Socket] match_state received:', data);
-  if (data.status !== 'active') {
-    data.status = 'active';
-  }
-  setMatchState(data);
-});
+      console.log('[Socket] match_state received:', data);
+      if (data.status !== 'active') {
+        data.status = 'active';
+      }
+      setMatchState(data);
+    });
 
     newSocket.on('game_state', (data: GameState) => {
       console.log('[Socket] game_state received:', data);
@@ -214,7 +155,6 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
           players: result.players || [],
         });
       }
-      // If status is "waiting", the socket will receive match_found when opponent joins
     } catch (error) {
       console.error('[Socket] find-match error:', error);
     }
@@ -265,12 +205,4 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       {children}
     </SocketContext.Provider>
   );
-}
-
-export function useSocket() {
-  const context = useContext(SocketContext);
-  if (context === undefined) {
-    throw new Error('useSocket must be used within a SocketProvider');
-  }
-  return context;
 }

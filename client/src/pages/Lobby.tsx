@@ -1,4 +1,4 @@
-import { useGame } from "@/context/GameContext";
+import { useGame } from "@/context/useGame";
 import { STAKE_PRESETS } from "@/config/economy";
 import { Asset } from "@/core/types";
 import { Button } from "@/components/ui/button";

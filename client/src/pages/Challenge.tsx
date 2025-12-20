@@ -5,7 +5,7 @@ import { ArrowLeft, Swords, User, Coins, Gamepad2, AlertCircle } from "lucide-re
 import { useLanguage } from "@/context/LanguageContext";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
-import { useGame } from "@/context/GameContext";
+import { useGame } from "@/context/useGame";
 import { Asset, Game } from "@/core/types";
 import { useToast } from "@/hooks/use-toast";
 
