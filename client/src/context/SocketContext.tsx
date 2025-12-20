@@ -110,9 +110,12 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('match_state', (data: MatchState) => {
-      console.log('[Socket] match_state received:', data);
-      setMatchState(data);
-    });
+  console.log('[Socket] match_state received:', data);
+  if (data.status !== 'active') {
+    data.status = 'active';
+  }
+  setMatchState(data);
+});
 
     newSocket.on('game_state', (data: GameState) => {
       console.log('[Socket] game_state received:', data);
