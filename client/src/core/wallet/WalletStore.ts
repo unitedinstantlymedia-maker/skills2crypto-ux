@@ -17,8 +17,8 @@ export class WalletStore {
   private static instance: WalletStore;
 
   private constructor() {
-    // Restore from localStorage if available (simulate persistence)
-    const stored = localStorage.getItem('wallet_state');
+    // Use sessionStorage for per-tab isolation (allows testing 1v1 in separate tabs)
+    const stored = sessionStorage.getItem('wallet_state');
     if (stored) {
       this.state = JSON.parse(stored);
     }
@@ -42,7 +42,7 @@ export class WalletStore {
   }
 
   private notify() {
-    localStorage.setItem('wallet_state', JSON.stringify(this.state));
+    sessionStorage.setItem('wallet_state', JSON.stringify(this.state));
     this.listeners.forEach(l => l(this.state));
   }
 
@@ -51,7 +51,7 @@ export class WalletStore {
     
     if (!this.state.connected) {
       // Try to recover address from storage or generate new
-      const stored = localStorage.getItem('wallet_state');
+      const stored = sessionStorage.getItem('wallet_state');
       let address = '0x' + Math.random().toString(36).substring(2, 10).toUpperCase();
       if (stored) {
          const parsed = JSON.parse(stored);
