@@ -294,7 +294,7 @@ function emitGameState(matchId: string): void {
     result: match.result,
   };
 
-  log(`Emitting game_state for ${matchId}`, "socket.io");
+  log(`[DEBUG] Emitting game_state for ${matchId}: ${JSON.stringify(payload)}`, "socket.io");
   io.to(matchId).emit("game_state", payload);
 }
 
@@ -331,7 +331,7 @@ export function initializeMatch(
 
   const adapter = getAdapter(game);
   const initialGameState = adapter ? adapter.initState() : {};
-
+log(`[DEBUG] initialGameState for match ${matchId}: ${JSON.stringify(initialGameState)}`, "socket.io");
   const match: MatchState = {
     id: matchId,
     game,
