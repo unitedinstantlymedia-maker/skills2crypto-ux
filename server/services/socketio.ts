@@ -94,6 +94,8 @@ function handleJoinMatch(socket: Socket, data: { matchId: string; playerId: stri
     return;
   }
 
+  log(`[TRACE] Before join: Match ${matchId} status=${match.status}, players connected: ${Object.values(match.players).filter((p) => p.connected).length}`, "socket.io");
+
   match.players[playerId].socketId = socket.id;
   match.players[playerId].connected = true;
 
@@ -102,7 +104,12 @@ function handleJoinMatch(socket: Socket, data: { matchId: string; playerId: stri
 
   log(`Player ${playerId} joined match ${matchId}`, "socket.io");
 
+  const connectedBefore = Object.values(match.players).filter((p) => p.connected).length;
   recalculateMatchStatus(match);
+  const connectedAfter = Object.values(match.players).filter((p) => p.connected).length;
+  
+  log(`[TRACE] After recalculate: Match ${matchId} status=${match.status}, connected players: ${connectedAfter}`, "socket.io");
+  
   // Emit both events to ensure clients see the updated status
   emitMatchState(matchId);
   emitGameState(matchId);
@@ -281,7 +288,7 @@ function emitMatchState(matchId: string): void {
     gameState: match.gameState,
   };
 
-  log(`Emitting match_state for ${matchId}: status=${match.status}`, "socket.io");
+  log(`[EMIT] match_state for ${matchId}: ${JSON.stringify(payload)}`, "socket.io");
   io.to(matchId).emit("match_state", payload);
 }
 
@@ -297,7 +304,7 @@ function emitGameState(matchId: string): void {
     result: match.result,
   };
 
-  log(`[DEBUG] Emitting game_state for ${matchId}: ${JSON.stringify(payload)}`, "socket.io");
+  log(`[EMIT] game_state for ${matchId}: status=${payload.status}, ${JSON.stringify(payload)}`, "socket.io");
   io.to(matchId).emit("game_state", payload);
 }
 

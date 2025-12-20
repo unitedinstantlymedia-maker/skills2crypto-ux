@@ -51,15 +51,20 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     newSocket.on('match_state', (data: MatchState) => {
-      console.log('[Socket] match_state received:', data);
+      console.log('[Socket] match_state received:', JSON.stringify(data));
+      console.log('[Socket] match_state.status:', data.status);
+      console.log('[Socket] match_state.players:', JSON.stringify(data.players));
       setMatchState(data);
+      console.log('[Socket] setMatchState called with:', data);
     });
 
     newSocket.on('game_state', (data: GameState) => {
-      console.log('[Socket] game_state received:', data);
+      console.log('[Socket] game_state received:', JSON.stringify(data));
+      console.log('[Socket] game_state.status:', data.status);
       setGameState(data);
       setIsWaitingForServer(false);
       setActionRejected(null);
+      console.log('[Socket] setGameState called with status:', data.status);
       if (data.result?.status === "finished") {
         setMatchResult(data.result);
         setIsMatchFinished(true);
@@ -102,7 +107,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     const sock = connect();
     if (sock) {
       console.log(`[Socket] Joining match ${matchId} as ${playerId}`);
+      console.log(`[Socket] Socket ID: ${sock.id}, Connected: ${sock.connected}`);
       sock.emit('join_match', { matchId, playerId });
+      console.log(`[Socket] join_match emit sent`);
     }
   }, [connect]);
 
