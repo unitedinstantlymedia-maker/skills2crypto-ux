@@ -4,7 +4,6 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import { GameProvider } from "@/context/GameContext";
 import { LanguageProvider } from "@/context/LanguageContext";
-import { SocketProvider } from "@/context/SocketContext";
 import { Layout } from "@/components/layout/Layout";
 
 import Landing from "@/pages/Landing";
@@ -41,12 +40,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
-        <SocketProvider>
-          <GameProvider>
-            <Router />
-            <Toaster />
-          </GameProvider>
-        </SocketProvider>
+        <GameProvider>
+          <Router />
+          <Toaster />
+        </GameProvider>
       </LanguageProvider>
     </QueryClientProvider>
   );

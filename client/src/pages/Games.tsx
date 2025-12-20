@@ -1,4 +1,4 @@
-import { useGame } from "@/context/useGame";
+import { useGame } from "@/context/GameContext";
 import { GameType } from "@/lib/types";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";

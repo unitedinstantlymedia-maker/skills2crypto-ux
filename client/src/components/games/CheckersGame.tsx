@@ -1,20 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
 
-interface CheckersGameProps {
-  matchId: string;
-  playerId: string;
-  onFinish: (result: "win" | "loss" | "draw") => void;
-}
-
-export function CheckersGame({ matchId, playerId, onFinish }: CheckersGameProps) {
+export function CheckersGame({ onFinish }: { onFinish: (result: 'win' | 'loss') => void }) {
   const { t } = useLanguage();
 
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-8">
-      <h2 className="text-2xl font-bold text-primary">CHECKERS</h2>
-
-      <div className="w-full aspect-square max-w-xs bg-black/40 border-2 border-white/10 rounded-lg grid grid-cols-8 grid-rows-8 relative overflow-hidden">
+      <div className="w-full aspect-square bg-black/40 border-2 border-white/10 rounded-lg grid grid-cols-8 grid-rows-8 relative overflow-hidden">
+         {/* Checkered background */}
          {Array.from({ length: 64 }).map((_, i) => {
           const x = i % 8;
           const y = Math.floor(i / 8);
@@ -30,35 +23,15 @@ export function CheckersGame({ matchId, playerId, onFinish }: CheckersGameProps)
           );
         })}
       </div>
-
-      <div className="text-center text-muted-foreground text-sm">
-        {t('Mock Checkers - Click buttons to end game', 'Mock Checkers - Click buttons to end game')}
-      </div>
       
-      <div className="grid grid-cols-3 gap-4 w-full max-w-md">
-        <Button 
-          onClick={() => onFinish('win')} 
-          className="bg-primary text-primary-foreground hover:bg-primary/90 font-display uppercase tracking-widest"
-        >
-          WIN
+      <div className="grid grid-cols-2 gap-4 w-full">
+        <Button onClick={() => onFinish('win')} className="bg-primary text-primary-foreground hover:bg-primary/90 font-display uppercase tracking-widest">
+          {t('Claim Win (Dev)', 'Claim Win (Dev)')}
         </Button>
-        <Button 
-          onClick={() => onFinish('draw')} 
-          variant="outline"
-          className="font-display uppercase tracking-widest"
-        >
-          DRAW
-        </Button>
-        <Button 
-          onClick={() => onFinish('loss')} 
-          variant="destructive" 
-          className="font-display uppercase tracking-widest"
-        >
-          LOSE
+        <Button onClick={() => onFinish('loss')} variant="destructive" className="font-display uppercase tracking-widest">
+          {t('Resign (Dev)', 'Resign (Dev)')}
         </Button>
       </div>
     </div>
   );
 }
-
-export default CheckersGame;
