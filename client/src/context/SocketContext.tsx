@@ -94,7 +94,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return socketRef.current;
 
-    const newSocket = io({
+    const newSocket = io("https://skills2crypto-yarkoroman86.replit.app",{
       transports: ['websocket', 'polling'],
       autoConnect: true,
     });
