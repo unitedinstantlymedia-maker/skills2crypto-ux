@@ -103,7 +103,9 @@ function handleJoinMatch(socket: Socket, data: { matchId: string; playerId: stri
   log(`Player ${playerId} joined match ${matchId}`, "socket.io");
 
   recalculateMatchStatus(match);
+  // Emit both events to ensure clients see the updated status
   emitMatchState(matchId);
+  emitGameState(matchId);
 }
 
 function handleLeaveMatch(socket: Socket, data: { matchId: string; playerId: string }): void {
@@ -134,6 +136,8 @@ function recalculateMatchStatus(match: MatchState): void {
   const connectedPlayers = Object.values(match.players).filter((p) => p.connected);
   const totalPlayers = Object.keys(match.players).length;
 
+  log(`[DEBUG] recalculateMatchStatus: ${match.id} - connected: ${connectedPlayers.length}/${totalPlayers}, status: ${match.status}`, "socket.io");
+
   if (match.status === "finished") {
     return;
   }
@@ -141,21 +145,20 @@ function recalculateMatchStatus(match: MatchState): void {
   if (connectedPlayers.length >= 2) {
     if (match.status !== "active") {
       match.status = "active";
-      log(`Match ${match.id} is now active`, "socket.io");
+      log(`Match ${match.id} is now active (2+ players connected)`, "socket.io");
       
       if (!match.escrowLocked) {
         const playerIds = Object.keys(match.players);
         escrowEngine.lock(match.id, match.asset as Asset, match.amount, playerIds);
         match.escrowLocked = true;
       }
-      emitGameState(match.id);
     }
   } else if (totalPlayers >= 2 && connectedPlayers.length < 2) {
     if (match.status === "active") {
       match.status = "paused";
       log(`Match ${match.id} paused - player disconnected`, "socket.io");
     }
-  } else {
+  } else if (connectedPlayers.length < 2) {
     match.status = "waiting";
   }
 }
