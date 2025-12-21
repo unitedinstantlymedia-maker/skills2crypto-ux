@@ -32,25 +32,35 @@ export class MockEscrowAdapter {
     // Ensure stake is treated as number
     const safeStake = Number(stake);
     const pot = safeStake * 2;
-    let fee = pot * FEE_RATE;
+    const blockchainFeePerPlayer = this.getEstimatedNetworkFee(asset);
+    const totalBlockchainFee = blockchainFeePerPlayer * 2;
+    const totalPlatformFee = pot * FEE_RATE;
+    
     let payout = 0;
+    let fee = 0;
 
     console.log(`[Escrow] Settling match ${matchId} for stake: ${safeStake} (${asset})`);
+    console.log(`[Escrow] Calculation: Pot = ${pot}, Platform Fee = ${totalPlatformFee}, Blockchain Fee Total = ${totalBlockchainFee}`);
 
     if (result === 'win') {
-      console.log(`[Escrow] Calculation: Pot = ${pot}, Fee Rate = ${FEE_RATE}, Fee = ${fee}`);
-      payout = pot - fee;
-      // Credit payout to wallet
+      // Winner: pot - all platform fees - all blockchain fees
+      payout = pot - totalPlatformFee - totalBlockchainFee;
+      fee = totalPlatformFee + totalBlockchainFee;
+      console.log(`[Escrow] Win: Payout = ${payout}, Fee = ${fee}`);
       walletAdapter.credit(asset, payout);
     } else if (result === 'draw') {
-        // DRAW RULE: Full refund, no commission
-        fee = 0;
-        payout = safeStake; 
-        console.log(`[Escrow] Draw: Refund full stake ${payout}, Fee = ${fee}`);
-        walletAdapter.credit(asset, payout);
+      // Draw: each player gets stake - (platform fee / 2) - (blockchain fee / 2)
+      const feePodPerUser = totalPlatformFee / 2;
+      const blockchainFeePerUser = totalBlockchainFee / 2;
+      payout = safeStake - feePodPerUser - blockchainFeePerUser;
+      fee = feePodPerUser + blockchainFeePerUser;
+      console.log(`[Escrow] Draw: Payout = ${payout}, Fee = ${fee} (Platform = ${feePodPerUser}, Blockchain = ${blockchainFeePerUser})`);
+      walletAdapter.credit(asset, payout);
     } else {
-        // Loss
-        console.log(`[Escrow] Loss: Payout 0`);
+      // Loss: loser gets nothing
+      payout = 0;
+      fee = 0;
+      console.log(`[Escrow] Loss: Payout = 0, Fee = 0`);
     }
     
     console.log(`[Escrow] Settled match ${matchId}: Result ${result}, Payout ${payout}, Fee ${fee}`);
