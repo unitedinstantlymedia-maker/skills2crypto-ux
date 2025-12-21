@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { ChessGame } from "@/components/games/ChessGame";
 import { TetrisGame } from "@/components/games/TetrisGame";
 import { CheckersGame } from "@/components/games/CheckersGame";
+import { WaitingRoom } from "@/components/games/WaitingRoom";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/context/LanguageContext";
@@ -24,6 +25,15 @@ export default function Play() {
   };
 
   if (!state.selectedGame) return null;
+
+  // Check if both players are present
+  const playerCount = state.currentMatch?.players.filter(p => p).length || 0;
+  const hasBothPlayers = playerCount === 2;
+
+  // If not both players, show waiting room
+  if (!hasBothPlayers) {
+    return <WaitingRoom />;
+  }
 
   return (
     <div className="h-full flex flex-col">
