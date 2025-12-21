@@ -47,12 +47,12 @@ export default function Play() {
         </div>
       </div>
 
-      <div className="flex-1 relative">
+      <div className="flex-1 flex flex-col items-center justify-center">
         {state.selectedGame === 'Chess' && <ChessGame onFinish={handleFinish} />}
         {state.selectedGame === 'Tetris' && <TetrisGame onFinish={handleFinish} />}
         {state.selectedGame === 'Checkers' && <CheckersGame onFinish={handleFinish} />}
         {state.selectedGame === 'Battleship' && (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-4 animate-in fade-in duration-500">
+          <div className="flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-500">
              <div className="w-24 h-24 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
                <span className="text-4xl">🚢</span>
              </div>
@@ -60,34 +60,27 @@ export default function Play() {
              <p className="text-muted-foreground font-mono">Game interface coming soon!</p>
           </div>
         )}
-        
-        {/* Prototype Controls Overlay - always visible for testing */}
-        <div className="absolute bottom-4 right-4 flex gap-2 bg-black/80 p-2 rounded-lg border border-white/10 backdrop-blur">
-          <Button 
-            size="sm" 
-            variant="default" 
-            className="bg-green-600 hover:bg-green-700 text-white h-8 px-3"
-            onClick={() => handleFinish('win')}
-          >
-            {t('Victory', 'Victory')}
-          </Button>
-          <Button 
-            size="sm" 
-            variant="outline" 
-            className="bg-yellow-500/80 hover:bg-yellow-600 text-white h-8 px-3 border-none"
-            onClick={() => handleFinish('draw')}
-          >
-            {t('Draw', 'Draw')}
-          </Button>
-          <Button 
-            size="sm" 
-            variant="destructive" 
-            className="h-8 px-3"
-            onClick={() => handleFinish('loss')}
-          >
-            {t('Defeat', 'Defeat')}
-          </Button>
-        </div>
+      </div>
+
+      <div className="flex justify-center gap-2 mb-4">
+        <Button 
+          onClick={() => handleFinish('win')}
+          className="bg-green-600 hover:bg-green-700 text-white"
+        >
+          {t('Victory', 'Victory')}
+        </Button>
+        <Button 
+          onClick={() => handleFinish('draw')}
+          className="bg-yellow-500 hover:bg-yellow-600 text-white"
+        >
+          {t('Draw', 'Draw')}
+        </Button>
+        <Button 
+          variant="destructive"
+          onClick={() => handleFinish('loss')}
+        >
+          {t('Defeat', 'Defeat')}
+        </Button>
       </div>
     </div>
   );
