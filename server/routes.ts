@@ -1,16 +1,38 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import type { Server } from "http";
+import type { Server as SocketIOServer } from "socket.io";
+import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
+  io: SocketIOServer
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  app.post("/api/find-match", async (req, res) => {
+    const { game, asset, stake, socketId } = req.body;
+
+    if (!game || !asset || !stake || !socketId) {
+      return res.status(400).json({ error: "missing params" });
+    }
+
+    const result = await findOrCreateMatch({
+      game,
+      asset,
+      stake,
+      socketId,
+    });
+
+    if (result.status === "matched" && result.players) {
+      (result.players as string[]).forEach((sid: string) => {
+        io.to(sid).emit("match-found", {
+          matchId: result.matchId,
+        });
+      });
+    }
+
+    res.json(result);
+  });
 
   return httpServer;
 }
