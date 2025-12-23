@@ -1,0 +1,89 @@
+PROJECT: Monorepo server+client (Vite/React, TS, Socket.IO, Redis)
+
+TASK:
+
+Full audit + build. 2) Report mismatches/bugs. 3) Auto-fix obvious issues only (no new features).
+
+DO:
+
+Install deps and build:
+
+Run npm i in root (and in client/server if separate).
+
+Typecheck: npm run typecheck or tsc -b.
+
+Build: npm run build in client and server (if any).
+
+Unify and fix code (edit files directly):
+
+Client alias @ → client/src.
+Replace any @/client/src/... → @/....
+Ensure:
+
+client/tsconfig.json:
+
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["../shared/*"],
+      "@assets/*": ["../attached_assets/*"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": ["src","../shared"]
+}
+
+
+client/vite.config.ts aliases:
+@=src, @shared=../shared, @assets=../attached_assets.
+
+Single API helper: keep only client/src/lib/api.ts.
+Remove duplicates (e.g. client/lib/api.ts). All imports → @/lib/api.
+
+Game type unified (lowercase): 'chess'|'tetris'|'checkers'|'battleship' everywhere (client & server).
+
+In Games.tsx card ids must be lowercase.
+
+In Play.tsx compare against lowercase.
+
+Remove any as any around game selection.
+
+Socket.IO path unified: client default path /socket.io.
+
+server/socket.ts: path: "/socket.io", transports: ["websocket"].
+
+Client: don’t set /ws; use default.
+
+Matchmaking route: server/routes.ts calls findOrCreateMatch.
+
+ESM import of types consistent (with or without .js per config).
+
+findOrCreateMatch uses proper Redis zpopmin handling and writes match:<id> with TTL (use latest working version).
+
+Server bootstrap clean: server/index.ts must have exactly one setupSocket(httpServer) and one registerRoutes(httpServer, app, io).
+Remove duplicate PORT/NODE_ENV/setupVite blocks.
+
+Game components: Chess/Checkers/Tetris/Battleship must have no DEV buttons inside.
+Only keep onFinish(result) prop. The three result buttons (Victory/Draw/Defeat) live only in Play.tsx below the board.
+
+Vite plugin export fix: client/vite-plugin-meta-images.ts must export both named and default:
+export function metaImagesPlugin(...) { ... } and export default metaImagesPlugin;
+In vite.config.ts: import { metaImagesPlugin } from "./vite-plugin-meta-images";
+
+Do not add new features. Only fixes/refactors to make build and runtime consistent.
+
+OUTPUT (MARKDOWN REPORT):
+
+Summary (one line).
+
+Build status: client/server (success or errors).
+
+Fixed items list (file → what changed).
+
+Remaining errors/warnings with file:line and message.
+
+Minimal To-Do list for me (only what you couldn’t auto-fix).
+
+If something can’t be auto-fixed, include a minimal patch (diff) inline in the report.

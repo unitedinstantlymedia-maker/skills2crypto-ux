@@ -66,7 +66,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // создаём/храним одно подключение
   useEffect(() => {
-    const s = io('/', { path: '/ws', transports: ['websocket'] });
+    const s = io('/', { transports: ['websocket'] });
     socketRef.current = s;
 
     s.on('connect', () => {

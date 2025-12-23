@@ -3,7 +3,7 @@ import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
 
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
-import type { Game, Asset } from "./core/types.js";
+import type { Game, Asset } from "./server/core/types";
 
 const GAMES: readonly Game[] = ["chess", "tetris", "checkers", "battleship"] as const;
 const ASSETS: readonly Asset[] = ["USDT", "ETH", "TON"] as const;

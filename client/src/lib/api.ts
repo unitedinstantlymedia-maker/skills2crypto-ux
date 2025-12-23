@@ -14,7 +14,7 @@ export type FindMatchResponse =
 
 // If frontend and backend are on the same domain/port in dev, keep empty.
 // If you proxy API elsewhere, set VITE_API_BASE in .env
-const BASE = (import.meta as any).env?.VITE_API_BASE ?? '';
+const BASE = import.meta.env?.VITE_API_BASE ?? '';
 
 // --- Single call used by the Lobby/Play screens ---
 export async function findMatch(
