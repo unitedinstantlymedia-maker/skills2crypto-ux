@@ -8,18 +8,29 @@ import { setupSocket } from "./socket";
 
 const PORT = Number(process.env.PORT ?? 5000);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
+const isProd = NODE_ENV === "production";
+
+// Parse allowed origins from env
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
 
 // =======================
 // APP SETUP
 // =======================
 const app = express();
 const httpServer = http.createServer(app);
-const io = setupSocket(httpServer); // /ws path внутри setupSocket
+const io = setupSocket(httpServer, { isProd, allowedOrigins });
 
 // =======================
 // MIDDLEWARE
 // =======================
-app.use(cors());
+app.use(cors({
+  origin: isProd ? allowedOrigins : true,
+  credentials: true,
+  methods: ["GET", "POST", "OPTIONS"]
+}));
 app.use(express.json());
 
 // =======================
