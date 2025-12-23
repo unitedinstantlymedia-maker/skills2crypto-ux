@@ -8,6 +8,7 @@ import { ChessGame } from "@/components/games/ChessGame";
 import { TetrisGame } from "@/components/games/TetrisGame";
 import { CheckersGame } from "@/components/games/CheckersGame";
 import { WaitingRoom } from "@/components/games/WaitingRoom";
+import { ErrorBoundary } from "@/components/system/ErrorBoundary";
 
 // ВАЖНО: selectedGame = 'chess' | 'tetris' | 'checkers' | 'battleship'
 export default function Play() {
@@ -81,7 +82,18 @@ export default function Play() {
 
       {/* игровое поле */}
       <div className="flex-1 flex items-center justify-center">
-        {ActiveGame && <ActiveGame />}
+        <ErrorBoundary
+          fallback={
+            <div className="p-4 text-center text-sm text-red-300 bg-red-900/20 rounded-lg">
+              Game crashed.{" "}
+              <button className="underline" onClick={() => location.reload()}>
+                Reload
+              </button>
+            </div>
+          }
+        >
+          {ActiveGame && <ActiveGame />}
+        </ErrorBoundary>
       </div>
 
       {/* КНОПКИ РЕЗУЛЬТАТА — ОТДЕЛЬНЫМ БЛОКОМ НИЖЕ КВАДРАТА И ВЫШЕ НАВИГАЦИИ */}
