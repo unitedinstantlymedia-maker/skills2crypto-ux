@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
@@ -66,11 +66,37 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // создаём/храним одно подключение
   useEffect(() => {
-    const s = io('/', { transports: ['websocket'] });
+    const s = io('/', {
+      path: '/socket.io',
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 8,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 4000,
+      timeout: 10000,
+      autoConnect: true,
+      withCredentials: true
+    });
     socketRef.current = s;
 
     s.on('connect', () => {
       console.log('[socket] connected', s.id);
+    });
+
+    s.on('connect_error', (err) => {
+      console.warn('[socket] connect_error', err?.message);
+    });
+
+    s.on('reconnect_attempt', (n) => {
+      console.log('[socket] reconnect_attempt', n);
+    });
+
+    s.on('reconnect', (n) => {
+      console.log('[socket] reconnected', n);
+    });
+
+    s.on('reconnect_failed', () => {
+      console.error('[socket] reconnect_failed');
     });
 
     // прилетел матч для нас
@@ -94,8 +120,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         .catch((e) => console.error('lockFunds failed', e));
     });
 
-    s.on('disconnect', () => {
-      console.log('[socket] disconnected');
+    s.on('disconnect', (reason) => {
+      console.log('[socket] disconnected', reason);
     });
 
     return () => {
