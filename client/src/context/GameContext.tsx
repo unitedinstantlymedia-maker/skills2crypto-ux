@@ -1,17 +1,28 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
-  Asset, 
-  Game, 
-  Match, 
-  WalletState,
-  getQueueKey,
-  HistoryEntry
-} from '@/core/types';
+import { io, Socket } from 'socket.io-client';
+
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
-import { walletStore } from '@/core/wallet/WalletStore'; // Need store for subscription
-import { matchmakingService } from '@/core/matchmaking/MatchmakingService';
+import { walletStore, type WalletState } from '@/core/wallet/WalletStore';
 import { mockEscrowAdapter } from '@/core/escrow/MockEscrowAdapter';
-import { historyStore } from '@/core/history/HistoryStore';
+import { historyStore, type HistoryEntry } from '@/core/history/HistoryStore';
+
+// типы и API-клиент
+import { findMatch } from '@/lib/api';
+import type { Game, Asset } from '@/lib/api';
+
+type MatchState =
+  | null
+  | {
+      id: string;
+      game: Game;
+      asset: Asset;
+      stake: number;
+      status: 'waiting' | 'active' | 'finished';
+      players?: string[];
+      result?: 'win' | 'loss' | 'draw';
+      payout?: number;
+      fee?: number;
+    };
 
 interface GameContextValue {
   state: {
@@ -19,173 +30,179 @@ interface GameContextValue {
     selectedAsset: Asset;
     stakeAmount: number;
     wallet: WalletState;
-    currentMatch: Match | null;
+    currentMatch: MatchState;
     history: HistoryEntry[];
     isFinding: boolean;
   };
   actions: {
     connectWallet: () => Promise<void>;
-    selectGame: (game: Game) => void;
-    selectAsset: (asset: Asset) => void;
-    setStake: (amount: number) => void;
+    selectGame: (g: Game) => void;
+    selectAsset: (a: Asset) => void;
+    setStake: (n: number) => void;
     startSearch: () => Promise<void>;
     cancelSearch: () => void;
-    finishMatch: (result: 'win' | 'loss' | 'draw') => Promise<void>;
+    finishMatch: (r: 'win' | 'loss' | 'draw') => Promise<void>;
   };
-  dispatch: React.Dispatch<any>; // Deprecated
+  dispatch: React.Dispatch<any>; // совместимость со старым кодом
 }
 
-const GameContext = createContext<GameContextValue | undefined>(undefined);
+const Ctx = createContext<GameContextValue | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
+  // ------- state
   const [walletState, setWalletState] = useState<WalletState>(walletStore.getState());
-  // Initialize from localStorage if available
   const [selectedGame, setSelectedGame] = useState<Game | null>(() => {
-    const stored = localStorage.getItem('skills2crypto_selected_game');
-    return stored ? (stored as Game) : null;
+    const s = localStorage.getItem('skills2crypto_selected_game');
+    return s ? (s as Game) : null;
   });
-  
   const [selectedAsset, setSelectedAsset] = useState<Asset>('USDT');
   const [stakeAmount, setStakeAmount] = useState<number>(20);
-  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
+  const [currentMatch, setCurrentMatch] = useState<MatchState>(null);
   const [history, setHistory] = useState(historyStore.getHistory());
   const [isFinding, setIsFinding] = useState(false);
 
-  // Persist selectedGame
+  // ------- socket
+  const socketRef = useRef<Socket | null>(null);
+
+  // создаём/храним одно подключение
   useEffect(() => {
-    if (selectedGame) {
-      localStorage.setItem('skills2crypto_selected_game', selectedGame);
-    }
+    const s = io('/', { path: '/ws', transports: ['websocket'] });
+    socketRef.current = s;
+
+    s.on('connect', () => {
+      console.log('[socket] connected', s.id);
+    });
+
+    // прилетел матч для нас
+    s.on('match-found', (payload: { matchId: string }) => {
+      if (!isFinding || !selectedGame) return;
+      console.log('[socket] match-found', payload);
+
+      setIsFinding(false);
+      // фиксируем активный матч
+      setCurrentMatch((prev) => ({
+        id: payload.matchId,
+        game: selectedGame,
+        asset: selectedAsset,
+        stake: stakeAmount,
+        status: 'active',
+      }));
+
+      // блокируем средства
+      void mockEscrowAdapter
+        .lockFunds(payload.matchId, selectedAsset, stakeAmount)
+        .catch((e) => console.error('lockFunds failed', e));
+    });
+
+    s.on('disconnect', () => {
+      console.log('[socket] disconnected');
+    });
+
+    return () => {
+      s.removeAllListeners();
+      s.close();
+      socketRef.current = null;
+    };
+  }, [isFinding, selectedGame, selectedAsset, stakeAmount]);
+
+  // ------- persistence
+  useEffect(() => {
+    if (selectedGame) localStorage.setItem('skills2crypto_selected_game', selectedGame);
   }, [selectedGame]);
 
-  // Subscribe to wallet changes
-  useEffect(() => {
-    return walletStore.subscribe((newState) => {
-      setWalletState(newState);
-    });
-  }, []);
-
-  // Poll for match updates if finding or active
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isFinding || (currentMatch && currentMatch.status === 'active')) {
-      interval = setInterval(() => {
-        if (walletState.address) {
-          if (isFinding) console.log("[GameContext] Polling for match...");
-          const match = matchmakingService.checkForMatch(walletState.address);
-          if (match) {
-            if (isFinding) {
-              // STRICT CHECK: Only accept match if stake equals current desired stake
-              // This prevents picking up stale matches from previous searches
-              if (match.stake !== stakeAmount) {
-                console.warn(`[GameContext] Ignored zombie match ${match.id} with wrong stake: ${match.stake}, expected: ${stakeAmount}`);
-                return;
-              }
-
-              // Just found it!
-              console.log("[GameContext] Polled match FOUND!", match);
-              setIsFinding(false);
-              setCurrentMatch(match);
-              // Lock funds now that we are active
-              mockEscrowAdapter.lockFunds(match.id, match.asset, match.stake).then(success => {
-                if (!success) {
-                   console.error("Failed to lock funds, aborting match");
-                   setCurrentMatch(null);
-                   // Handle error UI?
-                }
-              });
-            } else if (currentMatch && match.status !== currentMatch.status) {
-              // Update match state (e.g. finished by other player?)
-              setCurrentMatch(match);
-            }
-          }
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isFinding, currentMatch, walletState.address]);
+  // ------- wallet subscribe
+  useEffect(() => walletStore.subscribe(setWalletState), []);
 
   const connectWallet = async () => {
     await walletAdapter.connect();
   };
 
   const startSearch = async () => {
-    console.log("[GameContext] startSearch called");
-    if (!selectedGame || !walletState.address) {
-      console.warn("[GameContext] Missing game or address", { selectedGame, address: walletState.address });
+    if (!selectedGame) {
+      console.warn('[GameContext] game not selected');
+      return;
+    }
+    if (!walletState.address) {
+      console.warn('[GameContext] wallet not connected');
+      return;
+    }
+    const sock = socketRef.current;
+    if (!sock || !sock.id) {
+      console.warn('[GameContext] socket not ready');
       return;
     }
 
-    // 1. Check Balance via Adapter
-    const networkFee = mockEscrowAdapter.getEstimatedNetworkFee(selectedAsset);
-    const required = stakeAmount + networkFee;
-    
-    // Log balance check
-    console.log(`[GameContext] Checking balance for ${selectedAsset}. Required: ${required}, Have: ${walletState.balances[selectedAsset]}`);
-
+    // можно показать предупреждение о балансе, но не блокируем прототип
+    const netFee = mockEscrowAdapter.getEstimatedNetworkFee(selectedAsset);
+    const required = stakeAmount + netFee;
     if (!walletAdapter.canAfford(selectedAsset, required)) {
-      console.warn("[GameContext] Insufficient funds, proceeding anyway for prototype (or handled by UI warning)");
-      // We allow proceeding if UI allows it, but maybe walletAdapter.debit will fail later?
-      // For now, let's assume we proceed to Queue at least.
+      console.warn('[GameContext] low balance (allowed to proceed in prototype)');
     }
 
     setIsFinding(true);
-    console.log("[GameContext] Set isFinding = true");
-    
-    const params = {
+    setCurrentMatch({
+      id: 'pending',
       game: selectedGame,
       asset: selectedAsset,
-      stake: stakeAmount
-    };
+      stake: stakeAmount,
+      status: 'waiting',
+    });
 
-    // Clear any existing stale match in context before starting search
-    setCurrentMatch(null);
+    try {
+      const res = await findMatch({
+        game: selectedGame,
+        asset: selectedAsset,
+        stake: stakeAmount,
+        socketId: sock.id,
+      });
 
-    // 2. Try Match
-    console.log(`[GameContext] Calling tryMatch with params:`, JSON.stringify(params));
-    const match = matchmakingService.tryMatch(params, walletState.address);
-    
-    if (match) {
-      // Found immediately
-      console.log(`[GameContext] Match found immediately! ID: ${match.id}, Stake: ${match.stake}`);
+      if (res.status === 'matched') {
+        // мгновенно нашли — активируем
+        setIsFinding(false);
+        setCurrentMatch({
+          id: res.matchId,
+          game: selectedGame,
+          asset: selectedAsset,
+          stake: stakeAmount,
+          status: 'active',
+          players: res.players,
+        });
+
+        // присоединяемся к комнате и блокируем средства
+        sock.emit('join-match', res.matchId);
+        await mockEscrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
+      } else {
+        // waiting — ждём событие match-found
+        console.log('[GameContext] queued, waiting for match-found');
+      }
+    } catch (e) {
+      console.error('findMatch failed', e);
       setIsFinding(false);
-      setCurrentMatch(match);
-      // Lock funds
-      console.log(`[GameContext] Locking funds for match ${match.id}, Asset: ${match.asset}, Stake: ${match.stake}`);
-      await mockEscrowAdapter.lockFunds(match.id, match.asset, match.stake);
-    } else {
-      // Enqueue
-      console.log(`[GameContext] No match found, enqueuing with params:`, JSON.stringify(params));
-      matchmakingService.enqueue(params, walletState.address);
+      setCurrentMatch(null);
     }
   };
 
   const cancelSearch = () => {
-    if (!selectedGame || !walletState.address) return;
-    matchmakingService.cancel({
-      game: selectedGame,
-      asset: selectedAsset,
-      stake: stakeAmount
-    }, walletState.address);
     setIsFinding(false);
+    // на сервере явного cancel нет — достаточно убрать локальный флаг ожидания
+    if (currentMatch?.status === 'waiting') {
+      setCurrentMatch(null);
+    }
   };
 
   const finishMatch = async (result: 'win' | 'loss' | 'draw') => {
     if (!currentMatch) return;
 
-    // Settle
     const { payout, fee } = await mockEscrowAdapter.settleMatch(
-      currentMatch.id, 
-      currentMatch.asset, 
-      currentMatch.stake, 
+      currentMatch.id,
+      currentMatch.asset,
+      currentMatch.stake,
       result
     );
 
-    // Record History with EXPLICIT number conversion to prevent any string/stale data issues
     const safeStake = Number(currentMatch.stake);
     const safePayout = Number(payout);
     const safeFee = Number(fee);
-    const safePot = safeStake * 2;
 
     const entry: HistoryEntry = {
       id: currentMatch.id,
@@ -193,63 +210,53 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       asset: currentMatch.asset,
       stake: safeStake,
       result,
-      pot: safePot,
+      pot: safeStake * 2,
       fee: safeFee,
       payout: safePayout,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
-    
-    console.log("[GameContext] Adding History Entry:", JSON.stringify(entry));
-    
     historyStore.addEntry(entry);
     setHistory(historyStore.getHistory());
-    
-    // Update match status locally to finished
+
     setCurrentMatch({
       ...currentMatch,
       status: 'finished',
       result,
       payout: safePayout,
-      fee: safeFee
+      fee: safeFee,
     });
   };
 
-  const value: GameContextValue = {
-    state: {
-      selectedGame,
-      selectedAsset,
-      stakeAmount,
-      wallet: walletState,
-      currentMatch,
-      history,
-      isFinding
-    },
-    actions: {
-      connectWallet,
-      selectGame: setSelectedGame,
-      selectAsset: setSelectedAsset,
-      setStake: (amount: number) => {
-        console.log(`[GameContext] Setting stake to: ${amount}`);
-        setStakeAmount(amount);
+  const value = useMemo<GameContextValue>(
+    () => ({
+      state: {
+        selectedGame,
+        selectedAsset,
+        stakeAmount,
+        wallet: walletState,
+        currentMatch,
+        history,
+        isFinding,
       },
-      startSearch,
-      cancelSearch,
-      finishMatch
-    },
-    dispatch: () => {} 
-  };
-
-  return (
-    <GameContext.Provider value={value}>
-      {children}
-    </GameContext.Provider>
+      actions: {
+        connectWallet,
+        selectGame: setSelectedGame,
+        selectAsset: setSelectedAsset,
+        setStake: (n: number) => setStakeAmount(n),
+        startSearch,
+        cancelSearch,
+        finishMatch,
+      },
+      dispatch: () => {},
+    }),
+    [selectedGame, selectedAsset, stakeAmount, walletState, currentMatch, history, isFinding]
   );
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useGame() {
-  const context = useContext(GameContext);
-  if (context === undefined) {
-    throw new Error('useGame must be used within a GameProvider');
-  }
-  return context;
+  const ctx = useContext(Ctx);
+  if (!ctx) throw new Error('useGame must be used within GameProvider');
+  return ctx;
 }

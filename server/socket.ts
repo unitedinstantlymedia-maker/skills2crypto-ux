@@ -1,10 +1,11 @@
-import { Server } from "socket.io";
+import { Server as SocketIOServer } from "socket.io";
 import type { Server as HttpServer } from "http";
 
-export function setupSocket(httpServer: HttpServer) {
-  const io = new Server(httpServer, {
-    cors: { origin: "*" },
-    path: "/ws",
+export function setupSocket(httpServer: HttpServer): SocketIOServer {
+  const io = new SocketIOServer(httpServer, {
+    cors: { origin: "*" },           // сузишь на проде
+    path: "/socket.io",              // важно: совпадает с клиентом по умолчанию
+    transports: ["websocket"],       // быстрый канал
   });
 
   io.on("connection", (socket) => {
@@ -21,4 +22,5 @@ export function setupSocket(httpServer: HttpServer) {
   });
 
   return io;
+}
 }
