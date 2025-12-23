@@ -36,10 +36,19 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  // Load vite.config.ts from client directory for client build
-  const { execSync } = await import("child_process");
-  execSync("cd client && npm run build", { stdio: "inherit" });
-  execSync("mv client/dist dist/public", { stdio: "inherit" });
+  // Build client using vite with proper root directory
+  const cwd = process.cwd();
+  process.chdir("client");
+  try {
+    await viteBuild({
+      build: {
+        outDir: "../dist/public",
+        emptyOutDir: false
+      }
+    });
+  } finally {
+    process.chdir(cwd);
+  }
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
