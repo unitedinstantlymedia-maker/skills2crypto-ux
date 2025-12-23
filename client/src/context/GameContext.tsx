@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
