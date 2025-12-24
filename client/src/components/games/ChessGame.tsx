@@ -52,29 +52,37 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const makeMove = useCallback(
     (sourceSquare: string, targetSquare: string) => {
       try {
-        // Create a copy of the game to test the move
-        const gameCopy = new Chess(game.fen());
-        const move = gameCopy.move({
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: "q", // Always promote to queen for simplicity
+        // Use functional update to get the latest game state
+        let moveSuccessful = false;
+        let moveSan = "";
+        
+        setGame(prevGame => {
+          const gameCopy = new Chess(prevGame.fen());
+          const move = gameCopy.move({
+            from: sourceSquare,
+            to: targetSquare,
+            promotion: "q",
+          });
+
+          if (move) {
+            moveSuccessful = true;
+            moveSan = move.san;
+            setGamePosition(gameCopy.fen());
+            setMoveHistory(prev => [...prev, move.san]);
+            setSelectedSquare(null);
+            setLegalMoves([]);
+            return gameCopy;
+          }
+          return prevGame;
         });
 
-        if (move) {
-          // Update all state in one batch
-          setGame(gameCopy);
-          setGamePosition(gameCopy.fen());
-          setMoveHistory(prev => [...prev, move.san]);
-          setSelectedSquare(null);
-          setLegalMoves([]);
-          return true;
-        }
+        return moveSuccessful;
       } catch (error) {
         console.log("Invalid move:", error);
+        return false;
       }
-      return false;
     },
-    [game]
+    []
   );
 
   const onSquareClick = (square: string) => {
