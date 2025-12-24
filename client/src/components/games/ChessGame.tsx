@@ -1,11 +1,10 @@
-
 import { useState, useCallback, useEffect } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useLanguage } from "@/context/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Crown, Clock, Flag } from "lucide-react";
+import { Crown, Flag } from "lucide-react";
 
 type Result = "win" | "loss" | "draw";
 
@@ -18,85 +17,36 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const [game, setGame] = useState(new Chess());
   const [gamePosition, setGamePosition] = useState(game.fen());
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
-  const [playerColor] = useState<"white" | "black">("white"); // In real multiplayer, this would be determined by matchmaking
-  const [gameStatus, setGameStatus] = useState<string>("");
-  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
-  const [legalMoves, setLegalMoves] = useState<string[]>([]);
+  const [playerColor] = useState<"white" | "black">("white");
 
-  // Update game status
+  // Update game status when position changes
   useEffect(() => {
     if (game.isCheckmate()) {
       const winner = game.turn() === "w" ? "Black" : "White";
-      setGameStatus(`Checkmate! ${winner} wins!`);
-    } else if (game.isDraw()) {
-      setGameStatus("Draw!");
-    } else if (game.isStalemate()) {
-      setGameStatus("Stalemate - Draw!");
-    } else if (game.isThreefoldRepetition()) {
-      setGameStatus("Draw by threefold repetition!");
-    } else if (game.isInsufficientMaterial()) {
-      setGameStatus("Draw by insufficient material!");
-    } else if (game.isCheck()) {
-      setGameStatus("Check!");
-    } else {
-      setGameStatus(`${game.turn() === "w" ? "White" : "Black"} to move`);
+      console.log(`Checkmate! ${winner} wins!`);
+    } else if (game.isGameOver()) {
+      console.log("Game Over!");
     }
   }, [gamePosition, game]);
 
-  // Calculate legal moves for selected piece
-  const calculateLegalMoves = (square: string) => {
-    const moves = game.moves({ square, verbose: true });
-    return moves.map(move => move.to);
-  };
+  const makeMove = useCallback((sourceSquare: string, targetSquare: string) => {
+    try {
+      const move = game.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: "q",
+      });
 
-  const makeMove = useCallback(
-    (sourceSquare: string, targetSquare: string) => {
-      try {
-        const move = game.move({
-          from: sourceSquare,
-          to: targetSquare,
-          promotion: "q", // Always promote to queen for simplicity
-        });
-
-        if (move) {
-          setGamePosition(game.fen());
-          setMoveHistory([...moveHistory, move.san]);
-          setSelectedSquare(null);
-          setLegalMoves([]);
-          return true;
-        }
-      } catch (error) {
-        console.log("Invalid move:", error);
+      if (move) {
+        setGamePosition(game.fen());
+        setMoveHistory(prev => [...prev, move.san]);
+        return true;
       }
-      return false;
-    },
-    [game, moveHistory]
-  );
-
-  const onSquareClick = (square: string) => {
-    // If no square selected, select this square (if it has a piece of current player)
-    if (!selectedSquare) {
-      const piece = game.get(square);
-      if (piece && piece.color === game.turn()) {
-        setSelectedSquare(square);
-        setLegalMoves(calculateLegalMoves(square));
-      }
-    } else {
-      // Try to make a move
-      const moved = makeMove(selectedSquare, square);
-      if (!moved) {
-        // If move failed, maybe selecting a different piece
-        const piece = game.get(square);
-        if (piece && piece.color === game.turn()) {
-          setSelectedSquare(square);
-          setLegalMoves(calculateLegalMoves(square));
-        } else {
-          setSelectedSquare(null);
-          setLegalMoves([]);
-        }
-      }
+    } catch (error) {
+      console.log("Invalid move:", error);
     }
-  };
+    return false;
+  }, [game]);
 
   const onPieceDrop = (sourceSquare: string, targetSquare: string) => {
     return makeMove(sourceSquare, targetSquare);
@@ -119,25 +69,20 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     setGame(newGame);
     setGamePosition(newGame.fen());
     setMoveHistory([]);
-    setSelectedSquare(null);
-    setLegalMoves([]);
   };
 
-  // Custom square styles for legal moves and selection
-  const customSquareStyles: { [square: string]: React.CSSProperties } = {};
-  
-  if (selectedSquare) {
-    customSquareStyles[selectedSquare] = {
-      backgroundColor: "rgba(255, 255, 0, 0.4)",
-    };
-  }
-
-  legalMoves.forEach(square => {
-    customSquareStyles[square] = {
-      background: "radial-gradient(circle, rgba(0,255,0,0.3) 25%, transparent 25%)",
-      borderRadius: "50%",
-    };
-  });
+  const getGameStatus = () => {
+    if (game.isCheckmate()) {
+      const winner = game.turn() === "w" ? "Black" : "White";
+      return `Checkmate! ${winner} wins!`;
+    }
+    if (game.isDraw()) return "Draw!";
+    if (game.isStalemate()) return "Stalemate - Draw!";
+    if (game.isThreefoldRepetition()) return "Draw by threefold repetition!";
+    if (game.isInsufficientMaterial()) return "Draw by insufficient material!";
+    if (game.isCheck()) return "Check!";
+    return `${game.turn() === "w" ? "White" : "Black"} to move`;
+  };
 
   return (
     <div className="w-full space-y-4">
@@ -147,7 +92,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
           <div className="flex items-center gap-2">
             {game.isCheck() && <Crown className="h-5 w-5 text-yellow-500 animate-pulse" />}
             <span className="font-mono text-sm font-bold">
-              {gameStatus}
+              {getGameStatus()}
             </span>
           </div>
           <div className="text-xs text-muted-foreground font-mono">
@@ -161,9 +106,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         <Chessboard
           position={gamePosition}
           onPieceDrop={onPieceDrop}
-          onSquareClick={onSquareClick}
           boardOrientation={playerColor}
-          customSquareStyles={customSquareStyles}
           customBoardStyle={{
             borderRadius: "4px",
           }}
@@ -207,7 +150,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         >
           {t("Reset Board", "Reset Board")}
         </Button>
-        
+
         {game.isGameOver() && (
           <>
             {game.isCheckmate() && (
@@ -233,7 +176,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
             )}
           </>
         )}
-        
+
         {!game.isGameOver() && (
           <>
             <Button
