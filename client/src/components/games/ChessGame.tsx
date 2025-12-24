@@ -1,131 +1,102 @@
-
 import { useState } from "react";
 import { useLanguage } from "@/context/LanguageContext";
+import { Chess } from "chess.js";
 
 interface ChessGameProps {
   onFinish: (result: "win" | "loss" | "draw") => void;
 }
 
-type Piece = {
-  type: "pawn" | "rook" | "knight" | "bishop" | "queen" | "king";
-  color: "white" | "black";
-};
-
-type Square = Piece | null;
-type Board = Square[][];
-
 const PIECES_UNICODE = {
-  white: {
-    king: "♔",
-    queen: "♕",
-    rook: "♖",
-    bishop: "♗",
-    knight: "♘",
-    pawn: "♙",
-  },
-  black: {
-    king: "♚",
-    queen: "♛",
-    rook: "♜",
-    bishop: "♝",
-    knight: "♞",
-    pawn: "♟",
-  },
+  p: "♟",
+  r: "♜",
+  n: "♞",
+  b: "♝",
+  q: "♛",
+  k: "♚",
+  P: "♙",
+  R: "♖",
+  N: "♘",
+  B: "♗",
+  Q: "♕",
+  K: "♔",
 };
-
-function createInitialBoard(): Board {
-  const board: Board = Array(8).fill(null).map(() => Array(8).fill(null));
-  
-  // Black pieces (top)
-  board[0] = [
-    { type: "rook", color: "black" },
-    { type: "knight", color: "black" },
-    { type: "bishop", color: "black" },
-    { type: "queen", color: "black" },
-    { type: "king", color: "black" },
-    { type: "bishop", color: "black" },
-    { type: "knight", color: "black" },
-    { type: "rook", color: "black" },
-  ];
-  board[1] = Array(8).fill(null).map(() => ({ type: "pawn", color: "black" } as Piece));
-  
-  // White pieces (bottom)
-  board[6] = Array(8).fill(null).map(() => ({ type: "pawn", color: "white" } as Piece));
-  board[7] = [
-    { type: "rook", color: "white" },
-    { type: "knight", color: "white" },
-    { type: "bishop", color: "white" },
-    { type: "queen", color: "white" },
-    { type: "king", color: "white" },
-    { type: "bishop", color: "white" },
-    { type: "knight", color: "white" },
-    { type: "rook", color: "white" },
-  ];
-  
-  return board;
-}
 
 export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
-  const [board, setBoard] = useState<Board>(createInitialBoard());
-  const [selectedSquare, setSelectedSquare] = useState<[number, number] | null>(null);
-  const [currentTurn, setCurrentTurn] = useState<"white" | "black">("white");
+  const [game] = useState(() => new Chess());
+  const [position, setPosition] = useState(game.board());
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
 
   const handleSquareClick = (row: number, col: number) => {
-    const piece = board[row][col];
+    const square = `${String.fromCharCode(97 + col)}${8 - row}` as any;
+    const piece = game.get(square);
 
     if (selectedSquare === null) {
-      // Select a piece
-      if (piece && piece.color === currentTurn) {
-        setSelectedSquare([row, col]);
+      // Select a piece if it belongs to the current player
+      if (piece && piece.color === game.turn()) {
+        setSelectedSquare(square);
       }
     } else {
-      const [fromRow, fromCol] = selectedSquare;
-      const selectedPiece = board[fromRow][fromCol];
-
       // If clicking the same square, deselect
-      if (fromRow === row && fromCol === col) {
+      if (selectedSquare === square) {
         setSelectedSquare(null);
         return;
       }
 
       // If clicking another piece of the same color, select it instead
-      if (piece && piece.color === currentTurn) {
-        setSelectedSquare([row, col]);
+      if (piece && piece.color === game.turn()) {
+        setSelectedSquare(square);
         return;
       }
 
       // Attempt to move
-      if (selectedPiece && isValidMove(fromRow, fromCol, row, col, selectedPiece, board)) {
-        const newBoard = board.map(r => [...r]);
-        newBoard[row][col] = selectedPiece;
-        newBoard[fromRow][fromCol] = null;
-        
-        setBoard(newBoard);
-        setSelectedSquare(null);
-        setCurrentTurn(currentTurn === "white" ? "black" : "white");
-        
-        const move = `${String.fromCharCode(97 + fromCol)}${8 - fromRow} → ${String.fromCharCode(97 + col)}${8 - row}`;
-        setMoveHistory([...moveHistory, move]);
-      } else {
+      try {
+        const move = game.move({
+          from: selectedSquare,
+          to: square,
+          promotion: "q", // Always promote to queen for simplicity
+        });
+
+        if (move) {
+          setPosition(game.board());
+          setSelectedSquare(null);
+          setMoveHistory([...moveHistory, move.san]);
+
+          // Check for game over
+          if (game.isCheckmate()) {
+            // Current player lost (since turn switched after move)
+            onFinish(game.turn() === "w" ? "loss" : "win");
+          } else if (game.isDraw() || game.isStalemate() || game.isThreefoldRepetition()) {
+            onFinish("draw");
+          }
+        } else {
+          setSelectedSquare(null);
+        }
+      } catch (e) {
+        // Invalid move
         setSelectedSquare(null);
       }
     }
   };
 
+  const currentTurn = game.turn() === "w" ? "white" : "black";
+  const isCheck = game.isCheck();
+
   return (
     <div className="flex flex-col items-center justify-center h-full space-y-4 p-4">
       <div className="text-sm font-mono text-muted-foreground">
         {currentTurn === "white" ? "⚪ White's Turn" : "⚫ Black's Turn"}
+        {isCheck && " - Check!"}
       </div>
 
       <div className="w-full max-w-[400px] aspect-square bg-black/40 border-2 border-white/10 rounded-lg grid grid-cols-8 grid-rows-8 overflow-hidden">
-        {board.map((row, rowIndex) =>
+        {position.map((row, rowIndex) =>
           row.map((piece, colIndex) => {
             const isLight = (rowIndex + colIndex) % 2 === 1;
-            const isSelected = selectedSquare?.[0] === rowIndex && selectedSquare?.[1] === colIndex;
-            
+            const square = `${String.fromCharCode(97 + colIndex)}${8 - rowIndex}`;
+            const isSelected = selectedSquare === square;
+
             return (
               <button
                 key={`${rowIndex}-${colIndex}`}
@@ -138,8 +109,8 @@ export function ChessGame({ onFinish }: ChessGameProps) {
                 `}
               >
                 {piece && (
-                  <span className={piece.color === "white" ? "text-white drop-shadow-md" : "text-gray-800"}>
-                    {PIECES_UNICODE[piece.color][piece.type]}
+                  <span className={piece.color === "w" ? "text-white drop-shadow-md" : "text-gray-800"}>
+                    {PIECES_UNICODE[piece.type.toUpperCase() === piece.type ? piece.type : piece.type.toLowerCase()]}
                   </span>
                 )}
               </button>
@@ -178,95 +149,4 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       </div>
     </div>
   );
-}
-
-// Basic move validation (simplified - doesn't check all chess rules)
-function isValidMove(
-  fromRow: number,
-  fromCol: number,
-  toRow: number,
-  toCol: number,
-  piece: Piece,
-  board: Board
-): boolean {
-  const targetPiece = board[toRow][toCol];
-  
-  // Can't capture own pieces
-  if (targetPiece && targetPiece.color === piece.color) {
-    return false;
-  }
-
-  const rowDiff = Math.abs(toRow - fromRow);
-  const colDiff = Math.abs(toCol - fromCol);
-  const rowDir = toRow - fromRow;
-  const colDir = toCol - fromCol;
-
-  switch (piece.type) {
-    case "pawn":
-      const direction = piece.color === "white" ? -1 : 1;
-      const startRow = piece.color === "white" ? 6 : 1;
-      
-      // Move forward
-      if (colDiff === 0 && !targetPiece) {
-        if (rowDir === direction) return true;
-        if (fromRow === startRow && rowDir === 2 * direction && !board[fromRow + direction][fromCol]) return true;
-      }
-      
-      // Capture diagonally
-      if (colDiff === 1 && rowDir === direction && targetPiece) {
-        return true;
-      }
-      return false;
-
-    case "rook":
-      if (rowDiff === 0 || colDiff === 0) {
-        return isPathClear(fromRow, fromCol, toRow, toCol, board);
-      }
-      return false;
-
-    case "knight":
-      return (rowDiff === 2 && colDiff === 1) || (rowDiff === 1 && colDiff === 2);
-
-    case "bishop":
-      if (rowDiff === colDiff) {
-        return isPathClear(fromRow, fromCol, toRow, toCol, board);
-      }
-      return false;
-
-    case "queen":
-      if (rowDiff === 0 || colDiff === 0 || rowDiff === colDiff) {
-        return isPathClear(fromRow, fromCol, toRow, toCol, board);
-      }
-      return false;
-
-    case "king":
-      return rowDiff <= 1 && colDiff <= 1;
-
-    default:
-      return false;
-  }
-}
-
-function isPathClear(
-  fromRow: number,
-  fromCol: number,
-  toRow: number,
-  toCol: number,
-  board: Board
-): boolean {
-  const rowStep = toRow === fromRow ? 0 : (toRow - fromRow) / Math.abs(toRow - fromRow);
-  const colStep = toCol === fromCol ? 0 : (toCol - fromCol) / Math.abs(toCol - fromCol);
-
-  let currentRow = fromRow + rowStep;
-  let currentCol = fromCol + colStep;
-
-  while (currentRow !== toRow || currentCol !== toCol) {
-    if (board[currentRow][currentCol] !== null) {
-      return false;
-    }
-    currentRow += rowStep;
-    currentCol += colStep;
-  }
-
-  return true;
 }
