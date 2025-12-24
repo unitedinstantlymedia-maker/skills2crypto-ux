@@ -1,13 +1,7 @@
-
-import * as React from "react";
+import React, { useState } from "react";
 import { Check, Globe, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Command,
   CommandEmpty,
@@ -16,76 +10,76 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useLanguage } from "@/context/LanguageContext";
 import { LANGUAGES } from "@/data/languages";
 
 export function LanguageSelector() {
-  const [open, setOpen] = React.useState(false);
-  const [search, setSearch] = React.useState("");
-  const { currentLanguage, setLanguage } = useLanguage();
-
-  const filteredLanguages = React.useMemo(() => {
-    if (!search) return LANGUAGES;
-    return LANGUAGES.filter(
-      (lang) =>
-        lang.name.toLowerCase().includes(search.toLowerCase()) ||
-        lang.nativeName.toLowerCase().includes(search.toLowerCase()) ||
-        lang.code.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [search]);
+  const [open, setOpen] = useState(false);
+  const { currentLanguage, setLanguage, t } = useLanguage();
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-[200px] justify-between bg-card/50 border-white/10"
-        >
-          <Globe className="mr-2 h-4 w-4" />
-          {currentLanguage.nativeName}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0">
-        <Command>
-          <CommandInput
-            placeholder="Search language..."
-            value={search}
-            onValueChange={setSearch}
-          />
-          <CommandEmpty>No language found.</CommandEmpty>
-          <CommandList>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <div className="flex flex-col items-center cursor-pointer group">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-10 w-10 rounded-full bg-white/5 hover:bg-white/10 hover:text-white border border-white/10"
+          >
+            <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">{currentLanguage.flag}</span>
+          </Button>
+          <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1">
+            {t('Select Language', 'Select Language')}
+          </span>
+        </div>
+      </DialogTrigger>
+      <DialogContent className="p-0 gap-0 bg-background/95 backdrop-blur-xl border-white/10 sm:max-w-[425px]">
+        <DialogHeader className="px-4 py-3 border-b border-white/10">
+          <DialogTitle className="text-lg font-display tracking-wide">{t('Select Language', 'Select Language')}</DialogTitle>
+        </DialogHeader>
+        <Command className="bg-transparent">
+          <CommandInput placeholder={t('Search language...', 'Search language...')} />
+          <CommandList className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <CommandEmpty>{t('No language found.', 'No language found.')}</CommandEmpty>
             <CommandGroup>
-              {filteredLanguages.map((language) => (
+              {LANGUAGES.map((language) => (
                 <CommandItem
                   key={language.code}
-                  value={language.code}
+                  value={`${language.name} ${language.nativeName}`}
                   onSelect={() => {
                     setLanguage(language.code);
                     setOpen(false);
                   }}
+                  className="flex items-center gap-3 py-3 px-4 cursor-pointer aria-selected:bg-white/5"
                 >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      currentLanguage.code === language.code
-                        ? "opacity-100"
-                        : "opacity-0"
-                    )}
-                  />
+                  <span className="text-2xl">{language.flag}</span>
                   <div className="flex flex-col">
-                    <span className="font-medium">{language.nativeName}</span>
+                    <span className="text-sm font-medium text-foreground">
+                      {language.nativeName}
+                    </span>
                     <span className="text-xs text-muted-foreground">
                       {language.name}
                     </span>
                   </div>
+                  <Check
+                    className={cn(
+                      "ml-auto h-4 w-4 text-primary",
+                      currentLanguage.code === language.code ? "opacity-100" : "opacity-0"
+                    )}
+                  />
                 </CommandItem>
               ))}
             </CommandGroup>
           </CommandList>
         </Command>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }
