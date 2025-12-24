@@ -8,10 +8,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLanguage } from "@/context/LanguageContext";
-import { languages } from "@/data/languages";
+import { LANGUAGES } from "@/data/languages";
 
 export function LanguageSelector({ className = "" }: { className?: string }) {
-  const { language, setLanguage } = useLanguage();
+  const { currentLanguage, setLanguage } = useLanguage();
 
   return (
     <DropdownMenu>
@@ -26,11 +26,11 @@ export function LanguageSelector({ className = "" }: { className?: string }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {languages.map((lang) => (
+        {LANGUAGES.map((lang) => (
           <DropdownMenuItem
             key={lang.code}
             onClick={() => setLanguage(lang.code)}
-            className={language === lang.code ? "bg-accent" : ""}
+            className={currentLanguage.code === lang.code ? "bg-accent" : ""}
           >
             <span className="mr-2">{lang.flag}</span>
             {lang.name}
