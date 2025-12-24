@@ -4,11 +4,17 @@ import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import { useLanguage } from "@/context/LanguageContext";
+import { Button } from "@/components/ui/button";
+import { Eye, Swords } from "lucide-react";
 
 import photorealisticChessImage from "@assets/generated_images/elegant_photorealistic_chess_pieces.png";
 import cleanTetrisImage from "@assets/generated_images/clean_3d_colorful_tetris_blocks.png";
 import photorealisticCheckersImage from "@assets/generated_images/classic_photorealistic_checkers_board.png";
 import cinematicBattleshipImage from "@assets/generated_images/cinematic_realistic_battleship_game.png";
+
+// Import stock images
+import battleshipImage from '@assets/stock_images/battleship_navy_ship_31f24312.jpg';
+import tetrisImage from '@assets/stock_images/classic_tetris_game__1bffc655.jpg';
 
 type GameCard = { id: Game; name: string; image: string; players: string };
 
@@ -24,9 +30,14 @@ export default function Games() {
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
 
-  const handleSelectGame = (gameId: Game) => {
-    actions.selectGame(gameId);
-    setLocation("/lobby");
+  const handleGameSelect = (game: Game) => {
+    actions.selectGame(game);
+    setLocation('/lobby');
+  };
+
+  const handlePreview = (game: Game) => {
+    actions.selectGame(game);
+    setLocation('/preview');
   };
 
   return (
@@ -45,7 +56,7 @@ export default function Games() {
           >
             <Card
               className="group relative overflow-hidden cursor-pointer border-white/10 hover:border-white/20 transition-all duration-500 backdrop-blur-sm bg-black/40"
-              onClick={() => handleSelectGame(game.id)}
+              onClick={() => handleGameSelect(game.id)}
             >
               <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent z-10" />
               <div className="absolute inset-0 bg-black/20 z-[5] backdrop-blur-[1px]" />
@@ -63,6 +74,23 @@ export default function Games() {
                   {game.players} {t("playing", "playing")}
                 </p>
               </CardContent>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={() => handlePreview(game.id as Game)}
+                  variant="outline"
+                  className="flex-1 font-display uppercase tracking-widest"
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  {t('Preview', 'Preview')}
+                </Button>
+                <Button 
+                  onClick={() => handleGameSelect(game.id as Game)}
+                  className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 font-display uppercase tracking-widest"
+                >
+                  <Swords className="mr-2 h-4 w-4" />
+                  {t('Play', 'Play')}
+                </Button>
+              </div>
             </Card>
           </motion.div>
         ))}
