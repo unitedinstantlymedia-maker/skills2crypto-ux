@@ -11,6 +11,7 @@ import Rules from "@/pages/Rules";
 import Games from "@/pages/Games";
 import Lobby from "@/pages/Lobby";
 import Play from "@/pages/Play";
+import Preview from "@/pages/Preview";
 import Result from "@/pages/Result";
 import Wallet from "@/pages/Wallet";
 import History from "@/pages/History";
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/lobby" component={Lobby} />
         <Route path="/challenge/:challengeId" component={Challenge} />
         <Route path="/play/:gameId" component={Play} />
+        <Route path="/preview/:gameId" component={Preview} />
         <Route path="/result" component={Result} />
         <Route path="/wallet" component={Wallet} />
         <Route path="/history" component={History} />
