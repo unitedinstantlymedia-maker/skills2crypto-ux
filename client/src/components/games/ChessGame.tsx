@@ -61,9 +61,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         });
 
         if (move) {
+          // Update all state in one batch
           setGame(gameCopy);
           setGamePosition(gameCopy.fen());
-          setMoveHistory([...moveHistory, move.san]);
+          setMoveHistory(prev => [...prev, move.san]);
           setSelectedSquare(null);
           setLegalMoves([]);
           return true;
@@ -73,7 +74,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       }
       return false;
     },
-    [game, moveHistory]
+    [game]
   );
 
   const onSquareClick = (square: string) => {
