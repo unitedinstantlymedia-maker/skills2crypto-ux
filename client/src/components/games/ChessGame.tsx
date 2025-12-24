@@ -74,10 +74,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   );
 
   const onSquareClick = (square: string) => {
-    // If no square selected, select this square (if it has a piece of current player)
+    // If no square selected, select this square (if it has a piece - allow any color in preview)
     if (!selectedSquare) {
       const piece = game.get(square);
-      if (piece && piece.color === game.turn()) {
+      if (piece) {
         setSelectedSquare(square);
         setLegalMoves(calculateLegalMoves(square));
       }
@@ -87,7 +87,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       if (!moved) {
         // If move failed, maybe selecting a different piece
         const piece = game.get(square);
-        if (piece && piece.color === game.turn()) {
+        if (piece) {
           setSelectedSquare(square);
           setLegalMoves(calculateLegalMoves(square));
         } else {
