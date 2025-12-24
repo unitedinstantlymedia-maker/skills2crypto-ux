@@ -50,3 +50,29 @@ npm run db:push     # Push database schema
 1. **WalletAdapter** (`src/core/wallet`): Manages wallet connection and balance reading
 2. **MatchmakingService** (`src/core/matchmaking`): Handles finding opponents
 3. **EscrowAdapter** (`src/core/escrow`): Core logic for locking funds, fees, and settlements
+
+## Recent Fixes (Dec 24, 2025)
+
+### Phase 1: Critical Bug Fixes ✅
+1. **Build System Fixed**
+   - Added missing client dependencies: socket.io-client, chess.js, react-chessboard, nanoid
+   - Fixed script/build.ts to properly build from client directory
+   - Added optimizeDeps to vite.config.ts for socket.io-client
+
+2. **React Hook Error in ChessGame Fixed**
+   - Removed external canvas library causing hook conflicts
+   - Rewrote ChessGame.tsx with clean HTML/CSS grid (8x8 chessboard)
+   - All React hooks now called at component top level
+   - Game simulates 3-move gameplay with random outcome
+
+3. **State Update Warning in Lobby Fixed**
+   - Moved redirect logic from render phase to useEffect hook
+   - Prevents "Cannot update component (Route) while rendering (Lobby)" warning
+   - Proper dependency array management
+
+### Current Status
+- ✅ Server running on port 5000
+- ✅ Socket.IO connected with reconnection logic
+- ✅ All critical React errors resolved
+- ✅ Build process working correctly for client/server
+- ⚠️ Chess/Tetris/Checkers engines not yet implemented (placeholder games work)
