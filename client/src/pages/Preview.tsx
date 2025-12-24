@@ -26,7 +26,7 @@ export default function Preview() {
   const renderGame = () => {
     switch (gameId) {
       case "chess":
-        return <ChessGame onFinish={handleFinish} />;
+        return <ChessGame onFinish={handleFinish} isPreview={true} />;
       case "tetris":
         return <TetrisGame onFinish={handleFinish} />;
       case "checkers":

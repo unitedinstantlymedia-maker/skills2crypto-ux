@@ -11,9 +11,10 @@ type Result = "win" | "loss" | "draw";
 
 interface ChessGameProps {
   onFinish: (result: Result) => void;
+  isPreview?: boolean;
 }
 
-export function ChessGame({ onFinish }: ChessGameProps) {
+export function ChessGame({ onFinish, isPreview = false }: ChessGameProps) {
   const { t } = useLanguage();
   const [game, setGame] = useState(new Chess());
   const [gamePosition, setGamePosition] = useState(game.fen());
@@ -52,12 +53,13 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const makeMove = useCallback(
     (sourceSquare: string, targetSquare: string) => {
       try {
-        // Create a copy of the game to test the move
         const gameCopy = new Chess(game.fen());
+        
+        // Try to make the move
         const move = gameCopy.move({
           from: sourceSquare,
           to: targetSquare,
-          promotion: "q", // Always promote to queen for simplicity
+          promotion: "q",
         });
 
         if (move) {
