@@ -52,14 +52,17 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const makeMove = useCallback(
     (sourceSquare: string, targetSquare: string) => {
       try {
-        const move = game.move({
+        // Create a copy of the game to test the move
+        const gameCopy = new Chess(game.fen());
+        const move = gameCopy.move({
           from: sourceSquare,
           to: targetSquare,
           promotion: "q", // Always promote to queen for simplicity
         });
 
         if (move) {
-          setGamePosition(game.fen());
+          setGame(gameCopy);
+          setGamePosition(gameCopy.fen());
           setMoveHistory([...moveHistory, move.san]);
           setSelectedSquare(null);
           setLegalMoves([]);
