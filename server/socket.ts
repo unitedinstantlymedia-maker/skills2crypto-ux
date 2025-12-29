@@ -51,6 +51,46 @@ interface CheckersRoom {
 
 const checkersRooms = new Map<string, CheckersRoom>();
 
+interface ShipPlacement {
+  shipId: string;
+  row: number;
+  col: number;
+  horizontal: boolean;
+}
+
+interface BattleshipShip {
+  id: string;
+  name: string;
+  size: number;
+  cells: { row: number; col: number }[];
+  hits: number;
+  sunk: boolean;
+}
+
+interface BattleshipPlayerInfo {
+  socketId: string;
+  role: 'player1' | 'player2';
+  ready: boolean;
+  ships: BattleshipShip[];
+}
+
+interface BattleshipRoom {
+  players: Map<string, BattleshipPlayerInfo>;
+  started: boolean;
+  battlePhase: boolean;
+  currentTurn: 'player1' | 'player2';
+}
+
+const battleshipRooms = new Map<string, BattleshipRoom>();
+
+const SHIP_CONFIGS: { id: string; name: string; size: number }[] = [
+  { id: 'carrier', name: 'Carrier', size: 5 },
+  { id: 'battleship', name: 'Battleship', size: 4 },
+  { id: 'cruiser', name: 'Cruiser', size: 3 },
+  { id: 'submarine', name: 'Submarine', size: 3 },
+  { id: 'destroyer', name: 'Destroyer', size: 2 },
+];
+
 export function setupSocket(httpServer: HttpServer, opts: SocketOptions): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io",
@@ -382,6 +422,210 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] checkers-timeout", data.matchId, data.color);
       socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-timeout');
       checkersRooms.delete(data.matchId);
+    });
+
+    socket.on("join-battleship-match", (data: { matchId: string; playerId: string }) => {
+      const { matchId, playerId } = data;
+      socket.join(`battleship:${matchId}`);
+      console.log("[socket] join battleship match", matchId, socket.id, playerId);
+
+      socketToPlayer.set(socket.id, { matchId, playerId });
+
+      let room = battleshipRooms.get(matchId);
+      if (!room) {
+        room = {
+          players: new Map(),
+          started: false,
+          battlePhase: false,
+          currentTurn: 'player1'
+        };
+        battleshipRooms.set(matchId, room);
+      }
+
+      const existingPlayer = room.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.socketId = socket.id;
+        socket.emit('battleship-role-assigned', { role: existingPlayer.role });
+        console.log("[socket] battleship reconnect, role preserved:", existingPlayer.role);
+        
+        if (room.players.size === 2 && room.started) {
+          socket.emit('battleship-game-start');
+          if (room.battlePhase) {
+            socket.emit('battle-phase-start', { firstTurn: room.currentTurn });
+          }
+        }
+        return;
+      }
+
+      if (room.players.size >= 2) {
+        console.log("[socket] battleship match full, rejecting player", playerId);
+        socket.emit('match-full');
+        return;
+      }
+
+      const existingRoles = Array.from(room.players.values()).map(p => p.role);
+      const assignedRole: 'player1' | 'player2' = existingRoles.includes('player1') ? 'player2' : 'player1';
+      
+      room.players.set(playerId, { 
+        socketId: socket.id, 
+        role: assignedRole,
+        ready: false,
+        ships: []
+      });
+
+      socket.emit('battleship-role-assigned', { role: assignedRole });
+      console.log("[socket] battleship role assigned", matchId, playerId, assignedRole);
+
+      if (room.players.size === 2 && !room.started) {
+        room.started = true;
+        io.to(`battleship:${matchId}`).emit('battleship-game-start');
+        console.log("[socket] battleship-game-start", matchId);
+      }
+    });
+
+    socket.on("battleship-ready", (data: { matchId: string; placements: ShipPlacement[] }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] battleship-ready rejected - unauthorized");
+        return;
+      }
+
+      const room = battleshipRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) return;
+
+      const ships: BattleshipShip[] = data.placements.map(p => {
+        const config = SHIP_CONFIGS.find(s => s.id === p.shipId)!;
+        const cells: { row: number; col: number }[] = [];
+        
+        for (let i = 0; i < config.size; i++) {
+          cells.push({
+            row: p.horizontal ? p.row : p.row + i,
+            col: p.horizontal ? p.col + i : p.col
+          });
+        }
+
+        return {
+          id: p.shipId,
+          name: config.name,
+          size: config.size,
+          cells,
+          hits: 0,
+          sunk: false
+        };
+      });
+
+      player.ships = ships;
+      player.ready = true;
+
+      console.log("[socket] battleship player ready", data.matchId, player.role);
+
+      socket.to(`battleship:${data.matchId}`).emit('opponent-ready');
+
+      const allReady = Array.from(room.players.values()).every(p => p.ready);
+      if (allReady && !room.battlePhase) {
+        room.battlePhase = true;
+        room.currentTurn = 'player1';
+        io.to(`battleship:${data.matchId}`).emit('battle-phase-start', { firstTurn: 'player1' });
+        console.log("[socket] battleship battle phase start", data.matchId);
+      }
+    });
+
+    socket.on("battleship-attack", (data: { matchId: string; row: number; col: number }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] battleship-attack rejected - unauthorized");
+        return;
+      }
+
+      const room = battleshipRooms.get(data.matchId);
+      if (!room || !room.battlePhase) return;
+
+      const attacker = room.players.get(socketInfo.playerId);
+      if (!attacker || attacker.role !== room.currentTurn) {
+        console.log("[socket] battleship-attack rejected - not your turn");
+        return;
+      }
+
+      const defenderId = Array.from(room.players.entries()).find(([_, p]) => p.role !== attacker.role)?.[0];
+      if (!defenderId) return;
+
+      const defender = room.players.get(defenderId)!;
+
+      let hit = false;
+      let sunkShip: BattleshipShip | null = null;
+
+      for (const ship of defender.ships) {
+        const hitCell = ship.cells.find(c => c.row === data.row && c.col === data.col);
+        if (hitCell) {
+          hit = true;
+          ship.hits++;
+          if (ship.hits >= ship.size) {
+            ship.sunk = true;
+            sunkShip = ship;
+          }
+          break;
+        }
+      }
+
+      const allSunk = defender.ships.every(s => s.sunk);
+      const nextTurn = attacker.role === 'player1' ? 'player2' : 'player1';
+
+      if (!allSunk) {
+        room.currentTurn = nextTurn;
+      }
+
+      console.log("[socket] battleship-attack", data.matchId, data.row, data.col, hit ? "HIT" : "MISS", sunkShip?.name || "");
+
+      socket.emit('attack-result', {
+        row: data.row,
+        col: data.col,
+        hit,
+        sunkShip,
+        gameOver: allSunk,
+        nextTurn
+      });
+
+      const defenderSocket = io.sockets.sockets.get(defender.socketId);
+      if (defenderSocket) {
+        defenderSocket.emit('opponent-attack', {
+          row: data.row,
+          col: data.col,
+          hit,
+          sunkShipCells: sunkShip?.cells,
+          sunkShipName: sunkShip?.name,
+          gameOver: allSunk
+        });
+      }
+
+      if (allSunk) {
+        battleshipRooms.delete(data.matchId);
+      }
+    });
+
+    socket.on("battleship-timeout", (data: { matchId: string; role: 'player1' | 'player2' }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] battleship-timeout rejected - unauthorized");
+        return;
+      }
+
+      const room = battleshipRooms.get(data.matchId);
+      if (!room || !room.battlePhase) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.role !== data.role || room.currentTurn !== data.role) {
+        console.log("[socket] battleship-timeout rejected - role mismatch");
+        return;
+      }
+
+      const nextTurn = data.role === 'player1' ? 'player2' : 'player1';
+      room.currentTurn = nextTurn;
+
+      console.log("[socket] battleship-timeout (turn skipped)", data.matchId, data.role);
+      io.to(`battleship:${data.matchId}`).emit('turn-skipped', { skippedPlayer: data.role });
     });
 
     socket.on("disconnect", () => {
