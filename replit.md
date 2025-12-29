@@ -138,3 +138,7 @@ npm run db:push     # Push database schema
 6. **Error Messages** - Toast notifications for validation errors, ErrorBoundary for game crashes
 7. **Game Rules** - Added tabbed rules section to Rules.tsx covering Chess, Tetris, Checkers, Battleship
 8. **Mobile Responsive** - Layout has pb-40 padding for bottom nav, mobile-first container design
+
+### Cleanup (Dec 29, 2025)
+1. **Removed client-side MatchmakingService** - Deleted orphaned `client/src/core/matchmaking/` directory
+2. **Server-side matchmaking only** - All matchmaking handled by `server/matchmaking/redisMatchmaking.ts` via Socket.IO
