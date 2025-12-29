@@ -16,10 +16,11 @@ export default function Play() {
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
 
-  // если матча нет — уходим на главную
+  // если матча нет — проверяем demo mode, иначе уходим на главную
+  const isDemoMode = window.location.search.includes('demo=true');
   useEffect(() => {
-    if (!state.currentMatch) setLocation("/");
-  }, [state.currentMatch, setLocation]);
+    if (!state.currentMatch && !isDemoMode) setLocation("/");
+  }, [state.currentMatch, isDemoMode, setLocation]);
 
   const handleFinish = async (result: "win" | "loss" | "draw") => {
     await actions.finishMatch(result);
@@ -27,8 +28,10 @@ export default function Play() {
   };
 
   // компонент активной игры по ключу
+  const gameToShow = state.selectedGame || (isDemoMode ? 'chess' : null);
+  
   const ActiveGame = useMemo(() => {
-    switch (state.selectedGame) {
+    switch (gameToShow) {
       case "chess":
         return () => <ChessGame onFinish={handleFinish} />;
       case "tetris":
@@ -52,16 +55,16 @@ export default function Play() {
       default:
         return null;
     }
-  }, [state.selectedGame]); // eslint-disable-line
+  }, [gameToShow]); // eslint-disable-line
 
-  if (!state.selectedGame) return null;
+  if (!state.selectedGame && !isDemoMode) return null;
 
   // оба игрока должны быть в currentMatch.players
   const hasBothPlayers =
-    (state.currentMatch?.players?.filter(Boolean).length ?? 0) === 2;
+    (state.currentMatch?.players?.filter(Boolean).length ?? 0) === 2 || isDemoMode;
 
-  // если второго ещё нет — экран ожидания
-  if (!hasBothPlayers) return <WaitingRoom />;
+  // если второго ещё нет — экран ожидания (unless demo mode)
+  if (!hasBothPlayers && !isDemoMode) return <WaitingRoom />;
 
   const pot = ((state.currentMatch?.stake ?? 0) * 2).toFixed(0);
 
