@@ -17,20 +17,20 @@ interface ChessMove {
   blackTime: number;
 }
 
-interface GameEnd {
-  matchId: string;
-  result: 'checkmate' | 'stalemate' | 'draw' | 'timeout' | 'resignation';
-  winner: 'white' | 'black' | 'draw';
+interface PlayerInfo {
+  socketId: string;
+  color: 'white' | 'black';
 }
 
 interface MatchRoom {
-  players: Map<string, { socketId: string; color: 'white' | 'black' }>;
+  players: Map<string, PlayerInfo>;
   fen: string;
   whiteTime: number;
   blackTime: number;
 }
 
 const matchRooms = new Map<string, MatchRoom>();
+const socketToPlayer = new Map<string, { matchId: string; playerId: string }>();
 
 export function setupSocket(httpServer: HttpServer, opts: SocketOptions): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
@@ -51,6 +51,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socket.join(`match:${matchId}`);
       console.log("[socket] join match", matchId, socket.id, playerId);
 
+      socketToPlayer.set(socket.id, { matchId, playerId });
+
       let room = matchRooms.get(matchId);
       if (!room) {
         room = {
@@ -60,6 +62,28 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
           blackTime: 30 * 60 * 1000
         };
         matchRooms.set(matchId, room);
+      }
+
+      const existingPlayer = room.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.socketId = socket.id;
+        socket.emit('color-assigned', { color: existingPlayer.color });
+        console.log("[socket] reconnect, color preserved:", existingPlayer.color);
+        
+        if (room.players.size === 2) {
+          socket.emit('game-start', {
+            fen: room.fen,
+            whiteTime: room.whiteTime,
+            blackTime: room.blackTime
+          });
+        }
+        return;
+      }
+
+      if (room.players.size >= 2) {
+        console.log("[socket] match full, rejecting player", playerId);
+        socket.emit('match-full');
+        return;
       }
 
       const existingColors = Array.from(room.players.values()).map(p => p.color);
@@ -82,14 +106,30 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     socket.on("chess-move", (move: ChessMove) => {
       const { matchId, from, to, promotion, fen, san, whiteTime, blackTime } = move;
-      console.log("[socket] chess-move", matchId, from, to, san);
+      
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== matchId) {
+        console.log("[socket] chess-move rejected - unauthorized socket");
+        return;
+      }
 
       const room = matchRooms.get(matchId);
-      if (room) {
-        room.fen = fen;
-        room.whiteTime = whiteTime;
-        room.blackTime = blackTime;
+      if (!room) {
+        console.log("[socket] chess-move rejected - no room");
+        return;
       }
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) {
+        console.log("[socket] chess-move rejected - player not in room");
+        return;
+      }
+
+      console.log("[socket] chess-move", matchId, from, to, san, "by", player.color);
+      
+      room.fen = fen;
+      room.whiteTime = whiteTime;
+      room.blackTime = blackTime;
 
       socket.to(`match:${matchId}`).emit('opponent-move', {
         from,
@@ -103,6 +143,21 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     });
 
     socket.on("chess-resign", (data: { matchId: string; color: 'white' | 'black' }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] chess-resign rejected - unauthorized");
+        return;
+      }
+
+      const room = matchRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] chess-resign rejected - color mismatch");
+        return;
+      }
+
       console.log("[socket] chess-resign", data.matchId, data.color);
       socket.to(`match:${data.matchId}`).emit('opponent-resigned', {
         color: data.color
@@ -111,6 +166,21 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     });
 
     socket.on("chess-timeout", (data: { matchId: string; color: 'white' | 'black' }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] chess-timeout rejected - unauthorized");
+        return;
+      }
+
+      const room = matchRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] chess-timeout rejected - color mismatch");
+        return;
+      }
+
       console.log("[socket] chess-timeout", data.matchId, data.color);
       socket.to(`match:${data.matchId}`).emit('opponent-timeout', {
         color: data.color
@@ -118,7 +188,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(data.matchId);
     });
 
-    socket.on("game-end", (data: GameEnd) => {
+    socket.on("game-end", (data: { matchId: string; result: string; winner: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        return;
+      }
+
       console.log("[socket] game-end", data.matchId, data.result, data.winner);
       io.to(`match:${data.matchId}`).emit('match-ended', data);
       matchRooms.delete(data.matchId);
@@ -126,6 +201,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     socket.on("disconnect", () => {
       console.log("[socket] disconnected", socket.id);
+      socketToPlayer.delete(socket.id);
     });
   });
 
