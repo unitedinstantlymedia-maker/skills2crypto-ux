@@ -77,7 +77,7 @@ npm run db:push     # Push database schema
 - ✅ Build process working correctly for client/server
 - ✅ Chess multiplayer fully implemented with Socket.IO sync
 - ✅ Tetris multiplayer fully implemented with Socket.IO sync
-- ⚠️ Checkers engine not yet implemented (placeholder game works)
+- ✅ Checkers multiplayer fully implemented with Socket.IO sync
 
 ### Chess Multiplayer (Dec 29, 2025)
 1. **Socket.IO Events** - Server handles join-match, color-assigned, game-start, chess-move, opponent-move, chess-resign, chess-timeout
@@ -95,3 +95,14 @@ npm run db:push     # Push database schema
 5. **Multiplayer Sync** - Real-time opponent board preview, score sync every 500ms
 6. **Win Condition** - First player to fill board loses, opponent wins automatically
 7. **Modern UI** - Ghost piece, next piece preview, clean minimal design (no retro)
+
+### Checkers Multiplayer (Dec 29, 2025)
+1. **Game Engine** - Official checkers rules with mandatory captures and multi-jump
+2. **Board Setup** - Standard 8x8 board with 12 pieces per player (red/black)
+3. **Piece Movement** - Diagonal moves, kings move both directions after promotion
+4. **Mandatory Captures** - Must capture when possible, multi-jump required when available
+5. **Multi-Jump Sync** - Each hop sends turnEnded=false, final hop sends turnEnded=true to switch turn
+6. **Timer System** - 10-minute timers per player, only runs on active player's turn
+7. **Win Conditions** - Capture all opponent pieces or block all legal moves
+8. **Socket.IO Events** - join-checkers-match, checkers-color-assigned, checkers-game-start, checkers-move, opponent-checkers-move, checkers-timeout
+9. **Color Assignment** - First player = red, second = black, colors persist on reconnection
