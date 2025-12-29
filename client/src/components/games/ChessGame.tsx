@@ -113,7 +113,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         setLegalMoves([]);
         checkGameEnd();
         
-        if (!gameOver && !isPlayerTurn) {
+        if (!isDemoMode && !gameOver && !isPlayerTurn) {
           setTimeout(() => makeAIMove(), 500);
         }
         
@@ -123,7 +123,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       return false;
     }
     return false;
-  }, [game, checkGameEnd, gameOver, isPlayerTurn]);
+  }, [game, checkGameEnd, gameOver, isPlayerTurn, isDemoMode]);
 
   const makeAIMove = useCallback(() => {
     if (gameOver) return;
