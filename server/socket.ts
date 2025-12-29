@@ -79,9 +79,53 @@ interface BattleshipRoom {
   started: boolean;
   battlePhase: boolean;
   currentTurn: 'player1' | 'player2';
+  attackHistory: Map<string, Set<string>>; // playerId -> set of "row,col" strings
 }
 
 const battleshipRooms = new Map<string, BattleshipRoom>();
+
+const GRID_SIZE = 10;
+
+function validateShipPlacements(placements: ShipPlacement[]): { valid: boolean; error?: string } {
+  if (placements.length !== 5) {
+    return { valid: false, error: 'Must place exactly 5 ships' };
+  }
+
+  const requiredShips = new Set(['carrier', 'battleship', 'cruiser', 'submarine', 'destroyer']);
+  const placedShips = new Set(placements.map(p => p.shipId));
+  
+  for (const ship of requiredShips) {
+    if (!placedShips.has(ship)) {
+      return { valid: false, error: `Missing ship: ${ship}` };
+    }
+  }
+
+  const occupiedCells = new Set<string>();
+
+  for (const placement of placements) {
+    const config = SHIP_CONFIGS.find(s => s.id === placement.shipId);
+    if (!config) {
+      return { valid: false, error: `Invalid ship: ${placement.shipId}` };
+    }
+
+    for (let i = 0; i < config.size; i++) {
+      const row = placement.horizontal ? placement.row : placement.row + i;
+      const col = placement.horizontal ? placement.col + i : placement.col;
+
+      if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) {
+        return { valid: false, error: `Ship ${placement.shipId} out of bounds` };
+      }
+
+      const cellKey = `${row},${col}`;
+      if (occupiedCells.has(cellKey)) {
+        return { valid: false, error: `Ships overlap at ${row},${col}` };
+      }
+      occupiedCells.add(cellKey);
+    }
+  }
+
+  return { valid: true };
+}
 
 const SHIP_CONFIGS: { id: string; name: string; size: number }[] = [
   { id: 'carrier', name: 'Carrier', size: 5 },
@@ -437,7 +481,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
           players: new Map(),
           started: false,
           battlePhase: false,
-          currentTurn: 'player1'
+          currentTurn: 'player1',
+          attackHistory: new Map()
         };
         battleshipRooms.set(matchId, room);
       }
@@ -496,6 +541,18 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const player = room.players.get(socketInfo.playerId);
       if (!player) return;
 
+      if (player.ready) {
+        console.log("[socket] battleship-ready rejected - already ready");
+        return;
+      }
+
+      const validation = validateShipPlacements(data.placements);
+      if (!validation.valid) {
+        console.log("[socket] battleship-ready rejected - invalid placements:", validation.error);
+        socket.emit('placement-error', { error: validation.error });
+        return;
+      }
+
       const ships: BattleshipShip[] = data.placements.map(p => {
         const config = SHIP_CONFIGS.find(s => s.id === p.shipId)!;
         const cells: { row: number; col: number }[] = [];
@@ -548,6 +605,24 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         console.log("[socket] battleship-attack rejected - not your turn");
         return;
       }
+
+      if (data.row < 0 || data.row >= GRID_SIZE || data.col < 0 || data.col >= GRID_SIZE) {
+        console.log("[socket] battleship-attack rejected - out of bounds");
+        return;
+      }
+
+      let attackerHistory = room.attackHistory.get(socketInfo.playerId);
+      if (!attackerHistory) {
+        attackerHistory = new Set();
+        room.attackHistory.set(socketInfo.playerId, attackerHistory);
+      }
+
+      const attackKey = `${data.row},${data.col}`;
+      if (attackerHistory.has(attackKey)) {
+        console.log("[socket] battleship-attack rejected - already attacked this cell");
+        return;
+      }
+      attackerHistory.add(attackKey);
 
       const defenderId = Array.from(room.players.entries()).find(([_, p]) => p.role !== attacker.role)?.[0];
       if (!defenderId) return;
