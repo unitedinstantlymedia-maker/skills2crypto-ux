@@ -331,6 +331,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       to: { row: number; col: number };
       captures: { row: number; col: number }[];
       newTurn: 'red' | 'black';
+      turnEnded: boolean;
       redTime: number;
       blackTime: number;
     }) => {
@@ -349,13 +350,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      console.log("[socket] checkers-move", data.matchId, data.from, data.to, "by", player.color);
+      console.log("[socket] checkers-move", data.matchId, data.from, data.to, "by", player.color, "turnEnded:", data.turnEnded);
 
       socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-move', {
         from: data.from,
         to: data.to,
         captures: data.captures,
         newTurn: data.newTurn,
+        turnEnded: data.turnEnded,
         redTime: data.redTime,
         blackTime: data.blackTime
       });

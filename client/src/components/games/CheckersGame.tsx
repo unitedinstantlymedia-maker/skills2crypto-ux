@@ -16,6 +16,7 @@ interface MoveData {
   to: Position;
   captures: Position[];
   newTurn: PieceColor;
+  turnEnded: boolean;
   redTime: number;
   blackTime: number;
 }
@@ -94,9 +95,11 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       console.log('[CheckersGame] opponent move:', data);
       if (engineRef.current) {
         engineRef.current.applyOpponentMove(data.from, data.to, data.captures);
-        engineRef.current.switchTurn();
-        setRedTime(data.redTime);
-        setBlackTime(data.blackTime);
+        if (data.turnEnded) {
+          engineRef.current.switchTurn();
+          setRedTime(data.redTime);
+          setBlackTime(data.blackTime);
+        }
       }
     });
 
@@ -189,13 +192,14 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
           const newState = engineRef.current.getState();
           const turnChanged = newState.continuingCapture === null;
           
-          if (socketRef.current && matchId && turnChanged) {
+          if (socketRef.current && matchId) {
             socketRef.current.emit('checkers-move', {
               matchId,
               from,
               to: { row, col },
               captures: move?.captures || [],
-              newTurn: newState.currentTurn,
+              newTurn: turnChanged ? newState.currentTurn : playerColor,
+              turnEnded: turnChanged,
               redTime,
               blackTime
             });
