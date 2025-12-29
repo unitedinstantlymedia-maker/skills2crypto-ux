@@ -128,3 +128,13 @@ npm run db:push     # Push database schema
 5. **Local Handlers** - handleTimeout, handleResign, handleStateChange update UI and emit to server but never call onFinish directly
 6. **storeGameResult** - Server stores match results with matchId, gameType, winnerId, loserId, reason
 7. **Disconnect Handling** - 30-second grace period with playerToSocket tracking, cancels forfeit if player reconnects
+
+### Testing & Polish (Dec 29, 2025)
+1. **Game Result Flow** - finishMatch calls settleMatch → wallet credits via subscription pattern → history entry created → match status updated
+2. **Wallet Updates** - WalletStore uses subscriber pattern, GameContext subscribes to auto-update React state on balance changes
+3. **Disconnect Handling** - All games have reconnection: true, opponent-disconnected events show forfeit message
+4. **Multiple Game Prevention** - Lobby redirects to /play if currentMatch is active
+5. **Loading States** - WaitingRoom with player count, Loader2 icons, isFinding state in Lobby
+6. **Error Messages** - Toast notifications for validation errors, ErrorBoundary for game crashes
+7. **Game Rules** - Added tabbed rules section to Rules.tsx covering Chess, Tetris, Checkers, Battleship
+8. **Mobile Responsive** - Layout has pb-40 padding for bottom nav, mobile-first container design
