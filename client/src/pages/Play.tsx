@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from "react";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
 import { useGame } from "@/context/GameContext";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -10,28 +9,24 @@ import { CheckersGame } from "@/components/games/CheckersGame";
 import { WaitingRoom } from "@/components/games/WaitingRoom";
 import { ErrorBoundary } from "@/components/system/ErrorBoundary";
 
-// ВАЖНО: selectedGame = 'chess' | 'tetris' | 'checkers' | 'battleship'
 export default function Play() {
   const { state, actions } = useGame();
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
 
-  // если матча нет — проверяем demo mode, иначе уходим на главную
-  const isDemoMode = window.location.search.includes('demo=true');
   useEffect(() => {
-    if (!state.currentMatch && !isDemoMode) setLocation("/");
-  }, [state.currentMatch, isDemoMode, setLocation]);
+    if (!state.currentMatch) {
+      setLocation("/");
+    }
+  }, [state.currentMatch, setLocation]);
 
   const handleFinish = async (result: "win" | "loss" | "draw") => {
     await actions.finishMatch(result);
     setLocation("/result");
   };
 
-  // компонент активной игры по ключу
-  const gameToShow = state.selectedGame || (isDemoMode ? 'chess' : null);
-  
   const ActiveGame = useMemo(() => {
-    switch (gameToShow) {
+    switch (state.selectedGame) {
       case "chess":
         return () => <ChessGame onFinish={handleFinish} />;
       case "tetris":
@@ -55,22 +50,18 @@ export default function Play() {
       default:
         return null;
     }
-  }, [gameToShow]); // eslint-disable-line
+  }, [state.selectedGame]); // eslint-disable-line
 
-  if (!state.selectedGame && !isDemoMode) return null;
+  if (!state.selectedGame || !state.currentMatch) return null;
 
-  // оба игрока должны быть в currentMatch.players
-  const hasBothPlayers =
-    (state.currentMatch?.players?.filter(Boolean).length ?? 0) === 2 || isDemoMode;
+  const hasBothPlayers = (state.currentMatch?.players?.filter(Boolean).length ?? 0) === 2;
 
-  // если второго ещё нет — экран ожидания (unless demo mode)
-  if (!hasBothPlayers && !isDemoMode) return <WaitingRoom />;
+  if (!hasBothPlayers) return <WaitingRoom />;
 
   const pot = ((state.currentMatch?.stake ?? 0) * 2).toFixed(0);
 
   return (
     <div className="h-full flex flex-col">
-      {/* верхняя строка статуса */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -83,7 +74,6 @@ export default function Play() {
         </div>
       </div>
 
-      {/* игровое поле */}
       <div className="flex-1 flex items-center justify-center">
         <ErrorBoundary
           fallback={
@@ -97,19 +87,6 @@ export default function Play() {
         >
           {ActiveGame && <ActiveGame />}
         </ErrorBoundary>
-      </div>
-
-      {/* КНОПКИ РЕЗУЛЬТАТА — ОТДЕЛЬНЫМ БЛОКОМ НИЖЕ КВАДРАТА И ВЫШЕ НАВИГАЦИИ */}
-      <div className="flex justify-center gap-2 mb-4">
-        <Button onClick={() => handleFinish("win")} className="bg-green-600 hover:bg-green-700 text-white">
-          {t("Victory", "Victory")}
-        </Button>
-        <Button onClick={() => handleFinish("draw")} className="bg-yellow-500 hover:bg-yellow-600 text-white">
-          {t("Draw", "Draw")}
-        </Button>
-        <Button variant="destructive" onClick={() => handleFinish("loss")}>
-          {t("Defeat", "Defeat")}
-        </Button>
       </div>
     </div>
   );

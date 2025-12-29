@@ -15,7 +15,6 @@ import Result from "@/pages/Result";
 import Wallet from "@/pages/Wallet";
 import History from "@/pages/History";
 import Challenge from "@/pages/Challenge";
-import ChessDemo from "@/pages/ChessDemo";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -31,7 +30,6 @@ function Router() {
         <Route path="/result" component={Result} />
         <Route path="/wallet" component={Wallet} />
         <Route path="/history" component={History} />
-        <Route path="/chess-demo" component={ChessDemo} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

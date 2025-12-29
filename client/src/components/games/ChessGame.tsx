@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Chess, Square, Move, PieceSymbol } from 'chess.js';
+import { Chess, Square } from 'chess.js';
+import { io, Socket } from 'socket.io-client';
 import { useLanguage } from "@/context/LanguageContext";
 import { useGame } from "@/context/GameContext";
 import { PIECE_COMPONENTS } from './chess/ChessPieces';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Flag, RotateCcw } from 'lucide-react';
+import { Flag } from 'lucide-react';
 
 type Result = "win" | "loss" | "draw";
 
@@ -22,13 +23,11 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
   const { state } = useGame();
   
-  const isDemoMode = typeof window !== 'undefined' && window.location.pathname.includes('demo');
-  
   const [game, setGame] = useState(() => new Chess());
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
-  const [playerColor] = useState<'white' | 'black'>('white');
+  const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
   const [whiteTime, setWhiteTime] = useState(INITIAL_TIME);
   const [blackTime, setBlackTime] = useState(INITIAL_TIME);
   const [gameOver, setGameOver] = useState(false);
@@ -36,17 +35,104 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPiece, setDragPiece] = useState<{ square: Square; x: number; y: number } | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-
-  const isPlayerTurn = isDemoMode ? true : game.turn() === (playerColor === 'white' ? 'w' : 'b');
+  const socketRef = useRef<Socket | null>(null);
+  const gameRef = useRef(game);
 
   useEffect(() => {
-    if (gameOver) return;
+    gameRef.current = game;
+  }, [game]);
+
+  const matchId = state.currentMatch?.id;
+  const playerId = state.wallet.address || 'anonymous';
+
+  const isPlayerTurn = playerColor && game.turn() === (playerColor === 'white' ? 'w' : 'b');
+
+  useEffect(() => {
+    if (!matchId || matchId === 'pending') return;
+
+    const socket = io('/', {
+      path: '/socket.io',
+      transports: ['websocket'],
+      reconnection: true,
+      withCredentials: true
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('[ChessGame] socket connected');
+      setIsConnected(true);
+      socket.emit('join-match', { matchId, playerId });
+    });
+
+    socket.on('color-assigned', (data: { color: 'white' | 'black' }) => {
+      console.log('[ChessGame] color assigned:', data.color);
+      setPlayerColor(data.color);
+    });
+
+    socket.on('game-start', (data: { fen: string; whiteTime: number; blackTime: number }) => {
+      console.log('[ChessGame] game started');
+      setWaitingForOpponent(false);
+      setGame(new Chess(data.fen));
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+    });
+
+    socket.on('opponent-move', (data: { from: string; to: string; fen: string; san: string; whiteTime: number; blackTime: number }) => {
+      console.log('[ChessGame] opponent move:', data.san);
+      const newGame = new Chess(data.fen);
+      setGame(newGame);
+      setLastMove({ from: data.from as Square, to: data.to as Square });
+      setMoveHistory(prev => [...prev, data.san]);
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+      
+      if (newGame.isCheckmate()) {
+        const winner = newGame.turn() === 'w' ? 'black' : 'white';
+        handleGameEnd('checkmate', winner);
+      } else if (newGame.isStalemate() || newGame.isDraw()) {
+        handleGameEnd('draw', 'draw');
+      }
+    });
+
+    socket.on('opponent-resigned', (data: { color: 'white' | 'black' }) => {
+      console.log('[ChessGame] opponent resigned');
+      setGameOver(true);
+      setGameResult(t('Opponent resigned - You win!', 'Opponent resigned - You win!'));
+      if (timerRef.current) clearInterval(timerRef.current);
+      setTimeout(() => onFinish('win'), 2000);
+    });
+
+    socket.on('opponent-timeout', (data: { color: 'white' | 'black' }) => {
+      console.log('[ChessGame] opponent timeout');
+      setGameOver(true);
+      setGameResult(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
+      if (timerRef.current) clearInterval(timerRef.current);
+      setTimeout(() => onFinish('win'), 2000);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[ChessGame] socket disconnected');
+      setIsConnected(false);
+    });
+
+    return () => {
+      socket.removeAllListeners();
+      socket.close();
+      socketRef.current = null;
+    };
+  }, [matchId, playerId, onFinish, t]);
+
+  useEffect(() => {
+    if (gameOver || waitingForOpponent) return;
 
     timerRef.current = setInterval(() => {
-      if (game.turn() === 'w') {
+      const currentGame = gameRef.current;
+      if (currentGame.turn() === 'w') {
         setWhiteTime(prev => {
           if (prev <= 1000) {
             handleTimeout('white');
@@ -68,92 +154,92 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [game.turn(), gameOver]);
+  }, [gameOver, waitingForOpponent]);
+
+  const handleGameEnd = useCallback((reason: string, winner: 'white' | 'black' | 'draw') => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setGameOver(true);
+    
+    if (winner === 'draw') {
+      setGameResult(t('Draw!', 'Draw!'));
+      setTimeout(() => onFinish('draw'), 2000);
+    } else {
+      const playerWins = winner === playerColor;
+      setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
+      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 2000);
+    }
+  }, [playerColor, onFinish, t]);
 
   const handleTimeout = useCallback((color: 'white' | 'black') => {
     if (timerRef.current) clearInterval(timerRef.current);
     setGameOver(true);
+    
     const result: Result = color === playerColor ? 'loss' : 'win';
     setGameResult(color === 'white' ? t('Black wins on time!', 'Black wins on time!') : t('White wins on time!', 'White wins on time!'));
+    
+    if (color === playerColor && socketRef.current && matchId) {
+      socketRef.current.emit('chess-timeout', { matchId, color });
+    }
+    
     setTimeout(() => onFinish(result), 2000);
-  }, [playerColor, onFinish, t]);
+  }, [playerColor, onFinish, t, matchId]);
 
   const checkGameEnd = useCallback(() => {
     if (game.isCheckmate()) {
-      setGameOver(true);
       const winner = game.turn() === 'w' ? 'black' : 'white';
-      setGameResult(winner === 'white' ? t('White wins by checkmate!', 'White wins by checkmate!') : t('Black wins by checkmate!', 'Black wins by checkmate!'));
-      const result: Result = winner === playerColor ? 'win' : 'loss';
-      setTimeout(() => onFinish(result), 2000);
+      handleGameEnd('checkmate', winner);
       return true;
     }
-    if (game.isStalemate()) {
-      setGameOver(true);
-      setGameResult(t('Stalemate - Draw!', 'Stalemate - Draw!'));
-      setTimeout(() => onFinish('draw'), 2000);
-      return true;
-    }
-    if (game.isDraw()) {
-      setGameOver(true);
-      setGameResult(t('Draw!', 'Draw!'));
-      setTimeout(() => onFinish('draw'), 2000);
+    if (game.isStalemate() || game.isDraw()) {
+      handleGameEnd('draw', 'draw');
       return true;
     }
     return false;
-  }, [game, playerColor, onFinish, t]);
+  }, [game, handleGameEnd]);
 
   const makeMove = useCallback((from: Square, to: Square) => {
+    if (!isPlayerTurn || !playerColor) return false;
+    
     try {
       const move = game.move({ from, to, promotion: 'q' });
       if (move) {
-        setGame(new Chess(game.fen()));
+        const newGame = new Chess(game.fen());
+        setGame(newGame);
         setLastMove({ from, to });
         setMoveHistory(prev => [...prev, move.san]);
         setSelectedSquare(null);
         setLegalMoves([]);
-        checkGameEnd();
-        
-        if (!isDemoMode && !gameOver && !isPlayerTurn) {
-          setTimeout(() => makeAIMove(), 500);
+
+        if (socketRef.current && matchId) {
+          socketRef.current.emit('chess-move', {
+            matchId,
+            from,
+            to,
+            promotion: 'q',
+            fen: game.fen(),
+            san: move.san,
+            whiteTime,
+            blackTime
+          });
         }
-        
+
+        checkGameEnd();
         return true;
       }
     } catch {
       return false;
     }
     return false;
-  }, [game, checkGameEnd, gameOver, isPlayerTurn, isDemoMode]);
-
-  const makeAIMove = useCallback(() => {
-    if (gameOver) return;
-    
-    const moves = game.moves({ verbose: true });
-    if (moves.length === 0) return;
-    
-    const randomMove = moves[Math.floor(Math.random() * moves.length)];
-    game.move(randomMove);
-    setGame(new Chess(game.fen()));
-    setLastMove({ from: randomMove.from as Square, to: randomMove.to as Square });
-    setMoveHistory(prev => [...prev, randomMove.san]);
-    checkGameEnd();
-  }, [game, gameOver, checkGameEnd]);
-
-  useEffect(() => {
-    if (!isPlayerTurn && !gameOver && moveHistory.length === 0) {
-    }
-  }, [isPlayerTurn, gameOver, makeAIMove, moveHistory.length]);
+  }, [game, isPlayerTurn, playerColor, matchId, whiteTime, blackTime, checkGameEnd]);
 
   const handleSquareClick = useCallback((square: Square) => {
-    if (gameOver) return;
+    if (gameOver || !isPlayerTurn || waitingForOpponent) return;
     
-    const currentTurnColor = game.turn();
     const piece = game.get(square);
     
     const canSelectPiece = () => {
       if (!piece) return false;
-      if (isDemoMode) return piece.color === currentTurnColor;
-      return piece.color === (playerColor === 'white' ? 'w' : 'b') && isPlayerTurn;
+      return piece.color === (playerColor === 'white' ? 'w' : 'b');
     };
     
     if (selectedSquare) {
@@ -172,21 +258,13 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       const moves = game.moves({ square, verbose: true });
       setLegalMoves(moves.map(m => m.to as Square));
     }
-  }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn, isDemoMode]);
+  }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn, waitingForOpponent]);
 
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, square: Square) => {
-    if (gameOver) return;
+    if (gameOver || !isPlayerTurn || waitingForOpponent) return;
     
-    const currentTurnColor = game.turn();
     const piece = game.get(square);
-    
-    const canDrag = () => {
-      if (!piece) return false;
-      if (isDemoMode) return piece.color === currentTurnColor;
-      return piece.color === (playerColor === 'white' ? 'w' : 'b') && isPlayerTurn;
-    };
-    
-    if (!canDrag()) return;
+    if (!piece || piece.color !== (playerColor === 'white' ? 'w' : 'b')) return;
 
     e.preventDefault();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
@@ -197,7 +275,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     setSelectedSquare(square);
     const moves = game.moves({ square, verbose: true });
     setLegalMoves(moves.map(m => m.to as Square));
-  }, [game, playerColor, gameOver, isPlayerTurn, isDemoMode]);
+  }, [game, playerColor, gameOver, isPlayerTurn, waitingForOpponent]);
 
   const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!isDragging || !dragPiece) return;
@@ -220,8 +298,13 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     const clientY = 'changedTouches' in e ? e.changedTouches[0].clientY : e.clientY;
     
     const squareSize = rect.width / 8;
-    const file = Math.floor((clientX - rect.left) / squareSize);
-    const rank = Math.floor((clientY - rect.top) / squareSize);
+    let file = Math.floor((clientX - rect.left) / squareSize);
+    let rank = Math.floor((clientY - rect.top) / squareSize);
+    
+    if (playerColor === 'black') {
+      file = 7 - file;
+      rank = 7 - rank;
+    }
     
     if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
       const targetSquare = `${FILES[file]}${RANKS[rank]}` as Square;
@@ -234,7 +317,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     setDragPiece(null);
     setSelectedSquare(null);
     setLegalMoves([]);
-  }, [isDragging, dragPiece, legalMoves, makeMove]);
+  }, [isDragging, dragPiece, legalMoves, makeMove, playerColor]);
 
   useEffect(() => {
     if (isDragging) {
@@ -253,12 +336,17 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   }, [isDragging, handleDragMove, handleDragEnd]);
 
   const handleResign = useCallback(() => {
-    if (gameOver) return;
+    if (gameOver || !playerColor) return;
     setGameOver(true);
     setGameResult(t('You resigned', 'You resigned'));
     if (timerRef.current) clearInterval(timerRef.current);
+    
+    if (socketRef.current && matchId) {
+      socketRef.current.emit('chess-resign', { matchId, color: playerColor });
+    }
+    
     setTimeout(() => onFinish('loss'), 1500);
-  }, [gameOver, onFinish, t]);
+  }, [gameOver, playerColor, onFinish, t, matchId]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -267,9 +355,12 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   };
 
   const renderSquare = (file: number, rank: number) => {
-    const square = `${FILES[file]}${RANKS[rank]}` as Square;
+    const displayFile = playerColor === 'black' ? 7 - file : file;
+    const displayRank = playerColor === 'black' ? 7 - rank : rank;
+    
+    const square = `${FILES[displayFile]}${RANKS[displayRank]}` as Square;
     const piece = game.get(square);
-    const isLight = (file + rank) % 2 === 0;
+    const isLight = (displayFile + displayRank) % 2 === 0;
     const isSelected = selectedSquare === square;
     const isLegalMove = legalMoves.includes(square);
     const isLastMoveSquare = lastMove && (lastMove.from === square || lastMove.to === square);
@@ -280,14 +371,14 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
     return (
       <div
-        key={square}
+        key={`${file}-${rank}`}
         className={cn(
           "relative flex items-center justify-center transition-colors duration-150",
           isLight ? "bg-stone-200" : "bg-stone-600",
           isSelected && "ring-4 ring-emerald-400 ring-inset",
           isLastMoveSquare && !isSelected && (isLight ? "bg-emerald-200" : "bg-emerald-700"),
           isInCheck && "bg-red-500/70",
-          "cursor-pointer"
+          isPlayerTurn && !waitingForOpponent ? "cursor-pointer" : "cursor-default"
         )}
         onClick={() => handleSquareClick(square)}
         onMouseDown={(e) => handleDragStart(e, square)}
@@ -295,12 +386,12 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       >
         {file === 0 && (
           <span className="absolute left-1 top-0.5 text-[10px] font-medium opacity-60">
-            {RANKS[rank]}
+            {RANKS[displayRank]}
           </span>
         )}
         {rank === 7 && (
           <span className="absolute right-1 bottom-0.5 text-[10px] font-medium opacity-60">
-            {FILES[file]}
+            {FILES[displayFile]}
           </span>
         )}
         
@@ -323,21 +414,40 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     );
   };
 
+  const opponentTime = playerColor === 'white' ? blackTime : whiteTime;
+  const myTime = playerColor === 'white' ? whiteTime : blackTime;
+  const isOpponentTurn = playerColor && game.turn() !== (playerColor === 'white' ? 'w' : 'b');
+
+  if (waitingForOpponent) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center gap-4 py-12">
+        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <p className="text-lg font-medium">{t('Waiting for opponent...', 'Waiting for opponent...')}</p>
+        <p className="text-sm text-muted-foreground">
+          {isConnected ? t('Connected', 'Connected') : t('Connecting...', 'Connecting...')}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full flex flex-col gap-4">
       <div className={cn(
         "flex items-center justify-between px-4 py-3 rounded-lg",
-        game.turn() === 'b' ? "bg-zinc-800 ring-2 ring-green-500" : "bg-zinc-800/50"
+        isOpponentTurn ? "bg-zinc-800 ring-2 ring-green-500" : "bg-zinc-800/50"
       )}>
         <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full bg-zinc-900 border-2 border-zinc-600" />
+          <div className={cn(
+            "w-4 h-4 rounded-full border-2",
+            playerColor === 'white' ? "bg-zinc-900 border-zinc-600" : "bg-white border-zinc-400"
+          )} />
           <span className="font-semibold">{t('Opponent', 'Opponent')}</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",
-          blackTime < 60000 ? "bg-red-500/20 text-red-400" : "bg-zinc-700"
+          opponentTime < 60000 ? "bg-red-500/20 text-red-400" : "bg-zinc-700"
         )}>
-          {formatTime(blackTime)}
+          {formatTime(opponentTime)}
         </div>
       </div>
 
@@ -377,17 +487,20 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
       <div className={cn(
         "flex items-center justify-between px-4 py-3 rounded-lg",
-        game.turn() === 'w' ? "bg-zinc-800 ring-2 ring-green-500" : "bg-zinc-800/50"
+        isPlayerTurn ? "bg-zinc-800 ring-2 ring-green-500" : "bg-zinc-800/50"
       )}>
         <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full bg-white border-2 border-zinc-400" />
-          <span className="font-semibold">{t('You', 'You')}</span>
+          <div className={cn(
+            "w-4 h-4 rounded-full border-2",
+            playerColor === 'white' ? "bg-white border-zinc-400" : "bg-zinc-900 border-zinc-600"
+          )} />
+          <span className="font-semibold">{t('You', 'You')} ({playerColor})</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",
-          whiteTime < 60000 ? "bg-red-500/20 text-red-400" : "bg-zinc-700"
+          myTime < 60000 ? "bg-red-500/20 text-red-400" : "bg-zinc-700"
         )}>
-          {formatTime(whiteTime)}
+          {formatTime(myTime)}
         </div>
       </div>
 

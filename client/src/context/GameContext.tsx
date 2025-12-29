@@ -2,9 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useRef, useMemo 
 import { io, Socket } from 'socket.io-client';
 
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
-import { walletStore, type WalletState } from '@/core/wallet/WalletStore';
+import { walletStore } from '@/core/wallet/WalletStore';
 import { mockEscrowAdapter } from '@/core/escrow/MockEscrowAdapter';
-import { historyStore, type HistoryEntry } from '@/core/history/HistoryStore';
+import { historyStore } from '@/core/history/HistoryStore';
+import type { WalletState, HistoryEntry } from '@/core/types';
 
 // типы и API-клиент
 import { findMatch } from '@/lib/api';
