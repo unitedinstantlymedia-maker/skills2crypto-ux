@@ -39,6 +39,18 @@ interface TetrisRoom {
 
 const tetrisRooms = new Map<string, TetrisRoom>();
 
+interface CheckersPlayerInfo {
+  socketId: string;
+  color: 'red' | 'black';
+}
+
+interface CheckersRoom {
+  players: Map<string, CheckersPlayerInfo>;
+  started: boolean;
+}
+
+const checkersRooms = new Map<string, CheckersRoom>();
+
 export function setupSocket(httpServer: HttpServer, opts: SocketOptions): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io",
@@ -262,6 +274,112 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] tetris-game-over", data.matchId, data.playerId);
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-game-over');
       tetrisRooms.delete(data.matchId);
+    });
+
+    socket.on("join-checkers-match", (data: { matchId: string; playerId: string }) => {
+      const { matchId, playerId } = data;
+      socket.join(`checkers:${matchId}`);
+      console.log("[socket] join checkers match", matchId, socket.id, playerId);
+
+      socketToPlayer.set(socket.id, { matchId, playerId });
+
+      let room = checkersRooms.get(matchId);
+      if (!room) {
+        room = {
+          players: new Map(),
+          started: false
+        };
+        checkersRooms.set(matchId, room);
+      }
+
+      const existingPlayer = room.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.socketId = socket.id;
+        socket.emit('checkers-color-assigned', { color: existingPlayer.color });
+        console.log("[socket] checkers reconnect, color preserved:", existingPlayer.color);
+        
+        if (room.players.size === 2 && room.started) {
+          socket.emit('checkers-game-start');
+        }
+        return;
+      }
+
+      if (room.players.size >= 2) {
+        console.log("[socket] checkers match full, rejecting player", playerId);
+        socket.emit('match-full');
+        return;
+      }
+
+      const existingColors = Array.from(room.players.values()).map(p => p.color);
+      const assignedColor: 'red' | 'black' = existingColors.includes('red') ? 'black' : 'red';
+      
+      room.players.set(playerId, { socketId: socket.id, color: assignedColor });
+
+      socket.emit('checkers-color-assigned', { color: assignedColor });
+      console.log("[socket] checkers color assigned", matchId, playerId, assignedColor);
+
+      if (room.players.size === 2 && !room.started) {
+        room.started = true;
+        io.to(`checkers:${matchId}`).emit('checkers-game-start');
+        console.log("[socket] checkers-game-start", matchId);
+      }
+    });
+
+    socket.on("checkers-move", (data: {
+      matchId: string;
+      from: { row: number; col: number };
+      to: { row: number; col: number };
+      captures: { row: number; col: number }[];
+      newTurn: 'red' | 'black';
+      redTime: number;
+      blackTime: number;
+    }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] checkers-move rejected - unauthorized");
+        return;
+      }
+
+      const room = checkersRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) {
+        console.log("[socket] checkers-move rejected - player not in room");
+        return;
+      }
+
+      console.log("[socket] checkers-move", data.matchId, data.from, data.to, "by", player.color);
+
+      socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-move', {
+        from: data.from,
+        to: data.to,
+        captures: data.captures,
+        newTurn: data.newTurn,
+        redTime: data.redTime,
+        blackTime: data.blackTime
+      });
+    });
+
+    socket.on("checkers-timeout", (data: { matchId: string; color: 'red' | 'black' }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] checkers-timeout rejected - unauthorized");
+        return;
+      }
+
+      const room = checkersRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] checkers-timeout rejected - color mismatch");
+        return;
+      }
+
+      console.log("[socket] checkers-timeout", data.matchId, data.color);
+      socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-timeout');
+      checkersRooms.delete(data.matchId);
     });
 
     socket.on("disconnect", () => {
