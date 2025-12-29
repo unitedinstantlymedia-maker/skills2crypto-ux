@@ -32,6 +32,13 @@ interface MatchRoom {
 const matchRooms = new Map<string, MatchRoom>();
 const socketToPlayer = new Map<string, { matchId: string; playerId: string }>();
 
+interface TetrisRoom {
+  players: Map<string, string>;
+  started: boolean;
+}
+
+const tetrisRooms = new Map<string, TetrisRoom>();
+
 export function setupSocket(httpServer: HttpServer, opts: SocketOptions): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io",
@@ -197,6 +204,64 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] game-end", data.matchId, data.result, data.winner);
       io.to(`match:${data.matchId}`).emit('match-ended', data);
       matchRooms.delete(data.matchId);
+    });
+
+    socket.on("join-tetris-match", (data: { matchId: string; playerId: string }) => {
+      const { matchId, playerId } = data;
+      socket.join(`tetris:${matchId}`);
+      console.log("[socket] join tetris match", matchId, socket.id, playerId);
+
+      socketToPlayer.set(socket.id, { matchId, playerId });
+
+      let room = tetrisRooms.get(matchId);
+      if (!room) {
+        room = {
+          players: new Map(),
+          started: false
+        };
+        tetrisRooms.set(matchId, room);
+      }
+
+      if (!room.players.has(playerId)) {
+        room.players.set(playerId, socket.id);
+      } else {
+        room.players.set(playerId, socket.id);
+      }
+
+      if (room.players.size === 2 && !room.started) {
+        room.started = true;
+        io.to(`tetris:${matchId}`).emit('tetris-game-start');
+        console.log("[socket] tetris-game-start", matchId);
+      }
+    });
+
+    socket.on("tetris-state", (data: { 
+      matchId: string; 
+      board: (string | null)[][]; 
+      score: number; 
+      lines: number; 
+      level: number;
+      gameOver: boolean;
+    }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-state', {
+        board: data.board,
+        score: data.score,
+        lines: data.lines,
+        level: data.level,
+        gameOver: data.gameOver
+      });
+    });
+
+    socket.on("tetris-game-over", (data: { matchId: string; playerId: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      console.log("[socket] tetris-game-over", data.matchId, data.playerId);
+      socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-game-over');
+      tetrisRooms.delete(data.matchId);
     });
 
     socket.on("disconnect", () => {
