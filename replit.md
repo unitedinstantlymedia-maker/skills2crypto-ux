@@ -75,4 +75,13 @@ npm run db:push     # Push database schema
 - ✅ Socket.IO connected with reconnection logic
 - ✅ All critical React errors resolved
 - ✅ Build process working correctly for client/server
-- ⚠️ Chess/Tetris/Checkers engines not yet implemented (placeholder games work)
+- ✅ Chess multiplayer fully implemented with Socket.IO sync
+- ⚠️ Tetris/Checkers engines not yet implemented (placeholder games work)
+
+### Chess Multiplayer (Dec 29, 2025)
+1. **Socket.IO Events** - Server handles join-match, color-assigned, game-start, chess-move, opponent-move, chess-resign, chess-timeout
+2. **Color Assignment** - First player = white, second = black, colors persist on reconnection
+3. **Security** - Socket authorization validates all chess events before broadcasting
+4. **Game End** - Automatic detection of checkmate, stalemate, timeout, resignation
+5. **Timer Sync** - 30-minute timers per player synchronized via socket events
+6. **Demo Mode Removed** - Games require real matchmaking between two players
