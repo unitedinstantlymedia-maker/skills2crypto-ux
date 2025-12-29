@@ -6,7 +6,7 @@ export function WaitingRoom() {
   const { state } = useGame();
   const { t } = useLanguage();
 
-  const playerCount = state.currentMatch?.players.filter(p => p).length || 0;
+  const playerCount = state.currentMatch?.players?.filter(p => p).length || 0;
   const isWaiting = playerCount < 2;
 
   return (
