@@ -23,6 +23,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
   const engineRef = useRef<BattleshipEngine | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameEndedRef = useRef(false);
+  const onFinishCalledRef = useRef(false);
 
   const [gameState, setGameState] = useState<BattleshipState | null>(null);
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
@@ -109,8 +110,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
           gameEndedRef.current = true;
           setGameEnded(true);
           setResultMessage(t('Victory! You sunk all enemy ships!', 'Victory! You sunk all enemy ships!'));
-          setTimeout(() => onFinish('win'), 2000);
-        } else {
+        } else if (!data.gameOver) {
           setTurnTime(TURN_TIME);
         }
       }
@@ -137,8 +137,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
           gameEndedRef.current = true;
           setGameEnded(true);
           setResultMessage(t('Defeat! All your ships were sunk!', 'Defeat! All your ships were sunk!'));
-          setTimeout(() => onFinish('loss'), 2000);
-        } else {
+        } else if (!data.gameOver) {
           setTurnTime(TURN_TIME);
         }
       }
@@ -153,13 +152,28 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
       }
     });
 
-    socket.on('opponent-disconnected', () => {
+    socket.on('opponent-disconnected', (data?: { forfeit: boolean }) => {
       if (!gameEndedRef.current) {
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
-        setTimeout(() => onFinish('win'), 2000);
       }
+    });
+
+    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+      console.log('[BattleshipGame] game-result received:', data);
+      if (onFinishCalledRef.current) return;
+      onFinishCalledRef.current = true;
+      
+      gameEndedRef.current = true;
+      setGameEnded(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      
+      const playerWins = data.winnerId === playerId;
+      setResultMessage(playerWins 
+        ? t('Victory! You sunk all enemy ships!', 'Victory! You sunk all enemy ships!') 
+        : t('Defeat! All your ships were sunk!', 'Defeat! All your ships were sunk!'));
+      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     });
 
     if (socket.connected) {

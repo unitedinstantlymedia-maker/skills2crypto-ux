@@ -30,7 +30,51 @@ interface MatchRoom {
 }
 
 const matchRooms = new Map<string, MatchRoom>();
-const socketToPlayer = new Map<string, { matchId: string; playerId: string }>();
+const socketToPlayer = new Map<string, { matchId: string; playerId: string; gameType?: string }>();
+const playerToSocket = new Map<string, string>(); // playerId -> socketId (for reconnect tracking)
+const pendingDisconnects = new Map<string, ReturnType<typeof setTimeout>>(); // playerId -> timeout
+
+interface GameResult {
+  matchId: string;
+  gameType: string;
+  winnerId: string | null;
+  loserId: string | null;
+  result: 'win' | 'loss' | 'draw';
+  reason: string;
+  timestamp: number;
+}
+
+const gameResults = new Map<string, GameResult>();
+
+function storeGameResult(
+  matchId: string,
+  gameType: string,
+  winnerId: string | null,
+  loserId: string | null,
+  reason: string
+): GameResult {
+  let resultType: 'win' | 'loss' | 'draw';
+  if (winnerId && loserId) {
+    resultType = 'win';
+  } else if (!winnerId && !loserId) {
+    resultType = 'draw';
+  } else {
+    resultType = 'win';
+  }
+  
+  const result: GameResult = {
+    matchId,
+    gameType,
+    winnerId,
+    loserId,
+    result: resultType,
+    reason,
+    timestamp: Date.now()
+  };
+  gameResults.set(matchId, result);
+  console.log("[socket] game result stored:", result);
+  return result;
+}
 
 interface TetrisRoom {
   players: Map<string, string>;
@@ -154,7 +198,20 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socket.join(`match:${matchId}`);
       console.log("[socket] join match", matchId, socket.id, playerId);
 
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+      
       socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+      
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+      }
 
       let room = matchRooms.get(matchId);
       if (!room) {
@@ -262,9 +319,25 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       console.log("[socket] chess-resign", data.matchId, data.color);
+      
+      const winnerId = data.color === 'white' 
+        ? Array.from(room.players.entries()).find(([_, p]) => p.color === 'black')?.[0]
+        : Array.from(room.players.entries()).find(([_, p]) => p.color === 'white')?.[0];
+      const loserId = socketInfo.playerId;
+      
+      storeGameResult(data.matchId, 'chess', winnerId || null, loserId, 'resignation');
+      
       socket.to(`match:${data.matchId}`).emit('opponent-resigned', {
         color: data.color
       });
+      
+      io.to(`match:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'resignation'
+      });
+      
       matchRooms.delete(data.matchId);
     });
 
@@ -285,20 +358,46 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       console.log("[socket] chess-timeout", data.matchId, data.color);
+      
+      const winnerId = data.color === 'white' 
+        ? Array.from(room.players.entries()).find(([_, p]) => p.color === 'black')?.[0]
+        : Array.from(room.players.entries()).find(([_, p]) => p.color === 'white')?.[0];
+      const loserId = socketInfo.playerId;
+      
+      storeGameResult(data.matchId, 'chess', winnerId || null, loserId, 'timeout');
+      
       socket.to(`match:${data.matchId}`).emit('opponent-timeout', {
         color: data.color
       });
+      
+      io.to(`match:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'timeout'
+      });
+      
       matchRooms.delete(data.matchId);
     });
 
-    socket.on("game-end", (data: { matchId: string; result: string; winner: string }) => {
+    socket.on("game-end", (data: { matchId: string; result: string; winner: string; winnerId?: string; loserId?: string }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
         return;
       }
 
       console.log("[socket] game-end", data.matchId, data.result, data.winner);
+      
+      storeGameResult(data.matchId, 'chess', data.winnerId || null, data.loserId || null, data.result);
+      
       io.to(`match:${data.matchId}`).emit('match-ended', data);
+      io.to(`match:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId: data.winnerId,
+        loserId: data.loserId,
+        reason: data.result
+      });
+      
       matchRooms.delete(data.matchId);
     });
 
@@ -307,7 +406,20 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socket.join(`tetris:${matchId}`);
       console.log("[socket] join tetris match", matchId, socket.id, playerId);
 
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+      
       socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+      
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+      }
 
       let room = tetrisRooms.get(matchId);
       if (!room) {
@@ -356,7 +468,22 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       if (!socketInfo || socketInfo.matchId !== data.matchId) return;
 
       console.log("[socket] tetris-game-over", data.matchId, data.playerId);
+      
+      const room = tetrisRooms.get(data.matchId);
+      const winnerId = room ? Array.from(room.players.keys()).find(id => id !== data.playerId) : null;
+      const loserId = data.playerId;
+      
+      storeGameResult(data.matchId, 'tetris', winnerId || null, loserId, 'board_filled');
+      
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-game-over');
+      
+      io.to(`tetris:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'board_filled'
+      });
+      
       tetrisRooms.delete(data.matchId);
     });
 
@@ -365,7 +492,20 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socket.join(`checkers:${matchId}`);
       console.log("[socket] join checkers match", matchId, socket.id, playerId);
 
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+      
       socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+      
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+      }
 
       let room = checkersRooms.get(matchId);
       if (!room) {
@@ -464,7 +604,50 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       console.log("[socket] checkers-timeout", data.matchId, data.color);
+      
+      const winnerId = data.color === 'red' 
+        ? Array.from(room.players.entries()).find(([_, p]) => p.color === 'black')?.[0]
+        : Array.from(room.players.entries()).find(([_, p]) => p.color === 'red')?.[0];
+      const loserId = socketInfo.playerId;
+      
+      storeGameResult(data.matchId, 'checkers', winnerId || null, loserId, 'timeout');
+      
       socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-timeout');
+      
+      io.to(`checkers:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'timeout'
+      });
+      
+      checkersRooms.delete(data.matchId);
+    });
+
+    socket.on("checkers-game-end", (data: { matchId: string; winner: 'red' | 'black'; playerId: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] checkers-game-end rejected - unauthorized");
+        return;
+      }
+
+      const room = checkersRooms.get(data.matchId);
+      if (!room) return;
+
+      console.log("[socket] checkers-game-end", data.matchId, data.winner);
+      
+      const winnerId = Array.from(room.players.entries()).find(([_, p]) => p.color === data.winner)?.[0];
+      const loserId = Array.from(room.players.entries()).find(([_, p]) => p.color !== data.winner)?.[0];
+      
+      storeGameResult(data.matchId, 'checkers', winnerId || null, loserId || null, 'game_complete');
+      
+      io.to(`checkers:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'game_complete'
+      });
+      
       checkersRooms.delete(data.matchId);
     });
 
@@ -473,7 +656,20 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socket.join(`battleship:${matchId}`);
       console.log("[socket] join battleship match", matchId, socket.id, playerId);
 
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+      
       socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+      
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+      }
 
       let room = battleshipRooms.get(matchId);
       if (!room) {
@@ -676,6 +872,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       if (allSunk) {
+        storeGameResult(data.matchId, 'battleship', socketInfo.playerId, defenderId, 'all_ships_sunk');
+        
+        io.to(`battleship:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId: socketInfo.playerId,
+          loserId: defenderId,
+          reason: 'all_ships_sunk'
+        });
+        
         battleshipRooms.delete(data.matchId);
       }
     });
@@ -705,6 +910,99 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     socket.on("disconnect", () => {
       console.log("[socket] disconnected", socket.id);
+      const socketInfo = socketToPlayer.get(socket.id);
+      
+      if (socketInfo) {
+        const { matchId, playerId } = socketInfo;
+        
+        const timeout = setTimeout(() => {
+          const currentSocketId = playerToSocket.get(playerId);
+          if (currentSocketId && currentSocketId !== socket.id) {
+            console.log("[socket] player has reconnected, skipping forfeit:", playerId);
+            return;
+          }
+          
+          pendingDisconnects.delete(playerId);
+          playerToSocket.delete(playerId);
+          
+          const chessRoom = matchRooms.get(matchId);
+          if (chessRoom) {
+            const player = chessRoom.players.get(playerId);
+            if (player) {
+              const winnerId = Array.from(chessRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
+              
+              if (winnerId) {
+                storeGameResult(matchId, 'chess', winnerId, playerId, 'disconnect');
+                io.to(`match:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`match:${matchId}`).emit('game-result', {
+                  matchId,
+                  winnerId,
+                  loserId: playerId,
+                  reason: 'disconnect'
+                });
+              }
+              matchRooms.delete(matchId);
+            }
+          }
+          
+          const tetrisRoom = tetrisRooms.get(matchId);
+          if (tetrisRoom) {
+            const winnerId = Array.from(tetrisRoom.players.keys()).find(id => id !== playerId);
+            if (winnerId) {
+              storeGameResult(matchId, 'tetris', winnerId, playerId, 'disconnect');
+              io.to(`tetris:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+              io.to(`tetris:${matchId}`).emit('game-result', {
+                matchId,
+                winnerId,
+                loserId: playerId,
+                reason: 'disconnect'
+              });
+            }
+            tetrisRooms.delete(matchId);
+          }
+          
+          const checkersRoom = checkersRooms.get(matchId);
+          if (checkersRoom) {
+            const player = checkersRoom.players.get(playerId);
+            if (player) {
+              const winnerId = Array.from(checkersRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
+              if (winnerId) {
+                storeGameResult(matchId, 'checkers', winnerId, playerId, 'disconnect');
+                io.to(`checkers:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`checkers:${matchId}`).emit('game-result', {
+                  matchId,
+                  winnerId,
+                  loserId: playerId,
+                  reason: 'disconnect'
+                });
+              }
+              checkersRooms.delete(matchId);
+            }
+          }
+          
+          const battleshipRoom = battleshipRooms.get(matchId);
+          if (battleshipRoom && battleshipRoom.battlePhase) {
+            const player = battleshipRoom.players.get(playerId);
+            if (player) {
+              const winnerId = Array.from(battleshipRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
+              if (winnerId) {
+                storeGameResult(matchId, 'battleship', winnerId, playerId, 'disconnect');
+                io.to(`battleship:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`battleship:${matchId}`).emit('game-result', {
+                  matchId,
+                  winnerId,
+                  loserId: playerId,
+                  reason: 'disconnect'
+                });
+              }
+              battleshipRooms.delete(matchId);
+            }
+          }
+        }, 30000);
+        
+        pendingDisconnects.set(playerId, timeout);
+      }
+      
       socketToPlayer.delete(socket.id);
     });
   });

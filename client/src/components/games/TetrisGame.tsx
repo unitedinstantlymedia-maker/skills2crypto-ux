@@ -35,6 +35,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
   const engineRef = useRef<TetrisEngine | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const gameEndedRef = useRef(false);
+  const onFinishCalledRef = useRef(false);
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
@@ -63,10 +64,8 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
       if (socketRef.current && matchId) {
         socketRef.current.emit('tetris-game-over', { matchId, playerId });
       }
-      
-      setTimeout(() => onFinish('loss'), 2000);
     }
-  }, [matchId, playerId, onFinish, t]);
+  }, [matchId, playerId, t]);
 
   useEffect(() => {
     if (!matchId || matchId === 'pending') return;
@@ -107,9 +106,37 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
         if (engineRef.current) {
           engineRef.current.stop();
         }
-        
-        setTimeout(() => onFinish('win'), 2000);
       }
+    });
+
+    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
+      if (data.forfeit && !gameEndedRef.current) {
+        console.log('[TetrisGame] opponent disconnected - forfeit');
+        gameEndedRef.current = true;
+        setGameEnded(true);
+        setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
+        
+        if (engineRef.current) {
+          engineRef.current.stop();
+        }
+      }
+    });
+
+    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+      console.log('[TetrisGame] game-result received:', data);
+      if (onFinishCalledRef.current) return;
+      onFinishCalledRef.current = true;
+      
+      gameEndedRef.current = true;
+      setGameEnded(true);
+      
+      if (engineRef.current) {
+        engineRef.current.stop();
+      }
+      
+      const playerWins = data.winnerId === playerId;
+      setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lost!', 'You lost!'));
+      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     });
 
     socket.on('disconnect', () => {

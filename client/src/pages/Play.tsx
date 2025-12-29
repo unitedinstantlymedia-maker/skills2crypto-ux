@@ -6,6 +6,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { ChessGame } from "@/components/games/ChessGame";
 import { TetrisGame } from "@/components/games/TetrisGame";
 import { CheckersGame } from "@/components/games/CheckersGame";
+import { BattleshipGame } from "@/components/games/BattleshipGame";
 import { WaitingRoom } from "@/components/games/WaitingRoom";
 import { ErrorBoundary } from "@/components/system/ErrorBoundary";
 
@@ -34,19 +35,7 @@ export default function Play() {
       case "checkers":
         return () => <CheckersGame onFinish={handleFinish} />;
       case "battleship":
-        return () => (
-          <div className="flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-500">
-            <div className="w-24 h-24 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
-              <span className="text-4xl">🚢</span>
-            </div>
-            <h2 className="text-2xl font-display font-bold uppercase tracking-wider text-blue-400">
-              Battleship
-            </h2>
-            <p className="text-muted-foreground font-mono">
-              {t("Game interface coming soon!", "Game interface coming soon!")}
-            </p>
-          </div>
-        );
+        return () => <BattleshipGame onFinish={handleFinish} />;
       default:
         return null;
     }

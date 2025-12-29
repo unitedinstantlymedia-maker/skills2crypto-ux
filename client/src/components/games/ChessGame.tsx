@@ -42,6 +42,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const gameRef = useRef(game);
+  const onFinishCalledRef = useRef(false);
 
   useEffect(() => {
     gameRef.current = game;
@@ -104,7 +105,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setGameOver(true);
       setGameResult(t('Opponent resigned - You win!', 'Opponent resigned - You win!'));
       if (timerRef.current) clearInterval(timerRef.current);
-      setTimeout(() => onFinish('win'), 2000);
     });
 
     socket.on('opponent-timeout', (data: { color: 'white' | 'black' }) => {
@@ -112,7 +112,35 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setGameOver(true);
       setGameResult(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
       if (timerRef.current) clearInterval(timerRef.current);
-      setTimeout(() => onFinish('win'), 2000);
+    });
+
+    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
+      if (data.forfeit && !gameOver) {
+        console.log('[ChessGame] opponent disconnected - forfeit');
+        setGameOver(true);
+        setGameResult(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
+        if (timerRef.current) clearInterval(timerRef.current);
+      }
+    });
+
+    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+      console.log('[ChessGame] game-result received:', data);
+      if (onFinishCalledRef.current) return;
+      onFinishCalledRef.current = true;
+      
+      setGameOver(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      
+      const playerWins = data.winnerId === playerId;
+      const isDraw = !data.winnerId && !data.loserId;
+      
+      if (isDraw) {
+        setGameResult(t('Draw!', 'Draw!'));
+        setTimeout(() => onFinish('draw'), 1500);
+      } else {
+        setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
+        setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -162,27 +190,32 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     
     if (winner === 'draw') {
       setGameResult(t('Draw!', 'Draw!'));
-      setTimeout(() => onFinish('draw'), 2000);
     } else {
       const playerWins = winner === playerColor;
       setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
-      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 2000);
     }
-  }, [playerColor, onFinish, t]);
+    
+    if (socketRef.current && matchId) {
+      socketRef.current.emit('game-end', {
+        matchId,
+        result: reason,
+        winner,
+        winnerId: winner === playerColor ? playerId : null,
+        loserId: winner !== playerColor && winner !== 'draw' ? playerId : null
+      });
+    }
+  }, [playerColor, matchId, playerId, t]);
 
   const handleTimeout = useCallback((color: 'white' | 'black') => {
     if (timerRef.current) clearInterval(timerRef.current);
     setGameOver(true);
     
-    const result: Result = color === playerColor ? 'loss' : 'win';
     setGameResult(color === 'white' ? t('Black wins on time!', 'Black wins on time!') : t('White wins on time!', 'White wins on time!'));
     
     if (color === playerColor && socketRef.current && matchId) {
       socketRef.current.emit('chess-timeout', { matchId, color });
     }
-    
-    setTimeout(() => onFinish(result), 2000);
-  }, [playerColor, onFinish, t, matchId]);
+  }, [playerColor, t, matchId]);
 
   const checkGameEnd = useCallback(() => {
     if (game.isCheckmate()) {
@@ -344,9 +377,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     if (socketRef.current && matchId) {
       socketRef.current.emit('chess-resign', { matchId, color: playerColor });
     }
-    
-    setTimeout(() => onFinish('loss'), 1500);
-  }, [gameOver, playerColor, onFinish, t, matchId]);
+  }, [gameOver, playerColor, t, matchId]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);

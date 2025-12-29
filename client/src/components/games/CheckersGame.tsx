@@ -38,6 +38,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
   const socketRef = useRef<Socket | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameEndedRef = useRef(false);
+  const onFinishCalledRef = useRef(false);
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
@@ -56,9 +57,15 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       
       if (timerRef.current) clearInterval(timerRef.current);
       
-      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 2000);
+      if (socketRef.current && matchId) {
+        socketRef.current.emit('checkers-game-end', {
+          matchId,
+          winner: newState.winner,
+          playerId
+        });
+      }
     }
-  }, [playerColor, onFinish, t]);
+  }, [playerColor, matchId, playerId, t]);
 
   useEffect(() => {
     if (!matchId || matchId === 'pending') return;
@@ -109,8 +116,31 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
         setGameEnded(true);
         setResultMessage(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
         if (timerRef.current) clearInterval(timerRef.current);
-        setTimeout(() => onFinish('win'), 2000);
       }
+    });
+
+    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
+      if (data.forfeit && !gameEndedRef.current) {
+        console.log('[CheckersGame] opponent disconnected - forfeit');
+        gameEndedRef.current = true;
+        setGameEnded(true);
+        setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
+        if (timerRef.current) clearInterval(timerRef.current);
+      }
+    });
+
+    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+      console.log('[CheckersGame] game-result received:', data);
+      if (onFinishCalledRef.current) return;
+      onFinishCalledRef.current = true;
+      
+      gameEndedRef.current = true;
+      setGameEnded(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      
+      const playerWins = data.winnerId === playerId;
+      setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
+      setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     });
 
     socket.on('disconnect', () => {
@@ -170,10 +200,8 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       if (socketRef.current && matchId) {
         socketRef.current.emit('checkers-timeout', { matchId, color: playerColor });
       }
-      
-      setTimeout(() => onFinish('loss'), 2000);
     }
-  }, [playerColor, matchId, onFinish, t]);
+  }, [playerColor, matchId, t]);
 
   const handleSquareClick = useCallback((row: number, col: number) => {
     if (!engineRef.current || !playerColor || gameEnded) return;

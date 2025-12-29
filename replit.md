@@ -119,3 +119,12 @@ npm run db:push     # Push database schema
 8. **Win Condition** - Sink all 5 opponent ships to win
 9. **Sunk Notifications** - Clear feedback when ships are sunk
 10. **Socket.IO Events** - join-battleship-match, battleship-role-assigned, battleship-ready, battle-phase-start, battleship-attack, attack-result, opponent-attack, turn-skipped
+
+### Automatic Result Submission (Dec 29, 2025)
+1. **Server as Single Source of Truth** - All game results are determined and emitted by the server
+2. **No Manual Confirmation** - Removed Victory/Draw/Defeat buttons from GameShell.tsx
+3. **onFinishCalledRef Guard** - Prevents double-finish race conditions, separate from gameEndedRef
+4. **game-result Event** - Server emits to ALL players via io.to() broadcast, clients ONLY call onFinish from this event
+5. **Local Handlers** - handleTimeout, handleResign, handleStateChange update UI and emit to server but never call onFinish directly
+6. **storeGameResult** - Server stores match results with matchId, gameType, winnerId, loserId, reason
+7. **Disconnect Handling** - 30-second grace period with playerToSocket tracking, cancels forfeit if player reconnects
