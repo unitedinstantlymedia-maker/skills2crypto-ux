@@ -145,15 +145,21 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   }, [isPlayerTurn, gameOver, makeAIMove, moveHistory.length]);
 
   const handleSquareClick = useCallback((square: Square) => {
-    if (gameOver || !isPlayerTurn) return;
-
-    const piece = game.get(square);
+    if (gameOver) return;
+    
     const currentTurnColor = game.turn();
+    const piece = game.get(square);
+    
+    const canSelectPiece = () => {
+      if (!piece) return false;
+      if (isDemoMode) return piece.color === currentTurnColor;
+      return piece.color === (playerColor === 'white' ? 'w' : 'b') && isPlayerTurn;
+    };
     
     if (selectedSquare) {
       if (legalMoves.includes(square)) {
         makeMove(selectedSquare, square);
-      } else if (piece && (isDemoMode ? piece.color === currentTurnColor : piece.color === (playerColor === 'white' ? 'w' : 'b'))) {
+      } else if (canSelectPiece()) {
         setSelectedSquare(square);
         const moves = game.moves({ square, verbose: true });
         setLegalMoves(moves.map(m => m.to as Square));
@@ -161,7 +167,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         setSelectedSquare(null);
         setLegalMoves([]);
       }
-    } else if (piece && (isDemoMode ? piece.color === currentTurnColor : piece.color === (playerColor === 'white' ? 'w' : 'b'))) {
+    } else if (canSelectPiece()) {
       setSelectedSquare(square);
       const moves = game.moves({ square, verbose: true });
       setLegalMoves(moves.map(m => m.to as Square));
@@ -169,11 +175,18 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn, isDemoMode]);
 
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, square: Square) => {
-    if (gameOver || !isPlayerTurn) return;
+    if (gameOver) return;
     
-    const piece = game.get(square);
     const currentTurnColor = game.turn();
-    if (!piece || (isDemoMode ? piece.color !== currentTurnColor : piece.color !== (playerColor === 'white' ? 'w' : 'b'))) return;
+    const piece = game.get(square);
+    
+    const canDrag = () => {
+      if (!piece) return false;
+      if (isDemoMode) return piece.color === currentTurnColor;
+      return piece.color === (playerColor === 'white' ? 'w' : 'b') && isPlayerTurn;
+    };
+    
+    if (!canDrag()) return;
 
     e.preventDefault();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
