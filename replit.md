@@ -76,7 +76,8 @@ npm run db:push     # Push database schema
 - ✅ All critical React errors resolved
 - ✅ Build process working correctly for client/server
 - ✅ Chess multiplayer fully implemented with Socket.IO sync
-- ⚠️ Tetris/Checkers engines not yet implemented (placeholder games work)
+- ✅ Tetris multiplayer fully implemented with Socket.IO sync
+- ⚠️ Checkers engine not yet implemented (placeholder game works)
 
 ### Chess Multiplayer (Dec 29, 2025)
 1. **Socket.IO Events** - Server handles join-match, color-assigned, game-start, chess-move, opponent-move, chess-resign, chess-timeout
@@ -85,3 +86,12 @@ npm run db:push     # Push database schema
 4. **Game End** - Automatic detection of checkmate, stalemate, timeout, resignation
 5. **Timer Sync** - 30-minute timers per player synchronized via socket events
 6. **Demo Mode Removed** - Games require real matchmaking between two players
+
+### Tetris Multiplayer (Dec 29, 2025)
+1. **Game Engine** - Standard pieces (I,O,T,S,Z,J,L), SRS rotation, wall kicks, line clearing
+2. **Scoring System** - 100/300/500/800 points for 1-4 lines, multiplied by level
+3. **Speed Increase** - Starts at 1000ms, decreases 80ms per level (min 100ms)
+4. **Controls** - Keyboard: arrows move, space/up rotate, shift hard drop. Mobile: on-screen buttons
+5. **Multiplayer Sync** - Real-time opponent board preview, score sync every 500ms
+6. **Win Condition** - First player to fill board loses, opponent wins automatically
+7. **Modern UI** - Ghost piece, next piece preview, clean minimal design (no retro)
