@@ -22,6 +22,8 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
   const { state } = useGame();
   
+  const isDemoMode = typeof window !== 'undefined' && window.location.pathname.includes('demo');
+  
   const [game, setGame] = useState(() => new Chess());
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
@@ -38,7 +40,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
-  const isPlayerTurn = game.turn() === (playerColor === 'white' ? 'w' : 'b');
+  const isPlayerTurn = isDemoMode ? true : game.turn() === (playerColor === 'white' ? 'w' : 'b');
 
   useEffect(() => {
     if (gameOver) return;
@@ -146,11 +148,12 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     if (gameOver || !isPlayerTurn) return;
 
     const piece = game.get(square);
+    const currentTurnColor = game.turn();
     
     if (selectedSquare) {
       if (legalMoves.includes(square)) {
         makeMove(selectedSquare, square);
-      } else if (piece && piece.color === (playerColor === 'white' ? 'w' : 'b')) {
+      } else if (piece && (isDemoMode ? piece.color === currentTurnColor : piece.color === (playerColor === 'white' ? 'w' : 'b'))) {
         setSelectedSquare(square);
         const moves = game.moves({ square, verbose: true });
         setLegalMoves(moves.map(m => m.to as Square));
@@ -158,18 +161,19 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         setSelectedSquare(null);
         setLegalMoves([]);
       }
-    } else if (piece && piece.color === (playerColor === 'white' ? 'w' : 'b')) {
+    } else if (piece && (isDemoMode ? piece.color === currentTurnColor : piece.color === (playerColor === 'white' ? 'w' : 'b'))) {
       setSelectedSquare(square);
       const moves = game.moves({ square, verbose: true });
       setLegalMoves(moves.map(m => m.to as Square));
     }
-  }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn]);
+  }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn, isDemoMode]);
 
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, square: Square) => {
     if (gameOver || !isPlayerTurn) return;
     
     const piece = game.get(square);
-    if (!piece || piece.color !== (playerColor === 'white' ? 'w' : 'b')) return;
+    const currentTurnColor = game.turn();
+    if (!piece || (isDemoMode ? piece.color !== currentTurnColor : piece.color !== (playerColor === 'white' ? 'w' : 'b'))) return;
 
     e.preventDefault();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
@@ -180,7 +184,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     setSelectedSquare(square);
     const moves = game.moves({ square, verbose: true });
     setLegalMoves(moves.map(m => m.to as Square));
-  }, [game, playerColor, gameOver, isPlayerTurn]);
+  }, [game, playerColor, gameOver, isPlayerTurn, isDemoMode]);
 
   const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!isDragging || !dragPiece) return;
@@ -266,10 +270,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         key={square}
         className={cn(
           "relative flex items-center justify-center transition-colors duration-150",
-          isLight ? "bg-amber-100" : "bg-amber-700",
-          isSelected && "ring-4 ring-yellow-400 ring-inset",
-          isLastMoveSquare && "bg-yellow-300/50",
-          isInCheck && "bg-red-500/60",
+          isLight ? "bg-stone-200" : "bg-stone-600",
+          isSelected && "ring-4 ring-emerald-400 ring-inset",
+          isLastMoveSquare && !isSelected && (isLight ? "bg-emerald-200" : "bg-emerald-700"),
+          isInCheck && "bg-red-500/70",
           "cursor-pointer"
         )}
         onClick={() => handleSquareClick(square)}
@@ -290,7 +294,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         {isLegalMove && (
           <div className={cn(
             "absolute rounded-full transition-all",
-            piece ? "w-full h-full border-4 border-black/20" : "w-3 h-3 bg-black/20"
+            piece ? "w-full h-full border-4 border-emerald-500/50" : "w-3 h-3 bg-emerald-500/50"
           )} />
         )}
         
@@ -326,7 +330,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
       <div 
         ref={boardRef}
-        className="w-full aspect-square rounded-lg overflow-hidden shadow-2xl border-4 border-amber-900"
+        className="w-full aspect-square rounded-lg overflow-hidden shadow-2xl border-4 border-stone-800"
         style={{ touchAction: 'none' }}
       >
         <div className="grid grid-cols-8 grid-rows-8 w-full h-full">
