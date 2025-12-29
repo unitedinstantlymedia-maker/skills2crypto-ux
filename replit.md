@@ -38,7 +38,7 @@ npm run db:push     # Push database schema
 
 ## Key Features
 
-- Games: Chess, Tetris (Block Stack), Checkers
+- Games: Chess, Tetris (Block Stack), Checkers, Battleship
 - Assets: USDT, ETH, TON
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot
@@ -78,6 +78,7 @@ npm run db:push     # Push database schema
 - ✅ Chess multiplayer fully implemented with Socket.IO sync
 - ✅ Tetris multiplayer fully implemented with Socket.IO sync
 - ✅ Checkers multiplayer fully implemented with Socket.IO sync
+- ✅ Battleship multiplayer fully implemented with Socket.IO sync
 
 ### Chess Multiplayer (Dec 29, 2025)
 1. **Socket.IO Events** - Server handles join-match, color-assigned, game-start, chess-move, opponent-move, chess-resign, chess-timeout
@@ -106,3 +107,15 @@ npm run db:push     # Push database schema
 7. **Win Conditions** - Capture all opponent pieces or block all legal moves
 8. **Socket.IO Events** - join-checkers-match, checkers-color-assigned, checkers-game-start, checkers-move, opponent-checkers-move, checkers-timeout
 9. **Color Assignment** - First player = red, second = black, colors persist on reconnection
+
+### Battleship Multiplayer (Dec 29, 2025)
+1. **Game Engine** - 10x10 grid, 5 ships (Carrier 5, Battleship 4, Cruiser 3, Submarine 3, Destroyer 2)
+2. **Two-Phase Gameplay** - Setup phase (place ships) → Battle phase (turn-based attacks)
+3. **Dual Grids** - "Your Fleet" shows your ships and enemy hits, "Enemy Waters" shows your attack results
+4. **Ship Placement** - Click to select ship, click grid to place, toggle horizontal/vertical orientation
+5. **Server Validation** - All placements validated server-side (bounds, overlap, ship count)
+6. **Attack History** - Server tracks all attacks to prevent duplicate hits (anti-cheat)
+7. **Timer System** - 60-second timer per turn, auto-skip on timeout
+8. **Win Condition** - Sink all 5 opponent ships to win
+9. **Sunk Notifications** - Clear feedback when ships are sunk
+10. **Socket.IO Events** - join-battleship-match, battleship-role-assigned, battleship-ready, battle-phase-start, battleship-attack, attack-result, opponent-attack, turn-skipped
