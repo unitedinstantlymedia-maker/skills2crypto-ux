@@ -150,3 +150,12 @@ npm run db:push     # Push database schema
 4. **History API** - GET `/api/history/:playerId` returns match history filtered by player participation
 5. **Client HistoryStore** - Fetches history from server API instead of localStorage, includes 30s cache TTL
 6. **Draw Support** - Both player IDs stored for all matches, draw results show correct payout (stake - fee/2)
+
+### Challenge Friend Feature (Dec 30, 2025)
+1. **POST /api/create-challenge** - Creates a challenge with unique nanoid, stores in Redis with 1-hour TTL, returns shareable URL
+2. **GET /api/challenge/:challengeId** - Retrieves challenge data (game, asset, stake, challengerName, status)
+3. **POST /api/accept-challenge** - Validates challenge, creates match in Redis, notifies accepter via Socket.IO
+4. **Challenge.tsx** - Fetches challenge from server, displays challenger info, handles acceptance flow
+5. **Redis Storage** - `challenge:{id}` stores challenge data, `match:{id}` stores match data
+6. **Socket.IO Events** - `challenge-match-created` notifies accepter when match is ready
+7. **Expiration** - Challenges expire after 1 hour, matches expire after 2 hours
