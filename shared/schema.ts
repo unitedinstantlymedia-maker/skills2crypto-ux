@@ -39,3 +39,33 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertMatch = z.infer<typeof insertMatchSchema>;
 export type Match = typeof matches.$inferSelect;
+
+export const ChallengeStatusEnum = z.enum(["pending", "accepted", "expired", "cancelled", "completed"]);
+export type ChallengeStatus = z.infer<typeof ChallengeStatusEnum>;
+
+export const ChallengeDataSchema = z.object({
+  challengeId: z.string(),
+  game: z.string(),
+  asset: z.string(),
+  stake: z.number(),
+  challengerId: z.string(),
+  challengerName: z.string(),
+  challengerSocketId: z.string().optional(),
+  accepterId: z.string().optional(),
+  accepterName: z.string().optional(),
+  matchId: z.string().optional(),
+  status: ChallengeStatusEnum,
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  completedAt: z.number().optional(),
+});
+
+export type ChallengeData = z.infer<typeof ChallengeDataSchema>;
+
+export const ChallengeHistoryEntrySchema = z.object({
+  timestamp: z.number(),
+  status: ChallengeStatusEnum,
+  action: z.string(),
+});
+
+export type ChallengeHistoryEntry = z.infer<typeof ChallengeHistoryEntrySchema>;

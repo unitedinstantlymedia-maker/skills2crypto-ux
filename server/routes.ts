@@ -5,9 +5,26 @@ import { eq, or, desc } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
 import type { Game, Asset } from "./server/core/types";
 import { db } from "./db";
-import { matches } from "../shared/schema";
+import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
+
+const CHALLENGE_TTL = 3600;
+const EXPIRED_CHALLENGE_TTL = 86400;
+
+async function addChallengeHistory(
+  challengeId: string,
+  status: ChallengeStatus,
+  action: string
+): Promise<void> {
+  const entry: ChallengeHistoryEntry = {
+    timestamp: Date.now(),
+    status,
+    action,
+  };
+  await redis.rpush(`challenge:${challengeId}:history`, JSON.stringify(entry));
+  await redis.expire(`challenge:${challengeId}:history`, EXPIRED_CHALLENGE_TTL);
+}
 
 const GAMES: readonly Game[] = ["chess", "tetris", "checkers", "battleship"] as const;
 const ASSETS: readonly Asset[] = ["USDT", "ETH", "TON"] as const;
@@ -70,9 +87,8 @@ export async function registerRoutes(
   // CHALLENGE FRIEND FEATURE
   // =====================
   
-  // Create a new challenge
   app.post("/api/create-challenge", async (req, res) => {
-    const { game, asset, stake, challengerId, challengerName } = req.body ?? {};
+    const { game, asset, stake, challengerId, challengerName, challengerSocketId } = req.body ?? {};
     
     if (!isGame(game) || !isAsset(asset)) {
       return res.status(400).json({ error: "Invalid game or asset" });
@@ -87,24 +103,29 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Challenger ID required" });
     }
     
-    // Generate unique challenge ID
     const challengeId = nanoid(12);
+    const now = Date.now();
     
-    // Store in Redis with 1-hour TTL
-    const challengeData = {
+    const challengeData: ChallengeData = {
       challengeId,
       game,
       asset,
       stake: numericStake,
       challengerId,
       challengerName: challengerName || "Unknown",
-      createdAt: Date.now(),
-      status: "pending"
+      challengerSocketId: challengerSocketId || undefined,
+      status: "pending",
+      createdAt: now,
+      expiresAt: now + (CHALLENGE_TTL * 1000),
     };
     
-    await redis.set(`challenge:${challengeId}`, JSON.stringify(challengeData), { ex: 3600 });
+    await redis.set(`challenge:${challengeId}`, JSON.stringify(challengeData), { ex: EXPIRED_CHALLENGE_TTL });
     
-    // Build the shareable URL
+    await redis.sadd(`user:${challengerId}:challenges`, challengeId);
+    await redis.expire(`user:${challengerId}:challenges`, EXPIRED_CHALLENGE_TTL);
+    
+    await addChallengeHistory(challengeId, "pending", "challenge_created");
+    
     const baseUrl = process.env.REPLIT_DEV_DOMAIN 
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
       : process.env.REPL_SLUG && process.env.REPL_OWNER
@@ -118,7 +139,7 @@ export async function registerRoutes(
     return res.status(200).json({
       challengeId,
       shareUrl,
-      expiresIn: 3600
+      expiresIn: CHALLENGE_TTL
     });
   });
   
@@ -141,9 +162,8 @@ export async function registerRoutes(
     return res.status(200).json(challenge);
   });
   
-  // Accept a challenge - creates a match between challenger and accepter
   app.post("/api/accept-challenge", async (req, res) => {
-    const { challengeId, accepterId, accepterSocketId } = req.body ?? {};
+    const { challengeId, accepterId, accepterSocketId, accepterName } = req.body ?? {};
     
     if (!challengeId || !accepterId || !accepterSocketId) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -155,7 +175,7 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Challenge not found or expired" });
     }
     
-    const challenge = typeof data === "string" ? JSON.parse(data) : data;
+    const challenge: ChallengeData = typeof data === "string" ? JSON.parse(data) : data;
     
     if (challenge.status !== "pending") {
       return res.status(400).json({ error: "Challenge already accepted" });
@@ -165,16 +185,20 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Cannot accept your own challenge" });
     }
     
-    // Generate match ID
     const matchId = nanoid(16);
     
-    // Update challenge status
     challenge.status = "accepted";
     challenge.accepterId = accepterId;
+    challenge.accepterName = accepterName || "Unknown";
     challenge.matchId = matchId;
-    await redis.set(`challenge:${challengeId}`, JSON.stringify(challenge), { ex: 3600 });
     
-    // Store match data in Redis for the game
+    await redis.set(`challenge:${challengeId}`, JSON.stringify(challenge), { ex: EXPIRED_CHALLENGE_TTL });
+    
+    await redis.sadd(`user:${accepterId}:challenges`, challengeId);
+    await redis.expire(`user:${accepterId}:challenges`, EXPIRED_CHALLENGE_TTL);
+    
+    await addChallengeHistory(challengeId, "accepted", "challenge_accepted");
+    
     const matchData = {
       matchId,
       game: challenge.game,
@@ -182,19 +206,31 @@ export async function registerRoutes(
       stake: challenge.stake,
       player1Id: challenge.challengerId,
       player2Id: accepterId,
+      p1: challenge.challengerId,
+      p2: accepterId,
       challengeId,
       status: "waiting_for_players"
     };
-    await redis.set(`match:${matchId}`, JSON.stringify(matchData), { ex: 7200 });
+    await redis.hset(`match:${matchId}`, matchData);
+    await redis.expire(`match:${matchId}`, 7200);
     
     console.log(`[challenge] ${challengeId} accepted by ${accepterId}, match ${matchId} created`);
     
-    // Notify the accepter's socket about the match
     io.to(accepterSocketId).emit("challenge-match-created", { 
       matchId, 
       game: challenge.game,
       challengeId 
     });
+    
+    if (challenge.challengerSocketId) {
+      io.to(challenge.challengerSocketId).emit("challenge-accepted", {
+        challengeId,
+        matchId,
+        game: challenge.game,
+        accepterId,
+        accepterName: accepterName || "Unknown"
+      });
+    }
     
     return res.status(200).json({
       matchId,
@@ -204,6 +240,85 @@ export async function registerRoutes(
       challengerId: challenge.challengerId,
       challengerName: challenge.challengerName
     });
+  });
+
+  app.post("/api/cancel-challenge", async (req, res) => {
+    const { challengeId, challengerId } = req.body ?? {};
+    
+    if (!challengeId || !challengerId) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+    
+    const data = await redis.get(`challenge:${challengeId}`);
+    
+    if (!data) {
+      return res.status(404).json({ error: "Challenge not found or expired" });
+    }
+    
+    const challenge: ChallengeData = typeof data === "string" ? JSON.parse(data) : data;
+    
+    if (challenge.challengerId !== challengerId) {
+      return res.status(403).json({ error: "Only the challenger can cancel" });
+    }
+    
+    if (challenge.status !== "pending") {
+      return res.status(400).json({ error: `Cannot cancel challenge with status: ${challenge.status}` });
+    }
+    
+    challenge.status = "cancelled";
+    
+    await redis.set(`challenge:${challengeId}`, JSON.stringify(challenge), { ex: EXPIRED_CHALLENGE_TTL });
+    await addChallengeHistory(challengeId, "cancelled", "challenge_cancelled");
+    
+    if (challenge.challengerSocketId) {
+      io.to(challenge.challengerSocketId).emit("challenge-cancelled", {
+        challengeId: challenge.challengeId,
+        game: challenge.game,
+        stake: challenge.stake,
+        asset: challenge.asset,
+      });
+    }
+    
+    console.log(`[challenge] ${challengeId} cancelled by ${challengerId}`);
+    
+    return res.status(200).json({ success: true, challengeId });
+  });
+
+  app.get("/api/challenges/:userId", async (req, res) => {
+    const { userId } = req.params;
+    const { status } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "User ID required" });
+    }
+    
+    try {
+      const challengeIds = await redis.smembers(`user:${userId}:challenges`);
+      
+      if (!challengeIds || challengeIds.length === 0) {
+        return res.status(200).json([]);
+      }
+      
+      const challenges: ChallengeData[] = [];
+      
+      for (const cid of challengeIds) {
+        const data = await redis.get(`challenge:${cid}`);
+        if (data) {
+          const challenge: ChallengeData = typeof data === "string" ? JSON.parse(data) : data;
+          
+          if (!status || challenge.status === status) {
+            challenges.push(challenge);
+          }
+        }
+      }
+      
+      challenges.sort((a, b) => b.createdAt - a.createdAt);
+      
+      return res.status(200).json(challenges);
+    } catch (err) {
+      console.error("fetch challenges failed:", err);
+      return res.status(200).json([]);
+    }
   });
 
   app.get("/api/history/:playerId", async (req, res) => {

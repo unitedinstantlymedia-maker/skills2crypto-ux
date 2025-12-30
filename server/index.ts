@@ -5,6 +5,7 @@ import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite } from "./vite";
 import { setupSocket } from "./socket";
+import { startChallengeCleanup } from "./matchmaking/challengeCleanup";
 
 const PORT = Number(process.env.PORT ?? 5000);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
@@ -22,6 +23,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
 const app = express();
 const httpServer = http.createServer(app);
 const io = setupSocket(httpServer, { isProd, allowedOrigins });
+
+startChallengeCleanup(io);
 
 // =======================
 // MIDDLEWARE

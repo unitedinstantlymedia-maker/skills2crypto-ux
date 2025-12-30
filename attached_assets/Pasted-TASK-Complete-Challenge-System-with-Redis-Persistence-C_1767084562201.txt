@@ -1,0 +1,70 @@
+TASK: Complete Challenge System with Redis Persistence
+
+CURRENT STATE:
+- Challenge system partially implemented with mock data
+- Redis is already connected and working (see server/redis.ts)
+- Challenge routes exist in server/routes.ts but need improvement
+- Challenges are stored in Redis with 1-hour TTL
+- No cleanup mechanism for expired challenges
+- Status tracking is basic (pending/accepted only)
+
+REQUIRED CHANGES:
+
+1. ADD CHALLENGE STATUS ENUM
+Create proper status tracking in shared/schema.ts:
+- Define ChallengeStatus enum: "pending" | "accepted" | "expired" | "cancelled" | "completed"
+- Add type exports for challenge data structure
+
+2. IMPROVE REDIS STORAGE STRUCTURE
+In server/routes.ts, enhance challenge data storage:
+- Add expiresAt timestamp
+- Add accepterName field
+- Add completedAt timestamp (when match finishes)
+- Store challenger's socketId for notifications
+
+3. IMPLEMENT EXPIRATION CLEANUP
+Create server/matchmaking/challengeCleanup.ts:
+- Background job that runs every 5 minutes
+- Scans Redis for expired challenges (createdAt + 3600000 < Date.now())
+- Updates status to "expired" instead of deleting
+- Keeps expired challenges for 24 hours for history
+
+4. ADD CHALLENGE CANCELLATION
+In server/routes.ts:
+- POST /api/cancel-challenge endpoint
+- Validates challengerId matches requester
+- Updates status to "cancelled"
+- Notifies any connected accepter
+
+5. ADD CHALLENGE HISTORY TRACKING
+- Store all challenge state changes in Redis
+- Format: challenge:{id}:history array with timestamp + status + action
+- Useful for debugging and analytics
+
+6. ENHANCE SOCKET.IO NOTIFICATIONS
+In server/socket.ts:
+- Emit "challenge-expired" when challenge expires
+- Emit "challenge-cancelled" when creator cancels
+- Store challenger socketId in challenge data for notifications
+
+7. ADD CHALLENGE LIST ENDPOINT
+- GET /api/challenges/:userId - Returns all challenges for a user
+- Filters by status (pending, accepted, expired, cancelled)
+- Useful for future "My Challenges" UI
+
+FILES TO MODIFY:
+- shared/schema.ts (add types/enums)
+- server/routes.ts (enhance endpoints)
+- server/matchmaking/challengeCleanup.ts (NEW FILE - cleanup job)
+- server/socket.ts (add notifications)
+- server/index.ts (start cleanup job on server boot)
+
+TESTING CHECKLIST:
+✅ Challenge expires after 1 hour
+✅ Expired challenges move to "expired" status
+✅ Creator can cancel pending challenge
+✅ Cleanup job runs every 5 minutes
+✅ Old challenges are purged after 24 hours
+✅ Status transitions are logged in history
+
+Please implement all changes with complete code, no ellipsis.

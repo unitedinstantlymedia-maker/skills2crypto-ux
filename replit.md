@@ -152,10 +152,15 @@ npm run db:push     # Push database schema
 6. **Draw Support** - Both player IDs stored for all matches, draw results show correct payout (stake - fee/2)
 
 ### Challenge Friend Feature (Dec 30, 2025)
-1. **POST /api/create-challenge** - Creates a challenge with unique nanoid, stores in Redis with 1-hour TTL, returns shareable URL
-2. **GET /api/challenge/:challengeId** - Retrieves challenge data (game, asset, stake, challengerName, status)
-3. **POST /api/accept-challenge** - Validates challenge, creates match in Redis, notifies accepter via Socket.IO
-4. **Challenge.tsx** - Fetches challenge from server, displays challenger info, handles acceptance flow
-5. **Redis Storage** - `challenge:{id}` stores challenge data, `match:{id}` stores match data
-6. **Socket.IO Events** - `challenge-match-created` notifies accepter when match is ready
-7. **Expiration** - Challenges expire after 1 hour, matches expire after 2 hours
+1. **ChallengeStatus Enum** - `pending | accepted | expired | cancelled | completed` with Zod validation in shared/schema.ts
+2. **ChallengeData Type** - Includes challengeId, game, asset, stake, challengerId/Name, accepterId/Name, socketId, expiresAt, completedAt
+3. **POST /api/create-challenge** - Creates challenge with expiresAt timestamp, stores challengerSocketId, tracks in user:challenges set
+4. **GET /api/challenge/:challengeId** - Retrieves full challenge data including status and expiration
+5. **POST /api/accept-challenge** - Validates, updates status to accepted, stores accepterName, notifies both players via Socket.IO
+6. **POST /api/cancel-challenge** - Validates ownership, updates status to cancelled, emits challenge-cancelled event
+7. **GET /api/challenges/:userId** - Returns all challenges for a user, with optional status filter query param
+8. **Challenge History Tracking** - Redis list `challenge:{id}:history` stores all status changes with timestamp and action
+9. **Background Cleanup Job** - `server/matchmaking/challengeCleanup.ts` runs every 5 minutes, marks expired challenges, emits challenge-expired events
+10. **Socket.IO Events** - challenge-match-created, challenge-accepted, challenge-expired, challenge-cancelled
+11. **Redis Storage** - challenge:{id} (JSON), challenge:{id}:history (list), user:{id}:challenges (set), match:{id} (hash)
+12. **Expiration** - Challenges expire after 1 hour (3600s TTL), expired challenges kept 24 hours for history
