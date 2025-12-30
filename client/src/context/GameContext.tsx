@@ -59,7 +59,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [selectedAsset, setSelectedAsset] = useState<Asset>('USDT');
   const [stakeAmount, setStakeAmount] = useState<number>(20);
   const [currentMatch, setCurrentMatch] = useState<MatchState>(null);
-  const [history, setHistory] = useState(historyStore.getHistory());
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [isFinding, setIsFinding] = useState(false);
 
   // ------- socket
@@ -139,6 +139,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // ------- wallet subscribe
   useEffect(() => walletStore.subscribe(setWalletState), []);
+
+  // ------- fetch history when wallet connects
+  useEffect(() => {
+    if (walletState.address) {
+      historyStore.fetchHistory(walletState.address).then(setHistory);
+    }
+  }, [walletState.address]);
 
   const connectWallet = async () => {
     await walletAdapter.connect();
@@ -227,23 +234,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       result
     );
 
-    const safeStake = Number(currentMatch.stake);
     const safePayout = Number(payout);
     const safeFee = Number(fee);
-
-    const entry: HistoryEntry = {
-      id: currentMatch.id,
-      game: currentMatch.game,
-      asset: currentMatch.asset,
-      stake: safeStake,
-      result,
-      pot: safeStake * 2,
-      fee: safeFee,
-      payout: safePayout,
-      timestamp: Date.now(),
-    };
-    historyStore.addEntry(entry);
-    setHistory(historyStore.getHistory());
 
     setCurrentMatch({
       ...currentMatch,
@@ -252,6 +244,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       payout: safePayout,
       fee: safeFee,
     });
+
+    if (walletState.address) {
+      historyStore.invalidateCache();
+      historyStore.fetchHistory(walletState.address).then(setHistory);
+    }
   };
 
   const value = useMemo<GameContextValue>(

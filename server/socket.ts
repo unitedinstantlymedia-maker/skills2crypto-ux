@@ -1,5 +1,8 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
+import { db } from "./db";
+import { matches } from "../shared/schema";
+import { redis } from "./redis";
 
 interface SocketOptions {
   isProd: boolean;
@@ -46,13 +49,15 @@ interface GameResult {
 
 const gameResults = new Map<string, GameResult>();
 
-function storeGameResult(
+const FEE_RATE = 0.03;
+
+async function storeGameResult(
   matchId: string,
   gameType: string,
   winnerId: string | null,
   loserId: string | null,
   reason: string
-): GameResult {
+): Promise<GameResult> {
   let resultType: 'win' | 'loss' | 'draw';
   if (winnerId && loserId) {
     resultType = 'win';
@@ -62,6 +67,7 @@ function storeGameResult(
     resultType = 'win';
   }
   
+  const timestamp = Date.now();
   const result: GameResult = {
     matchId,
     gameType,
@@ -69,10 +75,51 @@ function storeGameResult(
     loserId,
     result: resultType,
     reason,
-    timestamp: Date.now()
+    timestamp
   };
   gameResults.set(matchId, result);
   console.log("[socket] game result stored:", result);
+
+  try {
+    const matchData = await redis.hgetall(`match:${matchId}`);
+    if (matchData && matchData.stake && matchData.asset && matchData.p1 && matchData.p2) {
+      const stake = Number(matchData.stake);
+      const asset = String(matchData.asset);
+      const player1Id = String(matchData.p1);
+      const player2Id = String(matchData.p2);
+      const pot = stake * 2;
+      const fee = pot * FEE_RATE;
+      
+      let payout = 0;
+      if (resultType === 'win' && winnerId) {
+        payout = pot - fee;
+      } else if (resultType === 'draw') {
+        payout = stake - (fee / 2);
+      }
+
+      await db.insert(matches).values({
+        matchId,
+        gameType,
+        player1Id,
+        player2Id,
+        winnerId: winnerId || null,
+        loserId: loserId || null,
+        stake,
+        asset,
+        pot,
+        fee,
+        payout,
+        reason,
+        timestamp,
+      });
+      console.log("[socket] match saved to database:", matchId);
+    } else {
+      console.warn("[socket] could not fetch match data from Redis for DB save:", matchId);
+    }
+  } catch (err) {
+    console.error("[socket] failed to save match to database:", err);
+  }
+
   return result;
 }
 

@@ -142,3 +142,11 @@ npm run db:push     # Push database schema
 ### Cleanup (Dec 29, 2025)
 1. **Removed client-side MatchmakingService** - Deleted orphaned `client/src/core/matchmaking/` directory
 2. **Server-side matchmaking only** - All matchmaking handled by `server/matchmaking/redisMatchmaking.ts` via Socket.IO
+
+### PostgreSQL Match History (Dec 30, 2025)
+1. **Database Schema** - Added `matches` table with columns: matchId, gameType, player1Id, player2Id, winnerId, loserId, stake, asset, pot, fee, payout, reason, timestamp
+2. **Database Connection** - `server/db.ts` uses drizzle-orm/node-postgres with pg.Pool for stable queries
+3. **Server Persistence** - `storeGameResult` in socket.ts saves match results to PostgreSQL, fetching match metadata (stake, asset, players) from Redis
+4. **History API** - GET `/api/history/:playerId` returns match history filtered by player participation
+5. **Client HistoryStore** - Fetches history from server API instead of localStorage, includes 30s cache TTL
+6. **Draw Support** - Both player IDs stored for all matches, draw results show correct payout (stake - fee/2)
