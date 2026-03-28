@@ -1,0 +1,55 @@
+Analyze the entire current state of the application — all files, all code, all server and client logic, all database connections, wallet and escrow logic, and every integration. Output a detailed report with the following sections:
+
+Architecture Overview:
+
+Describe the current structure and how all modules are connected (client, server, database, wallet, escrow, matchmaking, games, etc).
+
+Implementation Status by Module:
+
+For each major module (wallet, escrow, each game, matchmaking, history, nickname, challenge, backend API, smart contracts), show:
+
+Completion status (percentage and what works)
+
+What is still missing or broken
+
+Any critical bugs
+
+Dependencies & External Integrations:
+
+List all packages and third-party services currently used
+
+Show which are mock and which are real (wallets, blockchains, etc)
+
+Security & Checks:
+
+List all authentication, validation, KYC, rate limiting and any similar checks in the codebase
+
+Clearly mark which ones are actually enforced and which are optional, stubbed, or not active
+
+Critical Requirements:
+
+App must work with no registration, no email, no KYC, no forced user verification
+
+The only requirement is wallet connection (Web3, TON, etc)
+
+No “test” or “partial” implementations of KYC, registration or similar
+
+There must be a single cold wallet for platform commission — its address is hidden from user interface
+
+All user-facing flows must remain maximally simple: connect wallet, choose stake, play
+
+Next Steps:
+
+Output a concise, actionable step-by-step plan:
+
+Only what is really needed for the production-ready, fully functional app according to above requirements
+
+Skip all registration, KYC, admin checks, and redundant anti-cheat
+
+Focus only on real wallet integration, smart contract deployment, escrow, and production infrastructure
+
+Checklist:
+
+Output a clear checklist (with checkboxes) of what is fully done and what still remains to be implemented
+
+Your analysis should be based on the latest state of the codebase and flow logic. Do NOT include any features or checks that are not required by the requirements above. If something in the codebase contradicts the requirements (e.g., test KYC, registration), explicitly highlight it as unnecessary and recommend removal.
