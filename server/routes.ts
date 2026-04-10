@@ -3,7 +3,7 @@ import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
 import { eq, or, desc } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
-import type { Game, Asset } from "./server/core/types";
+import type { Game, Asset } from "./core/types";
 import { db } from "./db";
 import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
 import { redis } from "./redis";

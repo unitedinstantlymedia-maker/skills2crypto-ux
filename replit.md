@@ -16,7 +16,6 @@ This is a React + Express full-stack application that allows users to play 1v1 s
 - `server/` - Express backend
   - `index.ts` - Server entry point
   - `routes.ts` - API routes
-  - `storage.ts` - In-memory storage (MemStorage)
 - `shared/` - Shared types and schema
 - `attached_assets/` - Images and assets
 
