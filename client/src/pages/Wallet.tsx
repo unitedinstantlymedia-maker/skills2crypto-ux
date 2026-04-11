@@ -85,7 +85,7 @@ export default function Wallet() {
                 <span className="font-display font-bold">{asset}</span>
               </div>
               <div className="font-mono font-bold text-lg">
-                {wallet.balances[asset].toFixed(4)}
+                {(wallet.balances[asset] ?? 0).toFixed(4)}
               </div>
             </CardContent>
           </Card>

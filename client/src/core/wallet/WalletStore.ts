@@ -17,10 +17,18 @@ export class WalletStore {
   private static instance: WalletStore;
 
   private constructor() {
-    // Restore from localStorage if available (simulate persistence)
     const stored = localStorage.getItem('wallet_state');
     if (stored) {
-      this.state = JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      if (parsed.balances && 'TON' in parsed.balances) {
+        parsed.balances.BNB = parsed.balances.TON;
+        delete parsed.balances.TON;
+        localStorage.setItem('wallet_state', JSON.stringify(parsed));
+      }
+      if (parsed.balances) {
+        parsed.balances = { USDT: 0, ETH: 0, BNB: 0, ...parsed.balances };
+      }
+      this.state = parsed;
     }
   }
 
