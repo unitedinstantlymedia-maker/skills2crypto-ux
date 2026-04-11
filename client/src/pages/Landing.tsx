@@ -68,10 +68,15 @@ export default function Landing() {
             </svg>
           </div>
 
-          {/* TON: Blue triangle */}
-          <div className="flex items-center justify-center" title="TON">
-             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 4L20 19H4L12 4Z" fill="#0088CC" />
+          {/* BNB: Yellow-orange circle with B */}
+          <div className="flex items-center justify-center" title="BNB">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="11" fill="#F3BA2F" />
+              <path d="M12 5L14.5 7.5L10.5 11.5L8 9L12 5Z" fill="white" />
+              <path d="M15.5 8.5L18 11L15.5 13.5L13 11L15.5 8.5Z" fill="white" />
+              <path d="M12 12L14.5 14.5L10.5 18.5L8 16L12 12Z" fill="white" />
+              <path d="M8.5 8.5L11 11L8.5 13.5L6 11L8.5 8.5Z" fill="white" />
+              <path d="M12 10L14 12L12 14L10 12L12 10Z" fill="white" />
             </svg>
           </div>
         </div>

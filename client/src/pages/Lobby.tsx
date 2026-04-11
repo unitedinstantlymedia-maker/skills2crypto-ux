@@ -152,7 +152,7 @@ export default function Lobby() {
         <div className="space-y-3">
           <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">{t('Select Asset', 'Select Asset')}</label>
           <ToggleGroup type="single" value={state.selectedAsset} onValueChange={handleAssetChange} className="justify-start gap-3">
-            {(['USDT', 'ETH', 'TON'] as Asset[]).map((asset) => (
+            {(['USDT', 'ETH', 'BNB'] as Asset[]).map((asset) => (
               <ToggleGroupItem 
                 key={asset} 
                 value={asset}

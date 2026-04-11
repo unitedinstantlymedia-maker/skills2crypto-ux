@@ -22,12 +22,10 @@ export const SUPPORTED_ASSETS: Record<string, AssetConfig> = {
     // Mock conversion rate for network fee (1 ETH = 3000 USD)
     usdPrice: 3000.0
   },
-  TON: {
-    name: 'TON',
-    decimals: 9,
-    // Mock conversion rate (1 TON = 5 USD)
-    usdPrice: 5.0,
-    comingSoon: true
+  BNB: {
+    name: 'BNB',
+    decimals: 18,
+    usdPrice: 600.0
   }
 };
 

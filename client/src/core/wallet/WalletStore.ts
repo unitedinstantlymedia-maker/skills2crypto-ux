@@ -8,7 +8,7 @@ export class WalletStore {
   private state: WalletState = {
     connected: false,
     address: null,
-    balances: { USDT: 0, ETH: 0, TON: 0 }
+    balances: { USDT: 0, ETH: 0, BNB: 0 }
   };
   
   private listeners: Set<Listener> = new Set();
@@ -71,7 +71,7 @@ export class WalletStore {
     this.state = {
       connected: false,
       address: null,
-      balances: { USDT: 0, ETH: 0, TON: 0 }
+      balances: { USDT: 0, ETH: 0, BNB: 0 }
     };
     this.notify();
   }

@@ -7,7 +7,7 @@ export const NETWORK_FEE_USD_PER_PLAYER = 0; // No network fee for now
 export const ASSET_PRICES_USD: Record<string, number> = {
   USDT: 1.0,
   ETH: 3000.0,
-  TON: 5.0
+  BNB: 600.0
 };
 
 export const STAKE_PRESETS = [5, 20, 50, 100];
@@ -15,5 +15,5 @@ export const STAKE_PRESETS = [5, 20, 50, 100];
 export const INITIAL_BALANCES = {
   USDT: 1000,
   ETH: 1.5,
-  TON: 100
+  BNB: 100
 };

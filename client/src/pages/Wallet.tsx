@@ -71,14 +71,14 @@ export default function Wallet() {
           <span className="text-[10px] font-mono text-primary/70 border border-primary/30 px-2 py-1 rounded">{t('Test mode (simulated)', 'Test mode (simulated)')}</span>
         </div>
         
-        {(['USDT', 'ETH', 'TON'] as const).map((asset) => (
+        {(['USDT', 'ETH', 'BNB'] as const).map((asset) => (
           <Card key={asset} className="bg-card/50 border-white/10">
             <CardContent className="p-4 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
                   asset === 'USDT' ? 'bg-green-500/20 text-green-500' :
                   asset === 'ETH' ? 'bg-blue-500/20 text-blue-500' :
-                  'bg-blue-400/20 text-blue-400'
+                  'bg-yellow-500/20 text-yellow-500'
                 }`}>
                   {asset[0]}
                 </div>

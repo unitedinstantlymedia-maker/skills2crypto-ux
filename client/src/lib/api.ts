@@ -1,5 +1,5 @@
 export type Game = 'chess' | 'tetris' | 'checkers' | 'battleship';
-export type Asset = 'USDT' | 'ETH' | 'TON';
+export type Asset = 'USDT' | 'ETH' | 'BNB';
 
 export type FindMatchRequest = {
   game: Game;
