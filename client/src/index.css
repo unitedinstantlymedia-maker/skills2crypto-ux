@@ -87,3 +87,39 @@
     box-shadow: 0 0 10px hsl(var(--primary) / 0.2);
   }
 }
+
+@keyframes logo-shine-sweep {
+  0%, 70% {
+    transform: translateY(-100%);
+  }
+  85% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.logo-shine-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.logo-shine-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 30%,
+    rgba(180, 255, 200, 0.12) 40%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(180, 255, 200, 0.12) 60%,
+    transparent 70%,
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: logo-shine-sweep 4s ease-in-out infinite;
+}

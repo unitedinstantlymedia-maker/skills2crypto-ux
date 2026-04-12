@@ -10,11 +10,14 @@ export default function Landing() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] space-y-8 text-center relative">
-      <div className="fixed top-4 right-4 flex items-center gap-3 z-50">
+      <div className="fixed top-4 right-4 flex items-start gap-5 z-50">
         <Link href="/rules">
-          <span className="text-xs text-white/50 hover:text-white/80 transition-colors cursor-pointer tracking-wide uppercase">
-            {t('Rules', 'Rules')}
-          </span>
+          <div className="flex flex-col items-center cursor-pointer group pt-[2px]">
+            <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">📜</span>
+            <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1">
+              {t('Rules', 'Rules')}
+            </span>
+          </div>
         </Link>
         <div className="transform scale-150 origin-top-right">
           <LanguageSelector />
@@ -31,22 +34,8 @@ export default function Landing() {
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mb-4 z-10">
             SKILLS
           </h1>
-          <div className="relative z-0 overflow-hidden" style={{ width: '180px', height: '180px' }}>
+          <div className="relative z-0 logo-shine-container" style={{ width: '180px', height: '180px' }}>
             <img src={logoImage} alt="2" className="w-full h-full object-contain relative z-0" />
-            <motion.div
-              className="absolute inset-0 z-10 pointer-events-none"
-              style={{
-                background: 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 70%, transparent 100%)',
-              }}
-              initial={{ y: '-100%' }}
-              animate={{ y: ['-100%', '200%'] }}
-              transition={{
-                duration: 0.8,
-                repeat: Infinity,
-                repeatDelay: 3,
-                ease: 'easeInOut',
-              }}
-            />
           </div>
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mt-4 z-10">
             CRYPTO
