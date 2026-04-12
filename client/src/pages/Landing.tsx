@@ -10,7 +10,7 @@ export default function Landing() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] space-y-8 text-center relative">
-      <div className="fixed top-4 right-4 flex items-start gap-5 z-50">
+      <div className="fixed top-4 left-4 z-50">
         <Link href="/rules">
           <div className="flex flex-col items-center cursor-pointer group pt-[2px]">
             <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">📜</span>
@@ -19,6 +19,8 @@ export default function Landing() {
             </span>
           </div>
         </Link>
+      </div>
+      <div className="fixed top-4 right-4 z-50">
         <div className="transform scale-150 origin-top-right">
           <LanguageSelector />
         </div>
@@ -34,7 +36,7 @@ export default function Landing() {
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mb-4 z-10">
             SKILLS
           </h1>
-          <div className="relative z-0 logo-shine-container" style={{ width: '180px', height: '180px' }}>
+          <div className="relative z-0" style={{ width: '180px', height: '180px' }}>
             <img src={logoImage} alt="2" className="w-full h-full object-contain relative z-0" />
           </div>
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mt-4 z-10">
