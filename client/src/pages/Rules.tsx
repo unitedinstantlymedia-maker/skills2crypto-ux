@@ -16,7 +16,7 @@ export default function Rules() {
             <ArrowLeft className="h-6 w-6" />
           </Button>
         </Link>
-        <h1 className="text-2xl font-display font-bold uppercase tracking-wider">{t('Rules & Risks', 'Rules & Risks')}</h1>
+        <h1 className="text-2xl font-display font-bold uppercase tracking-wider">{t('Rules', 'Rules')}</h1>
       </div>
 
       <div className="space-y-4">
