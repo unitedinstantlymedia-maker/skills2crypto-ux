@@ -75,13 +75,31 @@ export default function Wallet() {
           <Card key={asset} className="bg-card/50 border-white/10">
             <CardContent className="p-4 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                  asset === 'USDT' ? 'bg-green-500/20 text-green-500' :
-                  asset === 'ETH' ? 'bg-blue-500/20 text-blue-500' :
-                  'bg-yellow-500/20 text-yellow-500'
-                }`}>
-                  {asset[0]}
-                </div>
+                {asset === 'USDT' && (
+                  <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="18" fill="#26A17B" />
+                    <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(38,161,123,0.4)" strokeWidth="1" />
+                    <path d="M16 13H24V15.5H21.5V27H18.5V15.5H16V13Z" fill="white" />
+                  </svg>
+                )}
+                {asset === 'ETH' && (
+                  <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="18" fill="#3C3C3D" />
+                    <path d="M20 6L28 20L20 26L12 20L20 6Z" fill="#8A92B2" />
+                    <path d="M20 26L28 20L20 34L12 20L20 26Z" fill="#62688F" />
+                    <path d="M20 6L28 20L20 23L12 20L20 6Z" fill="none" stroke="rgba(138,146,178,0.3)" strokeWidth="0.5" />
+                  </svg>
+                )}
+                {asset === 'BNB' && (
+                  <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="18" fill="#F3BA2F" />
+                    <path d="M20 10L23.5 13.5L18 19L15 16L20 10Z" fill="white" />
+                    <path d="M25 14L28 17L25 20L22 17L25 14Z" fill="white" />
+                    <path d="M20 19L23.5 22.5L18 28L15 25L20 19Z" fill="white" />
+                    <path d="M15 14L18 17L15 20L12 17L15 14Z" fill="white" />
+                    <path d="M20 16L22.5 18.5L20 21L17.5 18.5L20 16Z" fill="white" />
+                  </svg>
+                )}
                 <span className="font-display font-bold">{asset}</span>
               </div>
               <div className="font-mono font-bold text-lg">
