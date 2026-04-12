@@ -10,8 +10,15 @@ export default function Landing() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] space-y-8 text-center relative">
-      <div className="fixed top-4 right-4 transform scale-150 origin-top-right z-50">
-        <LanguageSelector />
+      <div className="fixed top-4 right-4 flex items-center gap-3 z-50">
+        <Link href="/rules">
+          <span className="text-xs text-white/50 hover:text-white/80 transition-colors cursor-pointer tracking-wide uppercase">
+            {t('Rules', 'Rules')}
+          </span>
+        </Link>
+        <div className="transform scale-150 origin-top-right">
+          <LanguageSelector />
+        </div>
       </div>
 
       <motion.div 
@@ -24,7 +31,23 @@ export default function Landing() {
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mb-4 z-10">
             SKILLS
           </h1>
-          <img src={logoImage} alt="2" className="w-32 h-32 object-contain relative z-0" />
+          <div className="relative z-0 overflow-hidden" style={{ width: '180px', height: '180px' }}>
+            <img src={logoImage} alt="2" className="w-full h-full object-contain relative z-0" />
+            <motion.div
+              className="absolute inset-0 z-10 pointer-events-none"
+              style={{
+                background: 'linear-gradient(180deg, transparent 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 70%, transparent 100%)',
+              }}
+              initial={{ y: '-100%' }}
+              animate={{ y: ['-100%', '200%'] }}
+              transition={{
+                duration: 0.8,
+                repeat: Infinity,
+                repeatDelay: 3,
+                ease: 'easeInOut',
+              }}
+            />
+          </div>
           <h1 className="text-6xl font-display font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 text-glow leading-none -mt-4 z-10">
             CRYPTO
           </h1>
@@ -45,39 +68,43 @@ export default function Landing() {
             {t('Play Now', 'Play Now')}
           </Button>
         </Link>
-        
-        <Link href="/rules">
-          <Button variant="outline" className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest border-white/10 hover:bg-white/5 hover:text-white">
-            {t('Rules & Risks', 'Rules & Risks')}
-          </Button>
-        </Link>
 
-        <div className="flex justify-center items-center gap-4 mt-4">
-          {/* USDT: Green circle with white T */}
-          <div className="flex items-center justify-center" title="USDT">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="10" fill="#26A17B" />
-              <path d="M10 8H14V10H12.5V16H11.5V10H10V8Z" fill="white" stroke="white" strokeWidth="1" />
-            </svg>
+        <div className="flex justify-center items-center gap-6 mt-6">
+          <div className="flex flex-col items-center gap-1" title="USDT">
+            <div className="rounded-full" style={{ filter: 'drop-shadow(0 0 6px rgba(38,161,123,0.7)) drop-shadow(0 0 12px rgba(38,161,123,0.3))' }}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#26A17B" />
+                <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(38,161,123,0.4)" strokeWidth="1" />
+                <path d="M16 13H24V15.5H21.5V27H18.5V15.5H16V13Z" fill="white" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-wider text-white/50">USDT</span>
           </div>
 
-          {/* ETH: Gray diamond */}
-          <div className="flex items-center justify-center" title="ETH">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L19 12L12 22L5 12L12 2Z" fill="#8C8C8C" />
-            </svg>
+          <div className="flex flex-col items-center gap-1" title="ETH">
+            <div className="rounded-full" style={{ filter: 'drop-shadow(0 0 6px rgba(140,140,200,0.6)) drop-shadow(0 0 12px rgba(140,140,200,0.25))' }}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#3C3C3D" />
+                <path d="M20 6L28 20L20 26L12 20L20 6Z" fill="#8A92B2" />
+                <path d="M20 26L28 20L20 34L12 20L20 26Z" fill="#62688F" />
+                <path d="M20 6L28 20L20 23L12 20L20 6Z" fill="none" stroke="rgba(138,146,178,0.3)" strokeWidth="0.5" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-wider text-white/50">ETH</span>
           </div>
 
-          {/* BNB: Yellow-orange circle with B */}
-          <div className="flex items-center justify-center" title="BNB">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="11" fill="#F3BA2F" />
-              <path d="M12 5L14.5 7.5L10.5 11.5L8 9L12 5Z" fill="white" />
-              <path d="M15.5 8.5L18 11L15.5 13.5L13 11L15.5 8.5Z" fill="white" />
-              <path d="M12 12L14.5 14.5L10.5 18.5L8 16L12 12Z" fill="white" />
-              <path d="M8.5 8.5L11 11L8.5 13.5L6 11L8.5 8.5Z" fill="white" />
-              <path d="M12 10L14 12L12 14L10 12L12 10Z" fill="white" />
-            </svg>
+          <div className="flex flex-col items-center gap-1" title="BNB">
+            <div className="rounded-full" style={{ filter: 'drop-shadow(0 0 6px rgba(243,186,47,0.7)) drop-shadow(0 0 12px rgba(243,186,47,0.3))' }}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#F3BA2F" />
+                <path d="M20 10L23.5 13.5L18 19L15 16L20 10Z" fill="white" />
+                <path d="M25 14L28 17L25 20L22 17L25 14Z" fill="white" />
+                <path d="M20 19L23.5 22.5L18 28L15 25L20 19Z" fill="white" />
+                <path d="M15 14L18 17L15 20L12 17L15 14Z" fill="white" />
+                <path d="M20 16L22.5 18.5L20 21L17.5 18.5L20 16Z" fill="white" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-wider text-white/50">BNB</span>
           </div>
         </div>
       </motion.div>
