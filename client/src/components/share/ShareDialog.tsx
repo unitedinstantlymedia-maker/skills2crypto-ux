@@ -10,6 +10,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useLanguage } from "@/context/LanguageContext";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
@@ -20,6 +21,7 @@ interface ShareDialogProps {
 
 export function ShareDialog({ open, onOpenChange }: ShareDialogProps) {
   const { toast } = useToast();
+  const { t } = useLanguage();
   const url = window.location.origin;
   const text = 'Play 1v1 crypto skill games with me on SKILLS2CRYPTO! 🎮💸';
   const fullText = `${text} Try now: ${url}`;
@@ -106,7 +108,7 @@ export function ShareDialog({ open, onOpenChange }: ShareDialogProps) {
         <DialogHeader>
           <DialogTitle className="text-xl font-display font-bold uppercase tracking-wider text-center">Share SKILLS2CRYPTO</DialogTitle>
           <DialogDescription className="text-center text-muted-foreground">
-            Invite your friends to battle for crypto!
+            {t('Invite your friends to battle for crypto!')}
           </DialogDescription>
         </DialogHeader>
         
