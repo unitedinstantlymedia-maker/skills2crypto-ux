@@ -246,18 +246,14 @@ export default function Wallet() {
             </div>
 
             <div className="space-y-1.5 pl-11">
-              {isEvmConnected && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-yellow-400/70">BNB Smart Chain (BEP-20)</span>
-                  <span className="font-mono text-muted-foreground">{usdtBscBalance.toFixed(4)}</span>
-                </div>
-              )}
-              {isTronConnected && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-red-400/70">Tron (TRC-20)</span>
-                  <span className="font-mono text-muted-foreground">{usdtTrc20Balance.toFixed(4)}</span>
-                </div>
-              )}
+              <div className="flex justify-between text-xs">
+                <span className="text-yellow-400/70">BNB Smart Chain (BEP-20)</span>
+                <span className="font-mono text-muted-foreground">{usdtBscBalance.toFixed(4)}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-red-400/70">Tron (TRC-20)</span>
+                <span className="font-mono text-muted-foreground">{usdtTrc20Balance.toFixed(4)}</span>
+              </div>
             </div>
 
             {isEvmConnected && !isCorrectChainForAsset('USDT') && !isTronConnected && (
