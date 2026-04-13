@@ -1,7 +1,7 @@
 import { useGame } from "@/context/GameContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Wallet as WalletIcon, ShieldCheck, LogOut, UserCircle, Pencil } from "lucide-react";
+import { Copy, Wallet as WalletIcon, ShieldCheck, LogOut, UserCircle, Pencil, ExternalLink } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { useRealWallet } from "@/core/wallet/WalletProvider";
 import { useState } from "react";
@@ -19,6 +19,7 @@ export default function Wallet() {
   const { t } = useLanguage();
   const {
     openConnectDialog,
+    openTronDialog,
     disconnectAll,
     evmAddress,
     tronAddress,
@@ -53,12 +54,21 @@ export default function Wallet() {
           </p>
         </div>
 
-        <Button
-          onClick={openConnectDialog}
-          className="h-14 px-8 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
-        >
-          {t('Connect Now')}
-        </Button>
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          <Button
+            onClick={openConnectDialog}
+            className="h-14 px-8 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
+          >
+            {t('Connect Now')}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={openTronDialog}
+            className="h-10 text-sm border-white/10 text-muted-foreground hover:text-white"
+          >
+            <span className="text-red-400 mr-1">USDT</span> — {t('Connect TronLink')}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -117,6 +127,15 @@ export default function Wallet() {
                     {copied === 'evm' && <span className="text-xs text-green-400">{t('Copied')}</span>}
                   </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={openConnectDialog}
+                  className="text-xs text-muted-foreground hover:text-white"
+                >
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  {t('Manage')}
+                </Button>
               </div>
             </CardHeader>
           </Card>
@@ -145,11 +164,18 @@ export default function Wallet() {
           </Card>
         )}
 
-        {!isEvmConnected || !isTronConnected ? (
-          <Button variant="outline" size="sm" onClick={openConnectDialog} className="border-white/10 text-sm">
-            {t('Connect more wallets')}
-          </Button>
-        ) : null}
+        <div className="flex gap-2">
+          {!isEvmConnected && (
+            <Button variant="outline" size="sm" onClick={openConnectDialog} className="border-white/10 text-sm flex-1">
+              <span className="text-blue-400 mr-1">ETH/BNB</span> — {t('Connect')}
+            </Button>
+          )}
+          {!isTronConnected && (
+            <Button variant="outline" size="sm" onClick={openTronDialog} className="border-white/10 text-sm flex-1">
+              <span className="text-red-400 mr-1">USDT</span> — {t('Connect TronLink')}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="space-y-4">

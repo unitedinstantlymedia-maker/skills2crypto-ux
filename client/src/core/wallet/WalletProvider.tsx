@@ -1,14 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { WagmiProvider, useAccount, useBalance, useConnect, useDisconnect } from 'wagmi';
-import { mainnet, bsc } from 'wagmi/chains';
-import { wagmiConfig } from '@/config/wagmi';
+import { WagmiProvider } from 'wagmi';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { mainnet, bsc } from '@reown/appkit/networks';
+import { useAppKit, useAppKitAccount, useDisconnect as useAppKitDisconnect } from '@reown/appkit/react';
+import { useBalance } from 'wagmi';
+import { wagmiConfig, appKit } from '@/config/wagmi';
+import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { connectTronLink, getTronAddress, getUsdtTrc20Balance, isTronLinkAvailable } from './TronWallet';
-import { ConnectWalletDialog } from '@/components/wallet/ConnectWalletDialog';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
+import { TronConnectDialog } from '@/components/wallet/TronConnectDialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface RealWalletContextValue {
   openConnectDialog: () => void;
+  openTronDialog: () => void;
   disconnectAll: () => void;
   evmAddress: string | null;
   tronAddress: string | null;
@@ -27,24 +33,28 @@ export function useRealWallet() {
 }
 
 function WalletSyncer({ children }: { children: React.ReactNode }) {
-  const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
-  const { disconnect: disconnectEvm } = useDisconnect();
+  const { open } = useAppKit();
+  const { address: evmAddress, isConnected: isEvmConnected } = useAppKitAccount();
+  const { disconnect: disconnectEvm } = useAppKitDisconnect();
+  const { toast } = useToast();
   const [tronAddress, setTronAddress] = useState<string | null>(null);
-  const [connectDialogOpen, setConnectDialogOpen] = useState(false);
+  const [tronDialogOpen, setTronDialogOpen] = useState(false);
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
   const [nickname, setNicknameState] = useState<string | null>(null);
   const hasPromptedNickname = useRef(false);
 
+  const evmAddr = (isEvmConnected && evmAddress) ? evmAddress as `0x${string}` : undefined;
+
   const ethBalance = useBalance({
-    address: evmAddress,
+    address: evmAddr,
     chainId: mainnet.id,
-    query: { enabled: isEvmConnected },
+    query: { enabled: !!evmAddr },
   });
 
   const bnbBalance = useBalance({
-    address: evmAddress,
+    address: evmAddr,
     chainId: bsc.id,
-    query: { enabled: isEvmConnected },
+    query: { enabled: !!evmAddr },
   });
 
   const [usdtBalance, setUsdtBalance] = useState(0);
@@ -100,11 +110,41 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     }
   }, [evmAddress, isEvmConnected, tronAddress]);
 
+  useEffect(() => {
+    if (!tronAddress) return;
+    const handleAccountChange = () => {
+      const newAddr = getTronAddress();
+      if (newAddr && newAddr !== tronAddress) {
+        setTronAddress(newAddr);
+      } else if (!newAddr) {
+        setTronAddress(null);
+        setUsdtBalance(0);
+      }
+    };
+    const messageHandler = (e: MessageEvent) => {
+      if (e.data?.message?.action === 'accountsChanged' || e.data?.message?.action === 'setAccount') {
+        handleAccountChange();
+      }
+    };
+    window.addEventListener('message', messageHandler);
+    const iv = setInterval(handleAccountChange, 10000);
+    return () => { window.removeEventListener('message', messageHandler); clearInterval(iv); };
+  }, [tronAddress]);
+
   const handleTronConnect = useCallback(async () => {
-    const addr = await connectTronLink();
-    if (addr) setTronAddress(addr);
-    return addr;
-  }, []);
+    try {
+      const addr = await connectTronLink();
+      if (addr) {
+        setTronAddress(addr);
+        return addr;
+      }
+      toast({ title: 'TronLink', description: 'Connection was rejected or cancelled.', variant: 'destructive' });
+      return null;
+    } catch (err) {
+      toast({ title: 'TronLink Error', description: String(err instanceof Error ? err.message : err), variant: 'destructive' });
+      return null;
+    }
+  }, [toast]);
 
   const disconnectAll = useCallback(() => {
     disconnectEvm();
@@ -123,14 +163,19 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     }
   }, [evmAddress, tronAddress]);
 
+  const openConnectDialog = useCallback(() => {
+    open({ view: 'Connect' });
+  }, [open]);
+
   useEffect(() => {
-    const handler = () => setConnectDialogOpen(true);
+    const handler = () => openConnectDialog();
     window.addEventListener('skills2crypto:open-connect-dialog', handler);
     return () => window.removeEventListener('skills2crypto:open-connect-dialog', handler);
-  }, []);
+  }, [openConnectDialog]);
 
   const contextValue: RealWalletContextValue = {
-    openConnectDialog: () => setConnectDialogOpen(true),
+    openConnectDialog,
+    openTronDialog: () => setTronDialogOpen(true),
     disconnectAll,
     evmAddress: evmAddress ?? null,
     tronAddress,
@@ -143,13 +188,11 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   return (
     <RealWalletContext.Provider value={contextValue}>
       {children}
-      <ConnectWalletDialog
-        open={connectDialogOpen}
-        onOpenChange={setConnectDialogOpen}
-        onTronConnect={handleTronConnect}
-        isEvmConnected={isEvmConnected}
+      <TronConnectDialog
+        open={tronDialogOpen}
+        onOpenChange={setTronDialogOpen}
+        onConnect={handleTronConnect}
         isTronConnected={!!tronAddress}
-        evmAddress={evmAddress ?? null}
         tronAddress={tronAddress}
       />
       <NicknameDialog
@@ -164,7 +207,9 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
-      <WalletSyncer>{children}</WalletSyncer>
+      <QueryClientProvider client={queryClient}>
+        <WalletSyncer>{children}</WalletSyncer>
+      </QueryClientProvider>
     </WagmiProvider>
   );
 }

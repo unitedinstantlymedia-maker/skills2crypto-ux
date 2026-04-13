@@ -167,14 +167,18 @@ npm run db:push     # Push database schema
 12. **Expiration** - Challenges expire after 1 hour (3600s TTL), expired challenges kept 24 hours for history
 
 ### Real Wallet Integration (Apr 13, 2026)
-1. **wagmi v2 + viem v2** - EVM wallet connections for ETH (Ethereum mainnet) and BNB (BSC)
-2. **TronLink** - Tron wallet connection for USDT TRC-20 via `window.tronWeb` injection
-3. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider and manages real wallet state
-4. **ConnectWalletDialog** - `client/src/components/wallet/ConnectWalletDialog.tsx` multi-chain wallet connection UI
-5. **wagmi config** - `client/src/config/wagmi.ts` with Ethereum mainnet + BSC chains, injected + WalletConnect connectors
-6. **TronWallet utility** - `client/src/core/wallet/TronWallet.ts` for TronLink detection, connection, USDT TRC-20 balance
-7. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, separate real/game balances
-8. **Network labels** - Wallet page shows USDT=Tron (TRC-20), ETH=Ethereum, BNB=BNB Smart Chain
-9. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
-10. **Vite config** - Added `resolve.dedupe` for react/react-dom/@tanstack/react-query, excluded @react-three packages
-11. **Translations** - 7 new keys added to all 8 languages (Disconnect, Copied, Choose Nickname, etc.)
+1. **@reown/appkit v1.8.19** - Universal wallet modal (MetaMask, Trust Wallet, Coinbase, WalletConnect QR, Rainbow) for ETH + BNB
+2. **wagmi v2 + viem v2** - EVM wallet connections via WagmiAdapter from @reown/appkit-adapter-wagmi
+3. **TronLink** - Tron wallet connection for USDT TRC-20 via `window.tronWeb` injection, with account change detection
+4. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider + QueryClientProvider, manages EVM + Tron state sync
+5. **appKit config** - `client/src/config/wagmi.ts` with WagmiAdapter, dark theme, green accent, featured wallets
+6. **TronConnectDialog** - `client/src/components/wallet/TronConnectDialog.tsx` separate Tron-specific connect dialog
+7. **TronWallet utility** - `client/src/core/wallet/TronWallet.ts` for TronLink detection, connection, USDT TRC-20 balance
+8. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, escrow protection, separate real/game balances
+9. **Network labels** - Wallet page shows USDT=Tron (TRC-20), ETH=Ethereum, BNB=BNB Smart Chain
+10. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
+11. **Vite config** - `resolve.dedupe` for react/react-dom/react-jsx-runtime/valtio/@tanstack/react-query; `optimizeDeps.include` for all @reown + wagmi + viem packages
+12. **Translations** - 11 keys across all 8 languages (Disconnect, Copied, Choose Nickname, Connect TronLink, Manage, etc.)
+13. **App.tsx** - QueryClientProvider removed from top-level (now inside WalletProvider using shared queryClient from lib/queryClient.ts)
+14. **Error handling** - Tron connect failures show toast notifications; Tron account changes detected via message events + polling
+15. **Env var** - `VITE_REOWN_PROJECT_ID` required for appkit modal

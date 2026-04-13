@@ -29,7 +29,7 @@ export default defineConfig({
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
-    dedupe: ['react', 'react-dom', '@tanstack/react-query'],
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', '@tanstack/react-query', 'valtio'],
   },
   css: {
     postcss: {
@@ -43,6 +43,17 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@react-three/fiber', '@react-three/drei'],
+    include: [
+      'react',
+      'react-dom',
+      '@tanstack/react-query',
+      'wagmi',
+      'viem',
+      '@reown/appkit',
+      '@reown/appkit/react',
+      '@reown/appkit/networks',
+      '@reown/appkit-adapter-wagmi',
+    ],
   },
   server: {
     host: "0.0.0.0",
