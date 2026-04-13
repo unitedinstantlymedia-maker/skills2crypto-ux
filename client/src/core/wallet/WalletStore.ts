@@ -6,7 +6,6 @@ type Listener = (state: WalletState) => void;
 interface RealWalletData {
   connected: boolean;
   address: string | null;
-  tronAddress: string | null;
   balances: Record<Asset, number>;
   nickname: string | null;
 }
@@ -16,7 +15,6 @@ export class WalletStore {
     connected: false,
     address: null,
     balances: { USDT: 0, ETH: 0, BNB: 0 },
-    tronAddress: null,
     nickname: null,
   };
 
@@ -37,7 +35,8 @@ export class WalletStore {
       if (parsed.balances) {
         parsed.balances = { USDT: 0, ETH: 0, BNB: 0, ...parsed.balances };
       }
-      this.state = { tronAddress: null, nickname: null, ...parsed };
+      this.state = { nickname: null, ...parsed };
+      if ('tronAddress' in this.state) delete (this.state as any).tronAddress;
       this.gameBalances = { ...this.state.balances };
     }
   }
@@ -78,7 +77,6 @@ export class WalletStore {
       connected: data.connected,
       address: data.address,
       balances: { ...this.realBalances },
-      tronAddress: data.tronAddress,
       nickname: data.nickname,
     };
     if (!this.escrowActive) {
@@ -116,7 +114,6 @@ export class WalletStore {
         connected: true,
         address,
         balances: { ...INITIAL_BALANCES },
-        tronAddress: null,
         nickname: null,
       };
       this.gameBalances = { ...INITIAL_BALANCES };
@@ -129,7 +126,6 @@ export class WalletStore {
       connected: false,
       address: null,
       balances: { USDT: 0, ETH: 0, BNB: 0 },
-      tronAddress: null,
       nickname: null,
     };
     this.realBalances = { USDT: 0, ETH: 0, BNB: 0 };

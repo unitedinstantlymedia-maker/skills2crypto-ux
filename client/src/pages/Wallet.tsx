@@ -8,7 +8,7 @@ import { useState } from "react";
 import { NicknameDialog } from "@/components/wallet/NicknameDialog";
 
 const NETWORK_LABELS: Record<string, { label: string; color: string }> = {
-  USDT: { label: "Tron (TRC-20)", color: "text-red-400" },
+  USDT: { label: "BNB Smart Chain (BEP-20)", color: "text-yellow-400" },
   ETH: { label: "Ethereum", color: "text-blue-400" },
   BNB: { label: "BNB Smart Chain", color: "text-yellow-400" },
 };
@@ -19,12 +19,9 @@ export default function Wallet() {
   const { t } = useLanguage();
   const {
     openConnectDialog,
-    openTronDialog,
     disconnectAll,
     evmAddress,
-    tronAddress,
     isEvmConnected,
-    isTronConnected,
     nickname,
     setNickname,
   } = useRealWallet();
@@ -54,21 +51,12 @@ export default function Wallet() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 w-full max-w-xs">
-          <Button
-            onClick={openConnectDialog}
-            className="h-14 px-8 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
-          >
-            {t('Connect Now')}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={openTronDialog}
-            className="h-10 text-sm border-white/10 text-muted-foreground hover:text-white"
-          >
-            <span className="text-red-400 mr-1">USDT</span> — {t('Connect TronLink')}
-          </Button>
-        </div>
+        <Button
+          onClick={openConnectDialog}
+          className="h-14 px-8 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow w-full max-w-xs"
+        >
+          {t('Connect Now')}
+        </Button>
       </div>
     );
   }
@@ -116,7 +104,7 @@ export default function Wallet() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-blue-400" />
-                    <CardTitle className="text-xs text-blue-400 font-bold uppercase tracking-wider">EVM (ETH / BNB)</CardTitle>
+                    <CardTitle className="text-xs text-blue-400 font-bold uppercase tracking-wider">EVM (ETH / BNB / USDT)</CardTitle>
                   </div>
                   <div className="flex items-center gap-2 font-mono text-sm text-white">
                     {shortenAddr(evmAddress)}
@@ -141,41 +129,11 @@ export default function Wallet() {
           </Card>
         )}
 
-        {isTronConnected && tronAddress && (
-          <Card className="bg-gradient-to-br from-red-500/10 to-card border-red-500/20">
-            <CardHeader className="pb-2">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-red-400" />
-                    <CardTitle className="text-xs text-red-400 font-bold uppercase tracking-wider">Tron (TRC-20)</CardTitle>
-                  </div>
-                  <div className="flex items-center gap-2 font-mono text-sm text-white">
-                    {shortenAddr(tronAddress)}
-                    <Copy
-                      className="h-3.5 w-3.5 text-muted-foreground cursor-pointer hover:text-white"
-                      onClick={() => handleCopy(tronAddress, 'tron')}
-                    />
-                    {copied === 'tron' && <span className="text-xs text-green-400">{t('Copied')}</span>}
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
+        {!isEvmConnected && (
+          <Button variant="outline" size="sm" onClick={openConnectDialog} className="border-white/10 text-sm w-full">
+            {t('Connect')}
+          </Button>
         )}
-
-        <div className="flex gap-2">
-          {!isEvmConnected && (
-            <Button variant="outline" size="sm" onClick={openConnectDialog} className="border-white/10 text-sm flex-1">
-              <span className="text-blue-400 mr-1">ETH/BNB</span> — {t('Connect')}
-            </Button>
-          )}
-          {!isTronConnected && (
-            <Button variant="outline" size="sm" onClick={openTronDialog} className="border-white/10 text-sm flex-1">
-              <span className="text-red-400 mr-1">USDT</span> — {t('Connect TronLink')}
-            </Button>
-          )}
-        </div>
       </div>
 
       <div className="space-y-4">

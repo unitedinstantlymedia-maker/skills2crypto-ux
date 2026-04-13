@@ -39,10 +39,10 @@ npm run db:push     # Push database schema
 ## Key Features
 
 - Games: Chess, Tetris (Block Stack), Checkers, Battleship
-- Assets: USDT (Tron TRC-20), ETH (Ethereum), BNB (BSC)
+- Assets: USDT (BSC BEP-20), ETH (Ethereum), BNB (BSC)
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot
-- Real wallet connections via wagmi (EVM) + TronLink (Tron)
+- Real wallet connections via @reown/appkit (EVM — MetaMask, Trust, Coinbase, WalletConnect)
 - Nickname system (localStorage-based, per wallet address)
 - Multi-language support (8 languages)
 
@@ -167,18 +167,16 @@ npm run db:push     # Push database schema
 12. **Expiration** - Challenges expire after 1 hour (3600s TTL), expired challenges kept 24 hours for history
 
 ### Real Wallet Integration (Apr 13, 2026)
-1. **@reown/appkit v1.8.19** - Universal wallet modal (MetaMask, Trust Wallet, Coinbase, WalletConnect QR, Rainbow) for ETH + BNB
+1. **@reown/appkit v1.8.19** - Universal wallet modal (MetaMask, Trust Wallet, Coinbase, WalletConnect QR, Rainbow) for ETH + BNB + USDT
 2. **wagmi v2 + viem v2** - EVM wallet connections via WagmiAdapter from @reown/appkit-adapter-wagmi
-3. **TronLink** - Tron wallet connection for USDT TRC-20 via `window.tronWeb` injection, with account change detection
-4. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider + QueryClientProvider, manages EVM + Tron state sync
+3. **USDT on BSC** - USDT BEP-20 balance read via `useReadContract` with contract `0x55d398326f99059fF775485246999027B3197955` on BSC
+4. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider + QueryClientProvider, manages EVM state sync
 5. **appKit config** - `client/src/config/wagmi.ts` with WagmiAdapter, dark theme, green accent, featured wallets
-6. **TronConnectDialog** - `client/src/components/wallet/TronConnectDialog.tsx` separate Tron-specific connect dialog
-7. **TronWallet utility** - `client/src/core/wallet/TronWallet.ts` for TronLink detection, connection, USDT TRC-20 balance
-8. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, escrow protection, separate real/game balances
-9. **Network labels** - Wallet page shows USDT=Tron (TRC-20), ETH=Ethereum, BNB=BNB Smart Chain
-10. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
-11. **Vite config** - `resolve.dedupe` for react/react-dom/react-jsx-runtime/valtio/@tanstack/react-query; `optimizeDeps.include` for all @reown + wagmi + viem packages
-12. **Translations** - 11 keys across all 8 languages (Disconnect, Copied, Choose Nickname, Connect TronLink, Manage, etc.)
-13. **App.tsx** - QueryClientProvider removed from top-level (now inside WalletProvider using shared queryClient from lib/queryClient.ts)
-14. **Error handling** - Tron connect failures show toast notifications; Tron account changes detected via message events + polling
-15. **Env var** - `VITE_REOWN_PROJECT_ID` required for appkit modal
+6. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, escrow protection, separate real/game balances
+7. **Network labels** - Wallet page shows USDT=BNB Smart Chain (BEP-20), ETH=Ethereum, BNB=BNB Smart Chain
+8. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
+9. **Vite config** - `resolve.dedupe` for react/react-dom/react-jsx-runtime/valtio/@tanstack/react-query; `optimizeDeps.include` for all @reown + wagmi + viem packages
+10. **Translations** - 11 keys across all 8 languages (Disconnect, Copied, Choose Nickname, Manage, etc.)
+11. **App.tsx** - QueryClientProvider removed from top-level (now inside WalletProvider using shared queryClient from lib/queryClient.ts)
+12. **Env var** - `VITE_REOWN_PROJECT_ID` required for appkit modal
+13. **Removed** - TronLink/TronWallet/TronConnectDialog/ConnectWalletDialog all deleted; no Tron dependency

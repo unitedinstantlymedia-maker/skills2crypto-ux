@@ -9,7 +9,6 @@ export interface WalletState {
   connected: boolean;
   address: string | null;
   balances: Record<Asset, number>;
-  tronAddress?: string | null;
   nickname?: string | null;
 }
 
