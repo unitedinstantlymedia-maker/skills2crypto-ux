@@ -13,7 +13,6 @@ import { useTronLink } from './useTronLink';
 import type { Asset } from '@/core/types';
 
 const USDT_BSC_ADDRESS = '0x55d398326f99059fF775485246999027B3197955' as const;
-const USDT_ETH_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7' as const;
 
 const ERC20_BALANCE_ABI = [
   {
@@ -51,7 +50,6 @@ interface RealWalletContextValue {
   connectTronLink: () => Promise<void>;
   disconnectTronLink: () => void;
   usdtBscBalance: number;
-  usdtEthBalance: number;
 }
 
 const RealWalletContext = createContext<RealWalletContextValue | undefined>(undefined);
@@ -105,18 +103,8 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     query: { enabled: !!evmAddr, refetchInterval: 30000 },
   });
 
-  const usdtEthResult = useReadContract({
-    address: USDT_ETH_ADDRESS,
-    abi: ERC20_BALANCE_ABI,
-    functionName: 'balanceOf',
-    args: evmAddr ? [evmAddr] : undefined,
-    chainId: mainnet.id,
-    query: { enabled: !!evmAddr, refetchInterval: 30000 },
-  });
-
   const usdtBsc = usdtBscResult.data ? parseFloat(formatUnits(usdtBscResult.data, 18)) : 0;
-  const usdtEth = usdtEthResult.data ? parseFloat(formatUnits(usdtEthResult.data, 6)) : 0;
-  const usdtTotal = usdtBsc + usdtEth + usdtTrc20Balance;
+  const usdtTotal = usdtBsc + usdtTrc20Balance;
 
   const isAnyConnected = isEvmConnected || isTronConnected;
   const primaryAddress = evmAddress ?? tronAddress ?? null;
@@ -215,7 +203,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     connectTronLink,
     disconnectTronLink,
     usdtBscBalance: usdtBsc,
-    usdtEthBalance: usdtEth,
   };
 
   return (

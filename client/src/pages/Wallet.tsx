@@ -31,7 +31,6 @@ export default function Wallet() {
     connectTronLink,
     disconnectTronLink,
     usdtBscBalance,
-    usdtEthBalance,
   } = useRealWallet();
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -248,16 +247,10 @@ export default function Wallet() {
 
             <div className="space-y-1.5 pl-11">
               {isEvmConnected && (
-                <>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-yellow-400/70">BNB Smart Chain (BEP-20)</span>
-                    <span className="font-mono text-muted-foreground">{usdtBscBalance.toFixed(4)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-blue-400/70">Ethereum (ERC-20)</span>
-                    <span className="font-mono text-muted-foreground">{usdtEthBalance.toFixed(4)}</span>
-                  </div>
-                </>
+                <div className="flex justify-between text-xs">
+                  <span className="text-yellow-400/70">BNB Smart Chain (BEP-20)</span>
+                  <span className="font-mono text-muted-foreground">{usdtBscBalance.toFixed(4)}</span>
+                </div>
               )}
               {isTronConnected && (
                 <div className="flex justify-between text-xs">
