@@ -31,7 +31,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'Win by capturing all pieces or blocking all opponent moves.',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Take turns firing at enemy coordinates. Hit = red, Miss = gray.',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 seconds per turn. First to sink all 5 enemy ships wins.'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 seconds per turn. First to sink all 5 enemy ships wins.',
+    'Disconnect': 'Disconnect', 'Copied': 'Copied', 'Choose Nickname': 'Choose Nickname', 'characters': 'characters', 'Connect your wallets to play and see your real balances.': 'Connect your wallets to play and see your real balances.', 'Install TronLink extension for USDT (TRC-20) support': 'Install TronLink extension for USDT (TRC-20) support', 'Connect more wallets': 'Connect more wallets'
   },
   'ru': {
     'Select Language': 'Выбрать язык', 'Search language...': 'Поиск языка...', 'No language found.': 'Язык не найден.',
@@ -67,7 +68,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'Победа — захватить все фигуры или заблокировать все ходы соперника.',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'Расставьте 5 кораблей на поле: Авианосец (5), Линкор (4), Крейсер (3), Подлодка (3), Эсминец (2).',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Стреляйте по координатам противника по очереди. Попадание = красный, Промах = серый.',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 секунд на ход. Побеждает тот, кто первым потопит все 5 кораблей противника.'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 секунд на ход. Побеждает тот, кто первым потопит все 5 кораблей противника.',
+    'Disconnect': 'Отключить', 'Copied': 'Скопировано', 'Choose Nickname': 'Выбрать никнейм', 'characters': 'символов', 'Connect your wallets to play and see your real balances.': 'Подключите кошельки, чтобы играть и видеть ваши реальные балансы.', 'Install TronLink extension for USDT (TRC-20) support': 'Установите расширение TronLink для поддержки USDT (TRC-20)', 'Connect more wallets': 'Подключить ещё'
   },
   'es': {
     'Select Language': 'Seleccionar Idioma', 'Search language...': 'Buscar idioma...', 'No language found.': 'Idioma no encontrado.',
@@ -102,7 +104,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'Gana capturando todas las piezas o bloqueando todos los movimientos del oponente.',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'Coloca 5 barcos en tu cuadrícula: Portaaviones (5), Acorazado (4), Crucero (3), Submarino (3), Destructor (2).',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Dispara por turnos a las coordenadas enemigas. Acierto = rojo, Fallo = gris.',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 segundos por turno. El primero en hundir los 5 barcos enemigos gana.'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 segundos por turno. El primero en hundir los 5 barcos enemigos gana.',
+    'Disconnect': 'Desconectar', 'Copied': 'Copiado', 'Choose Nickname': 'Elegir apodo', 'characters': 'caracteres', 'Connect your wallets to play and see your real balances.': 'Conecta tus billeteras para jugar y ver tus saldos reales.', 'Install TronLink extension for USDT (TRC-20) support': 'Instala la extensión TronLink para soporte de USDT (TRC-20)', 'Connect more wallets': 'Conectar más billeteras'
   },
   'he': {
     'Select Language': 'בחר שפה', 'Search language...': 'חפש שפה...', 'No language found.': 'לא נמצאה שפה.',
@@ -137,7 +140,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'ניצחון באכילת כל הכלים או חסימת כל מהלכי היריב.',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'מקם 5 ספינות על הלוח: נושאת מטוסים (5), ספינת קרב (4), סיירת (3), צוללת (3), משחתת (2).',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'ירי לסירוגין לקואורדינטות האויב. פגיעה = אדום, החטאה = אפור.',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 שניות לתור. הראשון שמטביע את כל 5 הספינות מנצח.'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 שניות לתור. הראשון שמטביע את כל 5 הספינות מנצח.',
+    'Disconnect': 'התנתק', 'Copied': 'הועתק', 'Choose Nickname': 'בחר כינוי', 'characters': 'תווים', 'Connect your wallets to play and see your real balances.': 'חבר את הארנקים שלך כדי לשחק ולראות את היתרות האמיתיות.', 'Install TronLink extension for USDT (TRC-20) support': 'התקן תוסף TronLink לתמיכה ב-USDT (TRC-20)', 'Connect more wallets': 'חבר עוד ארנקים'
   },
   'hi': {
     'Select Language': 'भाषा चुनें', 'Search language...': 'भाषा खोजें...', 'No language found.': 'कोई भाषा नहीं मिली।',
@@ -172,7 +176,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'सभी मोहरे खाकर या प्रतिद्वंद्वी की सभी चालें रोककर जीतें।',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': '5 जहाज़ रखें: कैरियर (5), बैटलशिप (4), क्रूज़र (3), सबमरीन (3), डिस्ट्रॉयर (2)।',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'बारी-बारी से दुश्मन के निर्देशांकों पर फायर करें। हिट = लाल, मिस = ग्रे।',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 सेकंड प्रति बारी। सभी 5 दुश्मन जहाज़ों को पहले डुबोने वाला जीतता है।'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 सेकंड प्रति बारी। सभी 5 दुश्मन जहाज़ों को पहले डुबोने वाला जीतता है।',
+    'Disconnect': 'डिस्कनेक्ट', 'Copied': 'कॉपी किया', 'Choose Nickname': 'उपनाम चुनें', 'characters': 'अक्षर', 'Connect your wallets to play and see your real balances.': 'खेलने और अपने वास्तविक बैलेंस देखने के लिए अपने वॉलेट कनेक्ट करें।', 'Install TronLink extension for USDT (TRC-20) support': 'USDT (TRC-20) समर्थन के लिए TronLink एक्सटेंशन इंस्टॉल करें', 'Connect more wallets': 'और वॉलेट कनेक्ट करें'
   },
   'vi': {
     'Select Language': 'Chọn ngôn ngữ', 'Search language...': 'Tìm ngôn ngữ...', 'No language found.': 'Không tìm thấy ngôn ngữ.',
@@ -208,7 +213,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'Thắng bằng cách ăn hết quân hoặc chặn mọi nước đi của đối thủ.',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'Đặt 5 tàu trên lưới: Tàu sân bay (5), Thiết giáp hạm (4), Tuần dương (3), Tàu ngầm (3), Khu trục (2).',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Lần lượt bắn vào tọa độ đối phương. Trúng = đỏ, Trượt = xám.',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 giây mỗi lượt. Ai đánh chìm hết 5 tàu đối phương trước sẽ thắng.'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 giây mỗi lượt. Ai đánh chìm hết 5 tàu đối phương trước sẽ thắng.',
+    'Disconnect': 'Ngắt kết nối', 'Copied': 'Đã sao chép', 'Choose Nickname': 'Chọn biệt danh', 'characters': 'ký tự', 'Connect your wallets to play and see your real balances.': 'Kết nối ví của bạn để chơi và xem số dư thực.', 'Install TronLink extension for USDT (TRC-20) support': 'Cài tiện ích TronLink để hỗ trợ USDT (TRC-20)', 'Connect more wallets': 'Kết nối thêm ví'
   },
   'th': {
     'Select Language': 'เลือกภาษา', 'Search language...': 'ค้นหาภาษา...', 'No language found.': 'ไม่พบภาษา',
@@ -244,6 +250,7 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Win by capturing all pieces or blocking all opponent moves.': 'ชนะโดยกินหมากทั้งหมดหรือบล็อกทุกตาเดินของคู่แข่ง',
     'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).': 'วาง 5 เรือบนกริด: เรือบรรทุก (5) เรือรบ (4) เรือลาดตระเวน (3) เรือดำน้ำ (3) เรือพิฆาต (2)',
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'ผลัดกันยิงพิกัดศัตรู โดน = แดง พลาด = เทา',
-    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 วินาทีต่อตา จมเรือศัตรูครบ 5 ลำก่อนชนะ'
+    '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 วินาทีต่อตา จมเรือศัตรูครบ 5 ลำก่อนชนะ',
+    'Disconnect': 'ตัดการเชื่อมต่อ', 'Copied': 'คัดลอกแล้ว', 'Choose Nickname': 'เลือกชื่อเล่น', 'characters': 'ตัวอักษร', 'Connect your wallets to play and see your real balances.': 'เชื่อมต่อกระเป๋าเงินเพื่อเล่นและดูยอดเงินจริง', 'Install TronLink extension for USDT (TRC-20) support': 'ติดตั้ง TronLink สำหรับ USDT (TRC-20)', 'Connect more wallets': 'เชื่อมต่อกระเป๋าเพิ่ม'
   }
 };

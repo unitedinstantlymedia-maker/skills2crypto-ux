@@ -22,6 +22,7 @@ This is a React + Express full-stack application that allows users to play 1v1 s
 ## Tech Stack
 
 - **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion
+- **Web3**: wagmi v2, viem v2, @wagmi/connectors (EVM), TronLink (Tron TRC-20)
 - **Backend**: Express, TypeScript
 - **Database**: PostgreSQL with Drizzle ORM (in-memory storage for prototype)
 - **UI Components**: shadcn/ui (Radix UI based)
@@ -38,11 +39,12 @@ npm run db:push     # Push database schema
 ## Key Features
 
 - Games: Chess, Tetris (Block Stack), Checkers, Battleship
-- Assets: USDT, ETH, TON
+- Assets: USDT (Tron TRC-20), ETH (Ethereum), BNB (BSC)
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot
-- Non-custodial concept (prototype simulates wallet state)
-- Multi-language support
+- Real wallet connections via wagmi (EVM) + TronLink (Tron)
+- Nickname system (localStorage-based, per wallet address)
+- Multi-language support (8 languages)
 
 ## Architecture
 
@@ -163,3 +165,16 @@ npm run db:push     # Push database schema
 10. **Socket.IO Events** - challenge-match-created, challenge-accepted, challenge-expired, challenge-cancelled
 11. **Redis Storage** - challenge:{id} (JSON), challenge:{id}:history (list), user:{id}:challenges (set), match:{id} (hash)
 12. **Expiration** - Challenges expire after 1 hour (3600s TTL), expired challenges kept 24 hours for history
+
+### Real Wallet Integration (Apr 13, 2026)
+1. **wagmi v2 + viem v2** - EVM wallet connections for ETH (Ethereum mainnet) and BNB (BSC)
+2. **TronLink** - Tron wallet connection for USDT TRC-20 via `window.tronWeb` injection
+3. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider and manages real wallet state
+4. **ConnectWalletDialog** - `client/src/components/wallet/ConnectWalletDialog.tsx` multi-chain wallet connection UI
+5. **wagmi config** - `client/src/config/wagmi.ts` with Ethereum mainnet + BSC chains, injected + WalletConnect connectors
+6. **TronWallet utility** - `client/src/core/wallet/TronWallet.ts` for TronLink detection, connection, USDT TRC-20 balance
+7. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, separate real/game balances
+8. **Network labels** - Wallet page shows USDT=Tron (TRC-20), ETH=Ethereum, BNB=BNB Smart Chain
+9. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
+10. **Vite config** - Added `resolve.dedupe` for react/react-dom/@tanstack/react-query, excluded @react-three packages
+11. **Translations** - 7 new keys added to all 8 languages (Disconnect, Copied, Choose Nickname, etc.)

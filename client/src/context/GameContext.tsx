@@ -148,7 +148,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [walletState.address]);
 
   const connectWallet = async () => {
-    await walletAdapter.connect();
+    const event = new CustomEvent('skills2crypto:open-connect-dialog');
+    window.dispatchEvent(event);
   };
 
   const startSearch = async () => {

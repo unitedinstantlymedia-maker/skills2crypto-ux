@@ -29,6 +29,7 @@ export default defineConfig({
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
+    dedupe: ['react', 'react-dom', '@tanstack/react-query'],
   },
   css: {
     postcss: {
@@ -39,6 +40,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+  },
+  optimizeDeps: {
+    exclude: ['@react-three/fiber', '@react-three/drei'],
   },
   server: {
     host: "0.0.0.0",
