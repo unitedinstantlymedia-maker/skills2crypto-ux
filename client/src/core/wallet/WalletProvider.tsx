@@ -9,6 +9,7 @@ import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { formatUnits } from 'viem';
+import { useTronLink } from './useTronLink';
 import type { Asset } from '@/core/types';
 
 const USDT_BSC_ADDRESS = '0x55d398326f99059fF775485246999027B3197955' as const;
@@ -42,6 +43,15 @@ interface RealWalletContextValue {
   switchToChain: (chainId: number) => Promise<void>;
   isCorrectChainForAsset: (asset: Asset) => boolean;
   isSwitchingChain: boolean;
+  isTronLinkInstalled: boolean;
+  isTronConnected: boolean;
+  tronAddress: string | null;
+  usdtTrc20Balance: number;
+  isTronConnecting: boolean;
+  connectTronLink: () => Promise<void>;
+  disconnectTronLink: () => void;
+  usdtBscBalance: number;
+  usdtEthBalance: number;
 }
 
 const RealWalletContext = createContext<RealWalletContextValue | undefined>(undefined);
@@ -62,6 +72,16 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const [isSwitchingChain, setIsSwitchingChain] = useState(false);
   const hasPromptedNickname = useRef(false);
 
+  const {
+    isTronLinkInstalled,
+    isTronConnected,
+    tronAddress,
+    usdtTrc20Balance,
+    isConnecting: isTronConnecting,
+    connectTronLink,
+    disconnectTronLink,
+  } = useTronLink();
+
   const evmAddr = (isEvmConnected && evmAddress) ? evmAddress as `0x${string}` : undefined;
 
   const ethBalance = useBalance({
@@ -76,7 +96,7 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     query: { enabled: !!evmAddr },
   });
 
-  const usdtBscBalance = useReadContract({
+  const usdtBscResult = useReadContract({
     address: USDT_BSC_ADDRESS,
     abi: ERC20_BALANCE_ABI,
     functionName: 'balanceOf',
@@ -85,7 +105,7 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     query: { enabled: !!evmAddr, refetchInterval: 30000 },
   });
 
-  const usdtEthBalance = useReadContract({
+  const usdtEthResult = useReadContract({
     address: USDT_ETH_ADDRESS,
     abi: ERC20_BALANCE_ABI,
     functionName: 'balanceOf',
@@ -94,51 +114,55 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     query: { enabled: !!evmAddr, refetchInterval: 30000 },
   });
 
-  const usdtBsc = usdtBscBalance.data ? parseFloat(formatUnits(usdtBscBalance.data, 18)) : 0;
-  const usdtEth = usdtEthBalance.data ? parseFloat(formatUnits(usdtEthBalance.data, 6)) : 0;
-  const usdtTotal = usdtBsc + usdtEth;
+  const usdtBsc = usdtBscResult.data ? parseFloat(formatUnits(usdtBscResult.data, 18)) : 0;
+  const usdtEth = usdtEthResult.data ? parseFloat(formatUnits(usdtEthResult.data, 6)) : 0;
+  const usdtTotal = usdtBsc + usdtEth + usdtTrc20Balance;
+
+  const isAnyConnected = isEvmConnected || isTronConnected;
+  const primaryAddress = evmAddress ?? tronAddress ?? null;
 
   useEffect(() => {
-    if (evmAddress && isEvmConnected) {
-      const storedNick = localStorage.getItem(`nickname_${evmAddress}`);
+    if (primaryAddress && isAnyConnected) {
+      const storedNick = localStorage.getItem(`nickname_${primaryAddress}`);
       setNicknameState(storedNick);
     }
 
     walletStore.syncRealWallet({
-      connected: isEvmConnected,
-      address: evmAddress ?? null,
+      connected: isAnyConnected,
+      address: primaryAddress,
       balances: {
         ETH: ethBalance.data ? parseFloat(ethBalance.data.formatted) : 0,
         BNB: bnbBalance.data ? parseFloat(bnbBalance.data.formatted) : 0,
         USDT: usdtTotal,
       },
-      nickname: evmAddress ? localStorage.getItem(`nickname_${evmAddress}`) : null,
+      nickname: primaryAddress ? localStorage.getItem(`nickname_${primaryAddress}`) : null,
     });
-  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, usdtTotal]);
+  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, usdtTotal, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected]);
 
   useEffect(() => {
-    if (isEvmConnected && evmAddress && !hasPromptedNickname.current) {
-      const storedNick = localStorage.getItem(`nickname_${evmAddress}`);
+    if (isAnyConnected && primaryAddress && !hasPromptedNickname.current) {
+      const storedNick = localStorage.getItem(`nickname_${primaryAddress}`);
       if (!storedNick) {
         hasPromptedNickname.current = true;
         setTimeout(() => setNicknameDialogOpen(true), 600);
       }
     }
-  }, [evmAddress, isEvmConnected]);
+  }, [primaryAddress, isAnyConnected]);
 
   const disconnectAll = useCallback(() => {
-    disconnectEvm();
+    if (isEvmConnected) disconnectEvm();
+    if (isTronConnected) disconnectTronLink();
     hasPromptedNickname.current = false;
     walletStore.disconnect();
-  }, [disconnectEvm]);
+  }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink]);
 
   const setNickname = useCallback((name: string) => {
-    if (evmAddress) {
-      localStorage.setItem(`nickname_${evmAddress}`, name);
+    if (primaryAddress) {
+      localStorage.setItem(`nickname_${primaryAddress}`, name);
       setNicknameState(name);
       walletStore.setNickname(name);
     }
-  }, [evmAddress]);
+  }, [primaryAddress]);
 
   const openConnectDialog = useCallback(() => {
     open({ view: 'Connect' });
@@ -157,10 +181,11 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   }, [switchNetwork]);
 
   const isCorrectChainForAsset = useCallback((asset: Asset) => {
+    if (asset === 'USDT' && isTronConnected) return true;
     if (!currentChainId) return false;
     const required = REQUIRED_CHAIN[asset];
     return Number(currentChainId) === required.chainId;
-  }, [currentChainId]);
+  }, [currentChainId, isTronConnected]);
 
   useEffect(() => {
     const handler = () => openConnectDialog();
@@ -182,6 +207,15 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     switchToChain,
     isCorrectChainForAsset,
     isSwitchingChain,
+    isTronLinkInstalled,
+    isTronConnected,
+    tronAddress,
+    usdtTrc20Balance,
+    isTronConnecting,
+    connectTronLink,
+    disconnectTronLink,
+    usdtBscBalance: usdtBsc,
+    usdtEthBalance: usdtEth,
   };
 
   return (

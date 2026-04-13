@@ -28,10 +28,11 @@ export default function Lobby() {
   const [challengeLink, setChallengeLink] = useState("");
   const { toast } = useToast();
   const { t } = useLanguage();
-  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName } = useRealWallet();
+  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected } = useRealWallet();
 
   const requiredChain = REQUIRED_CHAIN[state.selectedAsset];
-  const needsNetworkSwitch = isEvmConnected && !isCorrectChainForAsset(state.selectedAsset);
+  const isAnyConnected = isEvmConnected || isTronConnected;
+  const needsNetworkSwitch = isAnyConnected && !isCorrectChainForAsset(state.selectedAsset);
 
   useEffect(() => {
     if (!state.selectedGame) {

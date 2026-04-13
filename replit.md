@@ -184,9 +184,23 @@ npm run db:push     # Push database schema
 ### Network Switching (Apr 13, 2026)
 1. **Chain detection** - `useAppKitNetwork` tracks current wallet chain; exposed as `currentChainId`/`currentChainName` in WalletProvider context
 2. **REQUIRED_CHAIN map** - Exported from WalletProvider: USDT→BSC (56), BNB→BSC (56), ETH→Ethereum (1)
-3. **isCorrectChainForAsset(asset)** - Context helper returns boolean; compares current chain to asset requirement
+3. **isCorrectChainForAsset(asset)** - Context helper returns boolean; compares current chain to asset requirement; USDT returns true if Tron is connected
 4. **switchToChain(chainId)** - Calls `switchNetwork()` from @reown/appkit to prompt wallet chain switch
 5. **Lobby network guard** - `handleStartSearch` blocks match start with toast if on wrong chain; amber banner shows "Switch to BSC/Ethereum" button
 6. **Wallet page** - Shows current network name under address; per-asset amber banner with one-click switch button when on wrong chain
-7. **Translations** - 7 new keys (Network, Switch to, to play with, Currently on, Switching..., Please switch to, Wrong Network) in all 8 languages
-8. **USDT on Ethereum** - Also reads USDT ERC-20 balance from `0xdAC17F958D2ee523a2206206994597C13D831ec7` (6 decimals) on Ethereum mainnet; total USDT = BSC + ETH
+7. **Translations** - Network keys (Network, Switch to, to play with, Currently on, Switching..., Please switch to, Wrong Network) in all 7 locales
+8. **USDT on Ethereum** - Also reads USDT ERC-20 balance from `0xdAC17F958D2ee523a2206206994597C13D831ec7` (6 decimals) on Ethereum mainnet
+
+### TronLink / USDT TRC-20 (Apr 13, 2026)
+1. **TronLink detection** - `useTronLink` hook (`client/src/core/wallet/useTronLink.ts`) auto-detects TronLink browser extension via `window.tronWeb`/`window.tronLink`
+2. **TronLink NOT inside AppKit** - Tron is not an EVM chain; @reown/appkit has no Tron adapter. TronLink connection is handled separately alongside AppKit
+3. **USDT TRC-20 balance** - Reads from contract `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` (6 decimals) using `window.tronWeb.contract().at()` + `balanceOf()`
+4. **Auto-reconnect** - If user previously connected TronLink (`localStorage tronlink_connected`), auto-reconnects on page load
+5. **Balance polling** - USDT TRC-20 balance refreshes every 30 seconds when connected
+6. **Account change events** - Listens for `window.message` events from TronLink (`setAccount`, `setNode`) for live account/network updates
+7. **Total USDT** - Wallet page shows combined USDT = BSC (BEP-20) + ETH (ERC-20) + Tron (TRC-20) with per-network breakdown
+8. **Wallet page** - Red-themed TronLink card with address, copy, disconnect; "Connect TronLink" button appears only when extension is detected
+9. **Context values** - WalletProvider exposes: `isTronLinkInstalled`, `isTronConnected`, `tronAddress`, `usdtTrc20Balance`, `isTronConnecting`, `connectTronLink`, `disconnectTronLink`, `usdtBscBalance`, `usdtEthBalance`
+10. **Network guard** - USDT is considered "correct chain" if user is on BSC (EVM) OR has TronLink connected — either satisfies the requirement
+11. **Translations** - 3 new keys (Connect TronLink, Connecting..., Multi-Network) in all 7 locales
+12. **Dual wallet support** - Users can connect both EVM (via AppKit) and Tron (via TronLink) simultaneously
