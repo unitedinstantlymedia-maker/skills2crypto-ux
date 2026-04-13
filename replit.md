@@ -180,3 +180,13 @@ npm run db:push     # Push database schema
 11. **App.tsx** - QueryClientProvider removed from top-level (now inside WalletProvider using shared queryClient from lib/queryClient.ts)
 12. **Env var** - `VITE_REOWN_PROJECT_ID` required for appkit modal
 13. **Removed** - TronLink/TronWallet/TronConnectDialog/ConnectWalletDialog all deleted; no Tron dependency
+
+### Network Switching (Apr 13, 2026)
+1. **Chain detection** - `useAppKitNetwork` tracks current wallet chain; exposed as `currentChainId`/`currentChainName` in WalletProvider context
+2. **REQUIRED_CHAIN map** - Exported from WalletProvider: USDT→BSC (56), BNB→BSC (56), ETH→Ethereum (1)
+3. **isCorrectChainForAsset(asset)** - Context helper returns boolean; compares current chain to asset requirement
+4. **switchToChain(chainId)** - Calls `switchNetwork()` from @reown/appkit to prompt wallet chain switch
+5. **Lobby network guard** - `handleStartSearch` blocks match start with toast if on wrong chain; amber banner shows "Switch to BSC/Ethereum" button
+6. **Wallet page** - Shows current network name under address; per-asset amber banner with one-click switch button when on wrong chain
+7. **Translations** - 7 new keys (Network, Switch to, to play with, Currently on, Switching..., Please switch to, Wrong Network) in all 8 languages
+8. **USDT on Ethereum** - Also reads USDT ERC-20 balance from `0xdAC17F958D2ee523a2206206994597C13D831ec7` (6 decimals) on Ethereum mainnet; total USDT = BSC + ETH

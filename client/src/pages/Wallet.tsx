@@ -1,11 +1,12 @@
 import { useGame } from "@/context/GameContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Wallet as WalletIcon, ShieldCheck, LogOut, UserCircle, Pencil, ExternalLink } from "lucide-react";
+import { Copy, Wallet as WalletIcon, ShieldCheck, LogOut, UserCircle, Pencil, ExternalLink, Globe } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
-import { useRealWallet } from "@/core/wallet/WalletProvider";
+import { useRealWallet, REQUIRED_CHAIN } from "@/core/wallet/WalletProvider";
 import { useState } from "react";
 import { NicknameDialog } from "@/components/wallet/NicknameDialog";
+import type { Asset } from "@/core/types";
 
 const NETWORK_LABELS: Record<string, { label: string; color: string }> = {
   USDT: { label: "BNB Smart Chain (BEP-20)", color: "text-yellow-400" },
@@ -24,6 +25,11 @@ export default function Wallet() {
     isEvmConnected,
     nickname,
     setNickname,
+    currentChainId,
+    currentChainName,
+    switchToChain,
+    isCorrectChainForAsset,
+    isSwitchingChain,
   } = useRealWallet();
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -114,6 +120,12 @@ export default function Wallet() {
                     />
                     {copied === 'evm' && <span className="text-xs text-green-400">{t('Copied')}</span>}
                   </div>
+                  {currentChainName && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <Globe className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">{t('Network')}: <span className="text-white">{currentChainName}</span></span>
+                    </div>
+                  )}
                 </div>
                 <Button
                   variant="ghost"
@@ -143,43 +155,64 @@ export default function Wallet() {
 
         {(['USDT', 'ETH', 'BNB'] as const).map((asset) => {
           const network = NETWORK_LABELS[asset];
+          const required = REQUIRED_CHAIN[asset];
+          const onCorrectChain = isCorrectChainForAsset(asset);
           return (
             <Card key={asset} className="bg-card/50 border-white/10">
-              <CardContent className="p-4 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  {asset === 'USDT' && (
-                    <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <circle cx="20" cy="20" r="18" fill="#26A17B" />
-                      <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(38,161,123,0.4)" strokeWidth="1" />
-                      <path d="M16 13H24V15.5H21.5V27H18.5V15.5H16V13Z" fill="white" />
-                    </svg>
-                  )}
-                  {asset === 'ETH' && (
-                    <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <circle cx="20" cy="20" r="18" fill="#3C3C3D" />
-                      <path d="M20 6L28 20L20 26L12 20L20 6Z" fill="#8A92B2" />
-                      <path d="M20 26L28 20L20 34L12 20L20 26Z" fill="#62688F" />
-                      <path d="M20 6L28 20L20 23L12 20L20 6Z" fill="none" stroke="rgba(138,146,178,0.3)" strokeWidth="0.5" />
-                    </svg>
-                  )}
-                  {asset === 'BNB' && (
-                    <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <circle cx="20" cy="20" r="18" fill="#F3BA2F" />
-                      <path d="M20 10L23.5 13.5L18 19L15 16L20 10Z" fill="white" />
-                      <path d="M25 14L28 17L25 20L22 17L25 14Z" fill="white" />
-                      <path d="M20 19L23.5 22.5L18 28L15 25L20 19Z" fill="white" />
-                      <path d="M15 14L18 17L15 20L12 17L15 14Z" fill="white" />
-                      <path d="M20 16L22.5 18.5L20 21L17.5 18.5L20 16Z" fill="white" />
-                    </svg>
-                  )}
-                  <div>
-                    <span className="font-display font-bold">{asset}</span>
-                    <div className={`text-[10px] ${network.color}`}>{network.label}</div>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    {asset === 'USDT' && (
+                      <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="20" cy="20" r="18" fill="#26A17B" />
+                        <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(38,161,123,0.4)" strokeWidth="1" />
+                        <path d="M16 13H24V15.5H21.5V27H18.5V15.5H16V13Z" fill="white" />
+                      </svg>
+                    )}
+                    {asset === 'ETH' && (
+                      <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="20" cy="20" r="18" fill="#3C3C3D" />
+                        <path d="M20 6L28 20L20 26L12 20L20 6Z" fill="#8A92B2" />
+                        <path d="M20 26L28 20L20 34L12 20L20 26Z" fill="#62688F" />
+                        <path d="M20 6L28 20L20 23L12 20L20 6Z" fill="none" stroke="rgba(138,146,178,0.3)" strokeWidth="0.5" />
+                      </svg>
+                    )}
+                    {asset === 'BNB' && (
+                      <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="20" cy="20" r="18" fill="#F3BA2F" />
+                        <path d="M20 10L23.5 13.5L18 19L15 16L20 10Z" fill="white" />
+                        <path d="M25 14L28 17L25 20L22 17L25 14Z" fill="white" />
+                        <path d="M20 19L23.5 22.5L18 28L15 25L20 19Z" fill="white" />
+                        <path d="M15 14L18 17L15 20L12 17L15 14Z" fill="white" />
+                        <path d="M20 16L22.5 18.5L20 21L17.5 18.5L20 16Z" fill="white" />
+                      </svg>
+                    )}
+                    <div>
+                      <span className="font-display font-bold">{asset}</span>
+                      <div className={`text-[10px] ${network.color}`}>{network.label}</div>
+                    </div>
+                  </div>
+                  <div className="font-mono font-bold text-lg">
+                    {(wallet.balances[asset] ?? 0).toFixed(4)}
                   </div>
                 </div>
-                <div className="font-mono font-bold text-lg">
-                  {(wallet.balances[asset] ?? 0).toFixed(4)}
-                </div>
+
+                {isEvmConnected && !onCorrectChain && (
+                  <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+                    <span className="text-[11px] text-amber-400">
+                      {t('Switch to')} {required.name} {t('to play with')} {asset}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isSwitchingChain}
+                      onClick={() => switchToChain(required.chainId)}
+                      className="h-7 text-[10px] px-3 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 whitespace-nowrap"
+                    >
+                      {isSwitchingChain ? t('Switching...') : `${t('Switch to')} ${required.name}`}
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

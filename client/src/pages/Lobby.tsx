@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useLocation } from "wouter";
 import { useState } from "react";
-import { ArrowLeft, Coins, Zap, Info, Loader2, X, Ship, UserPlus, Copy, Check } from "lucide-react";
+import { ArrowLeft, Coins, Zap, Info, Loader2, X, Ship, UserPlus, Copy, Check, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import { mockEscrowAdapter } from "@/core/escrow/MockEscrowAdapter";
@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 import { ShareButton } from "@/components/ui/ShareButton";
 import { useLanguage } from "@/context/LanguageContext";
+import { useRealWallet, REQUIRED_CHAIN } from "@/core/wallet/WalletProvider";
 import logoImage from '@assets/2025-12-12_07.52.28_1765519599465.jpg';
 
 export default function Lobby() {
@@ -27,6 +28,10 @@ export default function Lobby() {
   const [challengeLink, setChallengeLink] = useState("");
   const { toast } = useToast();
   const { t } = useLanguage();
+  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName } = useRealWallet();
+
+  const requiredChain = REQUIRED_CHAIN[state.selectedAsset];
+  const needsNetworkSwitch = isEvmConnected && !isCorrectChainForAsset(state.selectedAsset);
 
   useEffect(() => {
     if (!state.selectedGame) {
@@ -69,6 +74,15 @@ export default function Lobby() {
       toast({
         title: t("Wallet not connected", "Wallet not connected"),
         description: t("Please connect your wallet to play.", "Please connect your wallet to play."),
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (needsNetworkSwitch) {
+      toast({
+        title: t("Wrong Network", "Wrong Network"),
+        description: `${t('Please switch to', 'Please switch to')} ${requiredChain.name} ${t('to play with', 'to play with')} ${state.selectedAsset}.`,
         variant: "destructive"
       });
       return;
@@ -168,6 +182,36 @@ export default function Lobby() {
             </span>
           </p>
         </div>
+
+        {needsNetworkSwitch && (
+          <Card className="bg-amber-500/5 border-amber-500/30 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm text-amber-200">
+                  {t('Please switch to')} <span className="font-bold text-white">{requiredChain.name}</span> {t('to play with')} <span className="font-bold text-white">{state.selectedAsset}</span>
+                </p>
+                {currentChainName && (
+                  <p className="text-xs text-muted-foreground">
+                    {t('Currently on')}: {currentChainName}
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  disabled={isSwitchingChain}
+                  onClick={() => switchToChain(requiredChain.chainId)}
+                  className="h-9 px-4 text-sm font-display font-bold uppercase tracking-wider bg-amber-500 text-black hover:bg-amber-400"
+                >
+                  {isSwitchingChain ? (
+                    <><RefreshCw className="h-3.5 w-3.5 mr-2 animate-spin" />{t('Switching...')}</>
+                  ) : (
+                    <>{t('Switch to')} {requiredChain.name}</>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* Stake Selection */}
         <div className="space-y-3">

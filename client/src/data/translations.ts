@@ -33,7 +33,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Take turns firing at enemy coordinates. Hit = red, Miss = gray.',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 seconds per turn. First to sink all 5 enemy ships wins.',
     'Disconnect': 'Disconnect', 'Copied': 'Copied', 'Choose Nickname': 'Choose Nickname', 'characters': 'characters', 'Connect your wallets to play and see your real balances.': 'Connect your wallets to play and see your real balances.', 'Connect more wallets': 'Connect more wallets',
-    'Manage': 'Manage', 'Connect': 'Connect'
+    'Manage': 'Manage', 'Connect': 'Connect',
+    'Network': 'Network', 'Switch to': 'Switch to', 'to play with': 'to play with', 'Currently on': 'Currently on', 'Switching...': 'Switching...', 'Please switch to': 'Please switch to', 'Wrong Network': 'Wrong Network'
   },
   'ru': {
     'Select Language': 'Выбрать язык', 'Search language...': 'Поиск языка...', 'No language found.': 'Язык не найден.',
@@ -71,7 +72,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Стреляйте по координатам противника по очереди. Попадание = красный, Промах = серый.',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 секунд на ход. Побеждает тот, кто первым потопит все 5 кораблей противника.',
     'Disconnect': 'Отключить', 'Copied': 'Скопировано', 'Choose Nickname': 'Выбрать никнейм', 'characters': 'символов', 'Connect your wallets to play and see your real balances.': 'Подключите кошельки, чтобы играть и видеть ваши реальные балансы.', 'Connect more wallets': 'Подключить ещё',
-    'Manage': 'Управление', 'Connect': 'Подключить'
+    'Manage': 'Управление', 'Connect': 'Подключить',
+    'Network': 'Сеть', 'Switch to': 'Переключить на', 'to play with': 'для игры с', 'Currently on': 'Сейчас на', 'Switching...': 'Переключение...', 'Please switch to': 'Переключитесь на', 'Wrong Network': 'Неверная сеть'
   },
   'es': {
     'Select Language': 'Seleccionar Idioma', 'Search language...': 'Buscar idioma...', 'No language found.': 'Idioma no encontrado.',
@@ -108,7 +110,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Dispara por turnos a las coordenadas enemigas. Acierto = rojo, Fallo = gris.',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 segundos por turno. El primero en hundir los 5 barcos enemigos gana.',
     'Disconnect': 'Desconectar', 'Copied': 'Copiado', 'Choose Nickname': 'Elegir apodo', 'characters': 'caracteres', 'Connect your wallets to play and see your real balances.': 'Conecta tus billeteras para jugar y ver tus saldos reales.', 'Connect more wallets': 'Conectar más billeteras',
-    'Manage': 'Gestionar', 'Connect': 'Conectar'
+    'Manage': 'Gestionar', 'Connect': 'Conectar',
+    'Network': 'Red', 'Switch to': 'Cambiar a', 'to play with': 'para jugar con', 'Currently on': 'Actualmente en', 'Switching...': 'Cambiando...', 'Please switch to': 'Cambia a', 'Wrong Network': 'Red incorrecta'
   },
   'he': {
     'Select Language': 'בחר שפה', 'Search language...': 'חפש שפה...', 'No language found.': 'לא נמצאה שפה.',
@@ -145,7 +148,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'ירי לסירוגין לקואורדינטות האויב. פגיעה = אדום, החטאה = אפור.',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 שניות לתור. הראשון שמטביע את כל 5 הספינות מנצח.',
     'Disconnect': 'התנתק', 'Copied': 'הועתק', 'Choose Nickname': 'בחר כינוי', 'characters': 'תווים', 'Connect your wallets to play and see your real balances.': 'חבר את הארנקים שלך כדי לשחק ולראות את היתרות האמיתיות.', 'Connect more wallets': 'חבר עוד ארנקים',
-    'Manage': 'ניהול', 'Connect': 'חבר'
+    'Manage': 'ניהול', 'Connect': 'חבר',
+    'Network': 'רשת', 'Switch to': 'עבור ל', 'to play with': 'כדי לשחק עם', 'Currently on': 'כעת ב', 'Switching...': 'מעביר...', 'Please switch to': 'עבור ל', 'Wrong Network': 'רשת שגויה'
   },
   'hi': {
     'Select Language': 'भाषा चुनें', 'Search language...': 'भाषा खोजें...', 'No language found.': 'कोई भाषा नहीं मिली।',
@@ -182,7 +186,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'बारी-बारी से दुश्मन के निर्देशांकों पर फायर करें। हिट = लाल, मिस = ग्रे।',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 सेकंड प्रति बारी। सभी 5 दुश्मन जहाज़ों को पहले डुबोने वाला जीतता है।',
     'Disconnect': 'डिस्कनेक्ट', 'Copied': 'कॉपी किया', 'Choose Nickname': 'उपनाम चुनें', 'characters': 'अक्षर', 'Connect your wallets to play and see your real balances.': 'खेलने और अपने वास्तविक बैलेंस देखने के लिए अपने वॉलेट कनेक्ट करें।', 'Connect more wallets': 'और वॉलेट कनेक्ट करें',
-    'Manage': 'प्रबंधन', 'Connect': 'कनेक्ट'
+    'Manage': 'प्रबंधन', 'Connect': 'कनेक्ट',
+    'Network': 'नेटवर्क', 'Switch to': 'स्विच करें', 'to play with': 'से खेलने के लिए', 'Currently on': 'अभी', 'Switching...': 'स्विच हो रहा है...', 'Please switch to': 'कृपया स्विच करें', 'Wrong Network': 'गलत नेटवर्क'
   },
   'vi': {
     'Select Language': 'Chọn ngôn ngữ', 'Search language...': 'Tìm ngôn ngữ...', 'No language found.': 'Không tìm thấy ngôn ngữ.',
@@ -220,7 +225,8 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'Lần lượt bắn vào tọa độ đối phương. Trúng = đỏ, Trượt = xám.',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 giây mỗi lượt. Ai đánh chìm hết 5 tàu đối phương trước sẽ thắng.',
     'Disconnect': 'Ngắt kết nối', 'Copied': 'Đã sao chép', 'Choose Nickname': 'Chọn biệt danh', 'characters': 'ký tự', 'Connect your wallets to play and see your real balances.': 'Kết nối ví của bạn để chơi và xem số dư thực.', 'Connect more wallets': 'Kết nối thêm ví',
-    'Manage': 'Quản lý', 'Connect': 'Kết nối'
+    'Manage': 'Quản lý', 'Connect': 'Kết nối',
+    'Network': 'Mạng', 'Switch to': 'Chuyển sang', 'to play with': 'để chơi với', 'Currently on': 'Đang ở', 'Switching...': 'Đang chuyển...', 'Please switch to': 'Hãy chuyển sang', 'Wrong Network': 'Sai mạng'
   },
   'th': {
     'Select Language': 'เลือกภาษา', 'Search language...': 'ค้นหาภาษา...', 'No language found.': 'ไม่พบภาษา',
@@ -258,6 +264,7 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Take turns firing at enemy coordinates. Hit = red, Miss = gray.': 'ผลัดกันยิงพิกัดศัตรู โดน = แดง พลาด = เทา',
     '60 seconds per turn. First to sink all 5 enemy ships wins.': '60 วินาทีต่อตา จมเรือศัตรูครบ 5 ลำก่อนชนะ',
     'Disconnect': 'ตัดการเชื่อมต่อ', 'Copied': 'คัดลอกแล้ว', 'Choose Nickname': 'เลือกชื่อเล่น', 'characters': 'ตัวอักษร', 'Connect your wallets to play and see your real balances.': 'เชื่อมต่อกระเป๋าเงินเพื่อเล่นและดูยอดเงินจริง', 'Connect more wallets': 'เชื่อมต่อกระเป๋าเพิ่ม',
-    'Manage': 'จัดการ', 'Connect': 'เชื่อมต่อ'
+    'Manage': 'จัดการ', 'Connect': 'เชื่อมต่อ',
+    'Network': 'เครือข่าย', 'Switch to': 'เปลี่ยนเป็น', 'to play with': 'เพื่อเล่นด้วย', 'Currently on': 'ขณะนี้อยู่ที่', 'Switching...': 'กำลังเปลี่ยน...', 'Please switch to': 'กรุณาเปลี่ยนเป็น', 'Wrong Network': 'เครือข่ายผิด'
   }
 };
