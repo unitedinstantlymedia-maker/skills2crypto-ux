@@ -10,12 +10,20 @@ export default function Landing() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[80vh] space-y-8 text-center relative">
-      <div className="fixed top-4 left-4 z-50">
+      <div className="fixed top-4 left-4 z-50 flex gap-4">
         <Link href="/rules">
           <div className="flex flex-col items-center cursor-pointer group pt-[2px]">
             <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">📜</span>
             <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1">
               {t('Rules', 'Rules')}
+            </span>
+          </div>
+        </Link>
+        <Link href="/about">
+          <div className="flex flex-col items-center cursor-pointer group pt-[2px]">
+            <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">💡</span>
+            <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1">
+              {t('About', 'About')}
             </span>
           </div>
         </Link>

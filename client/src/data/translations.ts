@@ -36,7 +36,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'Manage', 'Connect': 'Connect',
     'Network': 'Network', 'Switch to': 'Switch to', 'to play with': 'to play with', 'Currently on': 'Currently on', 'Switching...': 'Switching...', 'Please switch to': 'Please switch to', 'Wrong Network': 'Wrong Network',
     'Connect TronLink': 'Connect TronLink', 'Connecting...': 'Connecting...', 'Multi-Network': 'Multi-Network',
-    'Connect TON': 'Connect TON', 'Connect TON wallet to play with TON': 'Connect TON wallet to play with TON', 'Connect your TON wallet to play with': 'Connect your TON wallet to play with'
+    'Connect TON': 'Connect TON', 'Connect TON wallet to play with TON': 'Connect TON wallet to play with TON', 'Connect your TON wallet to play with': 'Connect your TON wallet to play with',
+    'About': 'About', 'About Us': 'About Us', 'Your Skill. Your Currency.': 'Your Skill. Your Currency.',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.",
+    'is a different breed.': 'is a different breed.',
+    'No sign-ups. Just your wallet.': 'No sign-ups. Just your wallet.', 'No luck. Just your skill.': 'No luck. Just your skill.', 'No middlemen. Just you versus an opponent.': 'No middlemen. Just you versus an opponent.',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.',
+    'Fair. Anonymous. Borderless.': 'Fair. Anonymous. Borderless.',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.',
+    'True freedom begins where control ends.': 'True freedom begins where control ends.'
   },
   'ru': {
     'Select Language': 'Выбрать язык', 'Search language...': 'Поиск языка...', 'No language found.': 'Язык не найден.',
@@ -77,7 +85,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'Управление', 'Connect': 'Подключить',
     'Network': 'Сеть', 'Switch to': 'Переключить на', 'to play with': 'для игры с', 'Currently on': 'Сейчас на', 'Switching...': 'Переключение...', 'Please switch to': 'Переключитесь на', 'Wrong Network': 'Неверная сеть',
     'Connect TronLink': 'Подключить TronLink', 'Connecting...': 'Подключение...', 'Multi-Network': 'Мультисеть',
-    'Connect TON': 'Подключить TON', 'Connect TON wallet to play with TON': 'Подключите TON кошелек для игры с TON', 'Connect your TON wallet to play with': 'Подключите TON кошелек для игры с'
+    'Connect TON': 'Подключить TON', 'Connect TON wallet to play with TON': 'Подключите TON кошелек для игры с TON', 'Connect your TON wallet to play with': 'Подключите TON кошелек для игры с',
+    'About': 'О нас', 'About Us': 'О нас', 'Your Skill. Your Currency.': 'Твой навык. Твоя валюта.',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "Мы устали от банков, блокирующих счета. Устали от паспортов, селфи и бесконечных проверок. Устали от казино, где выигрывает только заведение.",
+    'is a different breed.': '— это другая порода.',
+    'No sign-ups. Just your wallet.': 'Без регистрации. Только твой кошелёк.', 'No luck. Just your skill.': 'Без удачи. Только твой навык.', 'No middlemen. Just you versus an opponent.': 'Без посредников. Только ты против соперника.',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'Выиграл? Деньги мгновенно в твоём кошельке. Никаких задержек, «верификаций карты», замороженных счетов.',
+    'Fair. Anonymous. Borderless.': 'Честно. Анонимно. Без границ.',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Вызывай друзей или находи соперников по всему миру. Играй с USDT, ETH, BNB или TON.',
+    'True freedom begins where control ends.': 'Настоящая свобода начинается там, где заканчивается контроль.'
   },
   'es': {
     'Select Language': 'Seleccionar Idioma', 'Search language...': 'Buscar idioma...', 'No language found.': 'Idioma no encontrado.',
@@ -117,7 +133,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'Gestionar', 'Connect': 'Conectar',
     'Network': 'Red', 'Switch to': 'Cambiar a', 'to play with': 'para jugar con', 'Currently on': 'Actualmente en', 'Switching...': 'Cambiando...', 'Please switch to': 'Cambia a', 'Wrong Network': 'Red incorrecta',
     'Connect TronLink': 'Conectar TronLink', 'Connecting...': 'Conectando...', 'Multi-Network': 'Multi-Red',
-    'Connect TON': 'Conectar TON', 'Connect TON wallet to play with TON': 'Conecta tu billetera TON para jugar con TON', 'Connect your TON wallet to play with': 'Conecta tu billetera TON para jugar con'
+    'Connect TON': 'Conectar TON', 'Connect TON wallet to play with TON': 'Conecta tu billetera TON para jugar con TON', 'Connect your TON wallet to play with': 'Conecta tu billetera TON para jugar con',
+    'About': 'Acerca de', 'About Us': 'Sobre Nosotros', 'Your Skill. Your Currency.': 'Tu habilidad. Tu moneda.',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "Estamos cansados de que los bancos bloqueen cuentas. Cansados de pasaportes, selfies y controles interminables. Cansados de casinos donde solo gana la casa.",
+    'is a different breed.': 'es otra raza.',
+    'No sign-ups. Just your wallet.': 'Sin registros. Solo tu billetera.', 'No luck. Just your skill.': 'Sin suerte. Solo tu habilidad.', 'No middlemen. Just you versus an opponent.': 'Sin intermediarios. Solo tú contra un oponente.',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': '¿Ganaste? El dinero está instantáneamente en tu billetera. Sin demoras, sin "verificación de tarjeta", sin cuentas congeladas.',
+    'Fair. Anonymous. Borderless.': 'Justo. Anónimo. Sin fronteras.',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Desafía a amigos o compite con rivales de todo el mundo. Juega con USDT, ETH, BNB o TON.',
+    'True freedom begins where control ends.': 'La verdadera libertad comienza donde termina el control.'
   },
   'he': {
     'Select Language': 'בחר שפה', 'Search language...': 'חפש שפה...', 'No language found.': 'לא נמצאה שפה.',
@@ -157,7 +181,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'ניהול', 'Connect': 'חבר',
     'Network': 'רשת', 'Switch to': 'עבור ל', 'to play with': 'כדי לשחק עם', 'Currently on': 'כעת ב', 'Switching...': 'מעביר...', 'Please switch to': 'עבור ל', 'Wrong Network': 'רשת שגויה',
     'Connect TronLink': 'חבר TronLink', 'Connecting...': 'מתחבר...', 'Multi-Network': 'רב-רשתי',
-    'Connect TON': 'חבר TON', 'Connect TON wallet to play with TON': 'חבר ארנק TON כדי לשחק עם TON', 'Connect your TON wallet to play with': 'חבר ארנק TON כדי לשחק עם'
+    'Connect TON': 'חבר TON', 'Connect TON wallet to play with TON': 'חבר ארנק TON כדי לשחק עם TON', 'Connect your TON wallet to play with': 'חבר ארנק TON כדי לשחק עם',
+    'About': 'אודות', 'About Us': 'אודותינו', 'Your Skill. Your Currency.': 'המיומנות שלך. המטבע שלך.',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "נמאס לנו מבנקים שחוסמים חשבונות. נמאס מדרכונים, סלפים ובדיקות אינסופיות. נמאס מקזינו שבהם רק הבית מרוויח.",
+    'is a different breed.': 'הוא מסוג אחר.',
+    'No sign-ups. Just your wallet.': 'בלי הרשמה. רק הארנק שלך.', 'No luck. Just your skill.': 'בלי מזל. רק המיומנות שלך.', 'No middlemen. Just you versus an opponent.': 'בלי מתווכים. רק אתה מול יריב.',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'ניצחת? הכסף מיד בארנק שלך. ללא עיכובים, ללא "אימות כרטיס", ללא חשבונות מוקפאים.',
+    'Fair. Anonymous. Borderless.': 'הוגן. אנונימי. ללא גבולות.',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'אתגר חברים או התמודד עם יריבים ברחבי העולם. שחק עם USDT, ETH, BNB או TON.',
+    'True freedom begins where control ends.': 'חופש אמיתי מתחיל היכן שהשליטה נגמרת.'
   },
   'hi': {
     'Select Language': 'भाषा चुनें', 'Search language...': 'भाषा खोजें...', 'No language found.': 'कोई भाषा नहीं मिली।',
@@ -197,7 +229,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'प्रबंधन', 'Connect': 'कनेक्ट',
     'Network': 'नेटवर्क', 'Switch to': 'स्विच करें', 'to play with': 'से खेलने के लिए', 'Currently on': 'अभी', 'Switching...': 'स्विच हो रहा है...', 'Please switch to': 'कृपया स्विच करें', 'Wrong Network': 'गलत नेटवर्क',
     'Connect TronLink': 'TronLink कनेक्ट करें', 'Connecting...': 'कनेक्ट हो रहा है...', 'Multi-Network': 'मल्टी-नेटवर्क',
-    'Connect TON': 'TON कनेक्ट करें', 'Connect TON wallet to play with TON': 'TON से खेलने के लिए TON वॉलेट कनेक्ट करें', 'Connect your TON wallet to play with': 'खेलने के लिए अपना TON वॉलेट कनेक्ट करें'
+    'Connect TON': 'TON कनेक्ट करें', 'Connect TON wallet to play with TON': 'TON से खेलने के लिए TON वॉलेट कनेक्ट करें', 'Connect your TON wallet to play with': 'खेलने के लिए अपना TON वॉलेट कनेक्ट करें',
+    'About': 'हमारे बारे में', 'About Us': 'हमारे बारे में', 'Your Skill. Your Currency.': 'तुम्हारा हुनर। तुम्हारी मुद्रा।',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "हम बैंकों द्वारा खाते ब्लॉक करने से थक गए हैं। पासपोर्ट, सेल्फी और अंतहीन जांच से थक गए हैं। उन कैसीनो से थक गए हैं जहां सिर्फ घर जीतता है।",
+    'is a different breed.': 'एक अलग नस्ल है।',
+    'No sign-ups. Just your wallet.': 'कोई साइन-अप नहीं। बस आपका वॉलेट।', 'No luck. Just your skill.': 'कोई भाग्य नहीं। बस आपका हुनर।', 'No middlemen. Just you versus an opponent.': 'कोई बिचौलिया नहीं। बस आप बनाम प्रतिद्वंद्वी।',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'जीत गए? पैसा तुरंत आपके वॉलेट में। कोई देरी नहीं, कोई "कार्ड सत्यापन" नहीं, कोई फ्रोज़न खाता नहीं।',
+    'Fair. Anonymous. Borderless.': 'निष्पक्ष। गुमनाम। सीमाहीन।',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'दोस्तों को चुनौती दें या दुनिया भर के प्रतिद्वंद्वियों से खेलें। USDT, ETH, BNB या TON से खेलें।',
+    'True freedom begins where control ends.': 'सच्ची आज़ादी वहीं शुरू होती है जहाँ नियंत्रण खत्म होता है।'
   },
   'vi': {
     'Select Language': 'Chọn ngôn ngữ', 'Search language...': 'Tìm ngôn ngữ...', 'No language found.': 'Không tìm thấy ngôn ngữ.',
@@ -238,7 +278,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'Quản lý', 'Connect': 'Kết nối',
     'Network': 'Mạng', 'Switch to': 'Chuyển sang', 'to play with': 'để chơi với', 'Currently on': 'Đang ở', 'Switching...': 'Đang chuyển...', 'Please switch to': 'Hãy chuyển sang', 'Wrong Network': 'Sai mạng',
     'Connect TronLink': 'Kết nối TronLink', 'Connecting...': 'Đang kết nối...', 'Multi-Network': 'Đa mạng',
-    'Connect TON': 'Kết nối TON', 'Connect TON wallet to play with TON': 'Kết nối ví TON để chơi với TON', 'Connect your TON wallet to play with': 'Kết nối ví TON để chơi với'
+    'Connect TON': 'Kết nối TON', 'Connect TON wallet to play with TON': 'Kết nối ví TON để chơi với TON', 'Connect your TON wallet to play with': 'Kết nối ví TON để chơi với',
+    'About': 'Giới thiệu', 'About Us': 'Về Chúng Tôi', 'Your Skill. Your Currency.': 'Kỹ năng của bạn. Tiền tệ của bạn.',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "Chúng tôi chán ngấy ngân hàng chặn tài khoản. Chán hộ chiếu, selfie và kiểm tra bất tận. Chán casino nơi chỉ nhà cái thắng.",
+    'is a different breed.': 'là một giống loài khác.',
+    'No sign-ups. Just your wallet.': 'Không đăng ký. Chỉ ví của bạn.', 'No luck. Just your skill.': 'Không may mắn. Chỉ kỹ năng.', 'No middlemen. Just you versus an opponent.': 'Không trung gian. Chỉ bạn đối đầu đối thủ.',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'Thắng? Tiền ngay lập tức trong ví. Không chậm trễ, không "xác minh thẻ", không đóng băng tài khoản.',
+    'Fair. Anonymous. Borderless.': 'Công bằng. Ẩn danh. Không biên giới.',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Thách đấu bạn bè hoặc đối đầu đối thủ toàn cầu. Chơi với USDT, ETH, BNB hoặc TON.',
+    'True freedom begins where control ends.': 'Tự do thực sự bắt đầu nơi kiểm soát kết thúc.'
   },
   'th': {
     'Select Language': 'เลือกภาษา', 'Search language...': 'ค้นหาภาษา...', 'No language found.': 'ไม่พบภาษา',
@@ -279,6 +327,14 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'Manage': 'จัดการ', 'Connect': 'เชื่อมต่อ',
     'Network': 'เครือข่าย', 'Switch to': 'เปลี่ยนเป็น', 'to play with': 'เพื่อเล่นด้วย', 'Currently on': 'ขณะนี้อยู่ที่', 'Switching...': 'กำลังเปลี่ยน...', 'Please switch to': 'กรุณาเปลี่ยนเป็น', 'Wrong Network': 'เครือข่ายผิด',
     'Connect TronLink': 'เชื่อมต่อ TronLink', 'Connecting...': 'กำลังเชื่อมต่อ...', 'Multi-Network': 'หลายเครือข่าย',
-    'Connect TON': 'เชื่อมต่อ TON', 'Connect TON wallet to play with TON': 'เชื่อมต่อกระเป๋า TON เพื่อเล่นด้วย TON', 'Connect your TON wallet to play with': 'เชื่อมต่อกระเป๋า TON เพื่อเล่นด้วย'
+    'Connect TON': 'เชื่อมต่อ TON', 'Connect TON wallet to play with TON': 'เชื่อมต่อกระเป๋า TON เพื่อเล่นด้วย TON', 'Connect your TON wallet to play with': 'เชื่อมต่อกระเป๋า TON เพื่อเล่นด้วย',
+    'About': 'เกี่ยวกับ', 'About Us': 'เกี่ยวกับเรา', 'Your Skill. Your Currency.': 'ทักษะของคุณ สกุลเงินของคุณ',
+    "We're tired of banks blocking accounts. Tired of passports, selfies, and endless checks. Tired of casinos where only the house wins.": "เราเบื่อที่ธนาคารบล็อกบัญชี เบื่อพาสปอร์ต เซลฟี่ และการตรวจสอบไม่รู้จบ เบื่อคาสิโนที่มีแต่เจ้ามือชนะ",
+    'is a different breed.': 'เป็นสายพันธุ์ที่แตกต่าง',
+    'No sign-ups. Just your wallet.': 'ไม่ต้องสมัคร แค่กระเป๋าเงินของคุณ', 'No luck. Just your skill.': 'ไม่มีโชค แค่ทักษะของคุณ', 'No middlemen. Just you versus an opponent.': 'ไม่มีคนกลาง แค่คุณกับคู่ต่อสู้',
+    'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'ชนะ? เงินอยู่ในกระเป๋าทันที ไม่ล่าช้า ไม่มี "ยืนยันบัตร" ไม่มีบัญชีถูกอายัด',
+    'Fair. Anonymous. Borderless.': 'ยุติธรรม ไม่ระบุตัวตน ไร้พรมแดน',
+    'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'ท้าทายเพื่อนหรือแข่งกับคู่ต่อสู้ทั่วโลก เล่นด้วย USDT, ETH, BNB หรือ TON',
+    'True freedom begins where control ends.': 'อิสรภาพที่แท้จริงเริ่มต้นตรงที่การควบคุมสิ้นสุด'
   }
 };

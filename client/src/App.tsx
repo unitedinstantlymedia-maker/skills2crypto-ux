@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout/Layout";
 
 import Landing from "@/pages/Landing";
 import Rules from "@/pages/Rules";
+import About from "@/pages/About";
 import Games from "@/pages/Games";
 import Lobby from "@/pages/Lobby";
 import Play from "@/pages/Play";
@@ -22,6 +23,7 @@ function Router() {
       <Switch>
         <Route path="/" component={Landing} />
         <Route path="/rules" component={Rules} />
+        <Route path="/about" component={About} />
         <Route path="/games" component={Games} />
         <Route path="/lobby" component={Lobby} />
         <Route path="/challenge/:challengeId" component={Challenge} />
