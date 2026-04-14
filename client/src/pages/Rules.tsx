@@ -40,7 +40,7 @@ export default function Rules() {
             </div>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground leading-relaxed">
-            {t('We support USDT, ETH, and BNB. Ensure you have sufficient balance before playing. Wagers are locked in escrow during the match.', 'We support USDT, ETH, and BNB. Ensure you have sufficient balance before playing. Wagers are locked in escrow during the match.')}
+            {t('We support USDT, ETH, BNB, and TON. Ensure you have sufficient balance before playing. Wagers are locked in escrow during the match.', 'We support USDT, ETH, BNB, and TON. Ensure you have sufficient balance before playing. Wagers are locked in escrow during the match.')}
           </CardContent>
         </Card>
 

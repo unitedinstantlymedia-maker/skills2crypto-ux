@@ -14,12 +14,12 @@ export class WalletStore {
   private state: WalletState = {
     connected: false,
     address: null,
-    balances: { USDT: 0, ETH: 0, BNB: 0 },
+    balances: { USDT: 0, ETH: 0, BNB: 0, TON: 0 },
     nickname: null,
   };
 
-  private realBalances: Record<Asset, number> = { USDT: 0, ETH: 0, BNB: 0 };
-  private gameBalances: Record<Asset, number> = { USDT: 0, ETH: 0, BNB: 0 };
+  private realBalances: Record<Asset, number> = { USDT: 0, ETH: 0, BNB: 0, TON: 0 };
+  private gameBalances: Record<Asset, number> = { USDT: 0, ETH: 0, BNB: 0, TON: 0 };
   private listeners: Set<Listener> = new Set();
   private static instance: WalletStore;
 
@@ -27,13 +27,8 @@ export class WalletStore {
     const stored = localStorage.getItem('wallet_state');
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (parsed.balances && 'TON' in parsed.balances) {
-        parsed.balances.BNB = parsed.balances.TON;
-        delete parsed.balances.TON;
-        localStorage.setItem('wallet_state', JSON.stringify(parsed));
-      }
       if (parsed.balances) {
-        parsed.balances = { USDT: 0, ETH: 0, BNB: 0, ...parsed.balances };
+        parsed.balances = { USDT: 0, ETH: 0, BNB: 0, TON: 0, ...parsed.balances };
       }
       this.state = { nickname: null, ...parsed };
       if ('tronAddress' in this.state) delete (this.state as any).tronAddress;
@@ -125,11 +120,11 @@ export class WalletStore {
     this.state = {
       connected: false,
       address: null,
-      balances: { USDT: 0, ETH: 0, BNB: 0 },
+      balances: { USDT: 0, ETH: 0, BNB: 0, TON: 0 },
       nickname: null,
     };
-    this.realBalances = { USDT: 0, ETH: 0, BNB: 0 };
-    this.gameBalances = { USDT: 0, ETH: 0, BNB: 0 };
+    this.realBalances = { USDT: 0, ETH: 0, BNB: 0, TON: 0 };
+    this.gameBalances = { USDT: 0, ETH: 0, BNB: 0, TON: 0 };
     this.notify();
   }
 

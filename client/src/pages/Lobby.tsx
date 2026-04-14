@@ -28,11 +28,13 @@ export default function Lobby() {
   const [challengeLink, setChallengeLink] = useState("");
   const { toast } = useToast();
   const { t } = useLanguage();
-  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected } = useRealWallet();
+  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTonConnected, connectTonWallet } = useRealWallet();
 
-  const requiredChain = REQUIRED_CHAIN[state.selectedAsset];
-  const isAnyConnected = isEvmConnected || isTronConnected;
-  const needsNetworkSwitch = isAnyConnected && !isCorrectChainForAsset(state.selectedAsset);
+  const requiredChain = state.selectedAsset !== 'TON' ? REQUIRED_CHAIN[state.selectedAsset] : null;
+  const isAnyConnected = isEvmConnected || isTronConnected || isTonConnected;
+  const needsNetworkSwitch = state.selectedAsset === 'TON'
+    ? !isTonConnected
+    : isAnyConnected && !isCorrectChainForAsset(state.selectedAsset);
 
   useEffect(() => {
     if (!state.selectedGame) {
@@ -81,9 +83,12 @@ export default function Lobby() {
     }
 
     if (needsNetworkSwitch) {
+      const desc = state.selectedAsset === 'TON'
+        ? `${t('Connect your TON wallet to play with', 'Connect your TON wallet to play with')} TON.`
+        : `${t('Please switch to', 'Please switch to')} ${requiredChain?.name ?? ''} ${t('to play with', 'to play with')} ${state.selectedAsset}.`;
       toast({
         title: t("Wrong Network", "Wrong Network"),
-        description: `${t('Please switch to', 'Please switch to')} ${requiredChain.name} ${t('to play with', 'to play with')} ${state.selectedAsset}.`,
+        description: desc,
         variant: "destructive"
       });
       return;
@@ -166,13 +171,20 @@ export default function Lobby() {
         {/* Asset Selection */}
         <div className="space-y-3">
           <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">{t('Select Asset', 'Select Asset')}</label>
-          <ToggleGroup type="single" value={state.selectedAsset} onValueChange={handleAssetChange} className="justify-start gap-3">
-            {(['USDT', 'ETH', 'BNB'] as Asset[]).map((asset) => (
+          <ToggleGroup type="single" value={state.selectedAsset} onValueChange={handleAssetChange} className="justify-start gap-2 flex-wrap">
+            {(['USDT', 'ETH', 'BNB', 'TON'] as Asset[]).map((asset) => (
               <ToggleGroupItem 
                 key={asset} 
                 value={asset}
-                className="h-12 px-6 border border-white/10 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary/50 rounded-lg transition-all relative"
+                className="h-12 px-4 sm:px-6 border border-white/10 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary/50 rounded-lg transition-all relative flex items-center gap-2"
               >
+                {asset === 'TON' && (
+                  <svg width="16" height="16" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+                    <circle cx="20" cy="20" r="18" fill="#0098EA" />
+                    <path d="M13 15L20 11L27 15V21L20 29L13 21V15Z" fill="white" fillOpacity="0.9" />
+                    <path d="M20 11L27 15V21L20 29V11Z" fill="white" fillOpacity="0.7" />
+                  </svg>
+                )}
                 {asset}
               </ToggleGroupItem>
             ))}
@@ -184,7 +196,27 @@ export default function Lobby() {
           </p>
         </div>
 
-        {needsNetworkSwitch && (
+        {needsNetworkSwitch && state.selectedAsset === 'TON' && (
+          <Card className="bg-sky-500/5 border-sky-500/30 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-sky-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm text-sky-200">
+                  {t('Connect your TON wallet to play with')} <span className="font-bold text-white">TON</span>
+                </p>
+                <Button
+                  size="sm"
+                  onClick={connectTonWallet}
+                  className="h-9 px-4 text-sm font-display font-bold uppercase tracking-wider bg-sky-500 text-white hover:bg-sky-400"
+                >
+                  {t('Connect TON')}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {needsNetworkSwitch && state.selectedAsset !== 'TON' && requiredChain && (
           <Card className="bg-amber-500/5 border-amber-500/30 p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />

@@ -10,6 +10,7 @@ import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
+import { useTonConnect } from './useTonConnect';
 import type { Asset } from '@/core/types';
 
 const USDT_BSC_ADDRESS = '0x55d398326f99059fF775485246999027B3197955' as const;
@@ -24,7 +25,7 @@ const ERC20_BALANCE_ABI = [
   },
 ] as const;
 
-export const REQUIRED_CHAIN: Record<Asset, { chainId: number; name: string }> = {
+export const REQUIRED_CHAIN: Record<Exclude<Asset, 'TON'>, { chainId: number; name: string }> = {
   USDT: { chainId: 56, name: 'BNB Smart Chain' },
   BNB: { chainId: 56, name: 'BNB Smart Chain' },
   ETH: { chainId: 1, name: 'Ethereum' },
@@ -50,6 +51,12 @@ interface RealWalletContextValue {
   connectTronLink: () => Promise<void>;
   disconnectTronLink: () => void;
   usdtBscBalance: number;
+  isTonConnected: boolean;
+  tonAddress: string | null;
+  tonBalance: number;
+  isTonConnecting: boolean;
+  connectTonWallet: () => void;
+  disconnectTonWallet: () => void;
 }
 
 const RealWalletContext = createContext<RealWalletContextValue | undefined>(undefined);
@@ -80,6 +87,15 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     disconnectTronLink,
   } = useTronLink();
 
+  const {
+    isTonConnected,
+    tonAddress,
+    tonBalance,
+    isConnecting: isTonConnecting,
+    connectTonWallet,
+    disconnectTonWallet,
+  } = useTonConnect();
+
   const evmAddr = (isEvmConnected && evmAddress) ? evmAddress as `0x${string}` : undefined;
 
   const ethBalance = useBalance({
@@ -106,8 +122,8 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const usdtBsc = usdtBscResult.data ? parseFloat(formatUnits(usdtBscResult.data, 18)) : 0;
   const usdtTotal = usdtBsc + usdtTrc20Balance;
 
-  const isAnyConnected = isEvmConnected || isTronConnected;
-  const primaryAddress = evmAddress ?? tronAddress ?? null;
+  const isAnyConnected = isEvmConnected || isTronConnected || isTonConnected;
+  const primaryAddress = evmAddress ?? tronAddress ?? tonAddress ?? null;
 
   useEffect(() => {
     if (primaryAddress && isAnyConnected) {
@@ -122,10 +138,11 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
         ETH: ethBalance.data ? parseFloat(ethBalance.data.formatted) : 0,
         BNB: bnbBalance.data ? parseFloat(bnbBalance.data.formatted) : 0,
         USDT: usdtTotal,
+        TON: tonBalance,
       },
       nickname: primaryAddress ? localStorage.getItem(`nickname_${primaryAddress}`) : null,
     });
-  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, usdtTotal, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected]);
+  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, usdtTotal, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected, isTonConnected, tonAddress, tonBalance]);
 
   useEffect(() => {
     if (isAnyConnected && primaryAddress && !hasPromptedNickname.current) {
@@ -140,9 +157,10 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
     if (isTronConnected) disconnectTronLink();
+    if (isTonConnected) disconnectTonWallet();
     hasPromptedNickname.current = false;
     walletStore.disconnect();
-  }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink]);
+  }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
 
   const setNickname = useCallback((name: string) => {
     if (primaryAddress) {
@@ -169,11 +187,12 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   }, [switchNetwork]);
 
   const isCorrectChainForAsset = useCallback((asset: Asset) => {
+    if (asset === 'TON') return isTonConnected;
     if (asset === 'USDT' && isTronConnected) return true;
     if (!currentChainId) return false;
     const required = REQUIRED_CHAIN[asset];
     return Number(currentChainId) === required.chainId;
-  }, [currentChainId, isTronConnected]);
+  }, [currentChainId, isTronConnected, isTonConnected]);
 
   useEffect(() => {
     const handler = () => openConnectDialog();
@@ -203,6 +222,12 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     connectTronLink,
     disconnectTronLink,
     usdtBscBalance: usdtBsc,
+    isTonConnected,
+    tonAddress,
+    tonBalance,
+    isTonConnecting,
+    connectTonWallet,
+    disconnectTonWallet,
   };
 
   return (

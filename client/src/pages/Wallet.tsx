@@ -31,6 +31,12 @@ export default function Wallet() {
     connectTronLink,
     disconnectTronLink,
     usdtBscBalance,
+    isTonConnected,
+    tonAddress,
+    tonBalance,
+    isTonConnecting,
+    connectTonWallet,
+    disconnectTonWallet,
   } = useRealWallet();
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -41,7 +47,7 @@ export default function Wallet() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const isAnyConnected = isEvmConnected || isTronConnected;
+  const isAnyConnected = isEvmConnected || isTronConnected || isTonConnected;
 
   if (!wallet.connected && !isAnyConnected) {
     return (
@@ -82,6 +88,19 @@ export default function Wallet() {
               )}
             </Button>
           )}
+
+          <Button
+            onClick={connectTonWallet}
+            disabled={isTonConnecting}
+            variant="outline"
+            className="h-14 px-8 text-base font-display font-bold uppercase tracking-widest border-sky-500/30 text-sky-400 hover:bg-sky-500/10 hover:text-sky-300 w-full"
+          >
+            {isTonConnecting ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('Connecting...')}</>
+            ) : (
+              <><TonIcon className="h-5 w-5 mr-2" />{t('Connect TON')}</>
+            )}
+          </Button>
         </div>
       </div>
     );
@@ -204,6 +223,42 @@ export default function Wallet() {
           </Button>
         )}
 
+        {isTonConnected && tonAddress && (
+          <Card className="bg-gradient-to-br from-sky-500/10 to-card border-sky-500/20">
+            <CardHeader className="pb-2">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <TonIcon className="h-4 w-4 text-sky-400" />
+                    <CardTitle className="text-xs text-sky-400 font-bold uppercase tracking-wider">TON</CardTitle>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-sm text-white">
+                    {shortenAddr(tonAddress)}
+                    <Copy
+                      className="h-3.5 w-3.5 text-muted-foreground cursor-pointer hover:text-white"
+                      onClick={() => handleCopy(tonAddress, 'ton')}
+                    />
+                    {copied === 'ton' && <span className="text-xs text-green-400">{t('Copied')}</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <Globe className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-[10px] text-muted-foreground">{t('Network')}: <span className="text-white">TON</span></span>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={disconnectTonWallet}
+                  className="text-xs text-muted-foreground hover:text-sky-400"
+                >
+                  <LogOut className="h-3 w-3 mr-1" />
+                  {t('Disconnect')}
+                </Button>
+              </div>
+            </CardHeader>
+          </Card>
+        )}
+
         {!isTronConnected && isTronLinkInstalled && (
           <Button
             variant="outline"
@@ -216,6 +271,22 @@ export default function Wallet() {
               <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('Connecting...')}</>
             ) : (
               <><TronIcon className="h-4 w-4 mr-2" />{t('Connect TronLink')}</>
+            )}
+          </Button>
+        )}
+
+        {!isTonConnected && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={connectTonWallet}
+            disabled={isTonConnecting}
+            className="border-sky-500/20 text-sm w-full text-sky-400 hover:bg-sky-500/10"
+          >
+            {isTonConnecting ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('Connecting...')}</>
+            ) : (
+              <><TonIcon className="h-4 w-4 mr-2" />{t('Connect TON')}</>
             )}
           </Button>
         )}
@@ -333,6 +404,44 @@ export default function Wallet() {
             </Card>
           );
         })}
+
+        <Card className="bg-card/50 border-white/10">
+          <CardContent className="p-4 space-y-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="20" cy="20" r="18" fill="#0098EA" />
+                  <path d="M13 15L20 11L27 15V21L20 29L13 21V15Z" fill="white" fillOpacity="0.9" />
+                  <path d="M20 11L27 15V21L20 29V11Z" fill="white" fillOpacity="0.7" />
+                </svg>
+                <div>
+                  <span className="font-display font-bold">TON</span>
+                  <div className="text-[10px] text-sky-400">The Open Network</div>
+                </div>
+              </div>
+              <div className="font-mono font-bold text-lg">
+                {(wallet.balances.TON ?? 0).toFixed(4)}
+              </div>
+            </div>
+
+            {!isTonConnected && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-sky-500/10 border border-sky-500/20">
+                <span className="text-[11px] text-sky-400">
+                  {t('Connect TON wallet to play with TON')}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={connectTonWallet}
+                  disabled={isTonConnecting}
+                  className="h-7 text-[10px] px-3 border-sky-500/30 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300 whitespace-nowrap"
+                >
+                  {isTonConnecting ? t('Connecting...') : t('Connect TON')}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       <NicknameDialog
@@ -350,6 +459,15 @@ function TronIcon({ className }: { className?: string }) {
       <path d="M12 2L3 9L10 22L21 7L12 2Z" fill="currentColor" opacity="0.8" />
       <path d="M12 2L3 9L10 22L12 2Z" fill="currentColor" opacity="0.6" />
       <path d="M12 2L21 7L10 22L12 2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TonIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 8L12 4L18 8V14L12 20L6 14V8Z" fill="currentColor" opacity="0.9" />
+      <path d="M12 4L18 8V14L12 20V4Z" fill="currentColor" opacity="0.7" />
     </svg>
   );
 }

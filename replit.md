@@ -22,7 +22,7 @@ This is a React + Express full-stack application that allows users to play 1v1 s
 ## Tech Stack
 
 - **Frontend**: React 19, Vite, TailwindCSS, Wouter (routing), Framer Motion
-- **Web3**: wagmi v2, viem v2, @wagmi/connectors (EVM), TronLink (Tron TRC-20)
+- **Web3**: wagmi v2, viem v2, @wagmi/connectors (EVM), TronLink (Tron TRC-20), @tonconnect/ui-react + @ton/ton (TON)
 - **Backend**: Express, TypeScript
 - **Database**: PostgreSQL with Drizzle ORM (in-memory storage for prototype)
 - **UI Components**: shadcn/ui (Radix UI based)
@@ -39,7 +39,7 @@ npm run db:push     # Push database schema
 ## Key Features
 
 - Games: Chess, Tetris (Block Stack), Checkers, Battleship
-- Assets: USDT (BSC BEP-20), ETH (Ethereum), BNB (BSC)
+- Assets: USDT (BSC BEP-20 + Tron TRC-20), ETH (Ethereum), BNB (BSC), TON (The Open Network)
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot
 - Real wallet connections via @reown/appkit (EVM — MetaMask, Trust, Coinbase, WalletConnect)
@@ -204,3 +204,21 @@ npm run db:push     # Push database schema
 10. **Network guard** - USDT is considered "correct chain" if user is on BSC (EVM) OR has TronLink connected — either satisfies the requirement
 11. **Translations** - 3 new keys (Connect TronLink, Connecting..., Multi-Network) in all 7 locales
 12. **Dual wallet support** - Users can connect both EVM (via AppKit) and Tron (via TronLink) simultaneously
+
+### TON Integration (Apr 14, 2026)
+1. **@tonconnect/ui** - TON wallet connection via TonConnect UI (Tonkeeper, MyTonWallet, etc.), separate from EVM AppKit
+2. **useTonConnect hook** - `client/src/core/wallet/useTonConnect.ts` manages TON wallet state, balance polling, address conversion
+3. **Balance via RPC** - Fetches native TON balance from `https://toncenter.com/api/v2/jsonRPC` using `getAddressBalance`
+4. **Address format** - Raw hex address from TonConnect converted to user-friendly format via `@ton/core` `Address.parseRaw()`
+5. **Balance polling** - 30-second interval refresh when connected
+6. **Manifest** - `client/public/tonconnect-manifest.json` for dApp metadata
+7. **Asset type** - `Asset` type updated to `'USDT' | 'ETH' | 'BNB' | 'TON'` across client and server
+8. **WalletProvider** - TON state integrated: `isTonConnected`, `tonAddress`, `tonBalance`, `connectTonWallet`, `disconnectTonWallet`
+9. **WalletStore** - All balance records include TON (default 0)
+10. **Wallet page** - Sky-blue themed TON wallet card, TON balance display, "Connect TON" button
+11. **Lobby** - TON added as 4th asset option with blue TON icon; "Connect TON wallet" banner when TON selected without connection
+12. **Landing page** - TON icon (blue circle with diamond shape) shown alongside USDT/ETH/BNB
+13. **Network guard** - TON asset requires `isTonConnected` for correct chain; no EVM chain switching needed
+14. **No escrow yet** - TON escrow/smart contract logic not implemented; wallet connection and balance display only
+15. **Translations** - 3 new keys (Connect TON, Connect TON wallet to play with TON, Connect your TON wallet to play with) in all 7 locales
+16. **"Crypto Only" rule** - Updated to mention TON in all 7 locale translations

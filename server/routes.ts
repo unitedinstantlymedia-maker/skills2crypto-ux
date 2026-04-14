@@ -27,7 +27,7 @@ async function addChallengeHistory(
 }
 
 const GAMES: readonly Game[] = ["chess", "tetris", "checkers", "battleship"] as const;
-const ASSETS: readonly Asset[] = ["USDT", "ETH", "BNB"] as const;
+const ASSETS: readonly Asset[] = ["USDT", "ETH", "BNB", "TON"] as const;
 
 function isGame(x: unknown): x is Game {
   return typeof x === "string" && (GAMES as readonly string[]).includes(x);

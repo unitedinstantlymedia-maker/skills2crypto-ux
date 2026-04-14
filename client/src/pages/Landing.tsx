@@ -97,6 +97,17 @@ export default function Landing() {
             </div>
             <span className="text-[10px] font-bold tracking-wider text-white/50">BNB</span>
           </div>
+
+          <div className="flex flex-col items-center gap-1" title="TON">
+            <div className="rounded-full" style={{ filter: 'drop-shadow(0 0 6px rgba(0,152,234,0.7)) drop-shadow(0 0 12px rgba(0,152,234,0.3))' }}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#0098EA" />
+                <path d="M13 15L20 11L27 15V21L20 29L13 21V15Z" fill="white" fillOpacity="0.9" />
+                <path d="M20 11L27 15V21L20 29V11Z" fill="white" fillOpacity="0.7" />
+              </svg>
+            </div>
+            <span className="text-[10px] font-bold tracking-wider text-white/50">TON</span>
+          </div>
         </div>
       </motion.div>
     </div>
