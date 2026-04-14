@@ -1,0 +1,39 @@
+Write two smart contracts for my P2P gaming platform. The platform must use Session Keys with a 365-day validity period. Players sign one off-chain message (EIP-712) when they first connect. After that, all deposits are submitted by the server without wallet popups.
+
+**CRITICAL: NO EXTERNAL PAYMASTER SERVICES. The contract itself must handle gas costs by deducting an equivalent amount in USDT from the player's stake, using a built-in oracle. The platform DOES NOT sponsor gas.**
+
+**PART 1: EVM ESCROW (Solidity) for BNB Smart Chain and Tron**
+- Supported betting assets per network: USDT (BEP-20 on BSC, TRC-20 on Tron), native ETH (Ethereum), native BNB (BSC), and native TON (TON network).
+- Native coins (BNB, TRX) are NEVER required from players. The contract converts gas costs to USDT internally.
+
+Gas handling (built-in, no external services):
+1. Contract has a built-in oracle or accepts gas price data from the server (via a trusted updater).
+2. When a match is created, the contract calculates the estimated gas cost in USDT and deducts it from the player's stake as a `gasReserve`.
+3. After settlement, any unused `gasReserve` in USDT is returned to the players.
+
+Session Key & Match Flow:
+1. Player signs an EIP-712 message once, authorizing a session key for 365 days and a max stake per match.
+2. When two players are matched, the server calls `deposit(matchId, stake, player1Sig, player2Sig)`.
+3. Contract verifies signatures, calculates `gasReserve` in USDT, and locks `stake + gasReserve` from each player. Emits `MatchActive`.
+4. Only the oracle (server) can call `settleMatch(matchId, winner, reason)`:
+   - `reason = 0` (normal): winner gets payout, platform takes 3% fee.
+   - `reason = 1` (draw): players get refund minus 3% fee (split equally).
+   - `reason = 2` (disconnect): full refund of stake to both players, NO platform fee. Gas already spent on the `deposit` transaction is not refundable. Unused `gasReserve` (reserved for settlement) is returned. 
+5. Unused `gasReserve` is always returned to the players after settlement.
+
+Fee logic (normal and draw):
+- Platform fee is ALWAYS 3% of total stake (even on draws). Split equally.
+- Win: winner gets `totalStake - platformFee`.
+- Draw: each gets `stake - (platformFee / 2)` + share of unused gasReserve.
+- Platform fee sent to `platformWallet` (one per network).
+
+Security: OpenZeppelin ReentrancyGuard, Ownable, ECDSA. Events for all state changes.
+
+**PART 2: TON ESCROW (Tact language)**
+Same logic for native TON coin.
+- 365-day session key via TON Connect.
+- Built-in gas calculation in TON (no external paymaster).
+- Same fee logic: 3% platform fee on normal/draw, 0% on disconnect.  Gas already spent on the `deposit` transaction is not refundable. Unused `gasReserve` (reserved for settlement) is returned. 
+
+After writing, explain how the built-in gas oracle works and how to deploy on BSC testnet and TON testnet.   How to test a full match cycle (deposit, normal win, draw, disconnect) using two test wallets.
+What to change (RPC endpoints, contract addresses) when migrating from testnet to mainnet.

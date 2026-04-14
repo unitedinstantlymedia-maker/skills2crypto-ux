@@ -222,3 +222,21 @@ npm run db:push     # Push database schema
 14. **No escrow yet** - TON escrow/smart contract logic not implemented; wallet connection and balance display only
 15. **Translations** - 3 new keys (Connect TON, Connect TON wallet to play with TON, Connect your TON wallet to play with) in all 7 locales
 16. **"Crypto Only" rule** - Updated to mention TON in all 7 locale translations
+
+### About Page (Apr 14, 2026)
+1. **About.tsx** - New page at `/about` with platform manifesto text
+2. **Landing link** - "About" icon link placed next to "Rules" in top-left corner of landing page
+3. **Translations** - All About page text translated across all 7 locales
+
+### Smart Contracts (Apr 14, 2026)
+1. **EVM Escrow** - `contracts/evm/Skills2CryptoEscrow.sol` (Solidity 0.8.24, OpenZeppelin)
+   - Session keys with EIP-712 signatures (365-day validity)
+   - USDT (BEP-20) and native coin (ETH/BNB) support
+   - Built-in gas oracle: server updates gas price in USDT, contract deducts gasReserve from stake
+   - 3% platform fee on normal/draw, 0% on disconnect
+   - Oracle-only settlement, ReentrancyGuard, events for all state changes
+2. **TON Escrow** - `contracts/ton/skills2crypto_escrow.tact` (Tact language)
+   - Same logic for native TON coin
+   - Session registration, deposit, settlement with 3 reasons
+   - Built-in gas calculation in TON
+3. **Deployment Guide** - `contracts/DEPLOYMENT_GUIDE.md` covers gas oracle design, BSC/TON testnet deployment, full match cycle testing, and testnet-to-mainnet migration
