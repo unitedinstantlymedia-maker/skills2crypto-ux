@@ -276,15 +276,18 @@ npm run db:push     # Push database schema
 6. **Env vars** - `SERVER_SESSION_WALLET` (server-side), `VITE_SERVER_SESSION_WALLET` + `VITE_BSC_ESCROW_ADDRESS` (client-side)
 
 ### Unified Onboarding & Deposit Pipeline (Apr 15, 2026)
-1. **3-step onboarding** - SessionKeyDialog now shows: Signing → Registering → Approving USDT (via `OnboardingStep` type)
-2. **useUsdtApproval hook** - `client/src/core/wallet/useUsdtApproval.ts` checks USDT allowance on BSC escrow contract and triggers `approve(MaxUint256)` via wagmi `useWriteContract`
-3. **WalletProvider wiring** - After session key registration succeeds, auto-triggers USDT approval; `onboardingStep` state drives SessionKeyDialog UI; dialog auto-closes when both session key + approval complete
-4. **useSessionKey escrowAddress** - Hook now returns `escrowAddress` from server nonce response, used to set the spender for USDT approval
-5. **EvmEscrowAdapter** - `client/src/core/escrow/EvmEscrowAdapter.ts` with `lockFunds`, `submitDeposit` (calls `/api/oracle/submit-deposit`), `settleMatch`, `getEstimatedNetworkFee`
-6. **Escrow factory** - `client/src/core/escrow/index.ts` selects Mock vs Real adapter based on `VITE_USE_MOCK_ESCROW` env var (defaults to mock)
-7. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
-8. **Server deposit endpoint** - `POST /api/oracle/submit-deposit` routes to `oracle.submitDeposit` (USDT) or `oracle.submitDepositNative` (ETH/BNB) based on `assetType`
-9. **Env vars** - Client: `VITE_USE_MOCK_ESCROW` (default true), `VITE_ESCROW_CHAIN_ID` (default 56); Server: `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`, `BSC_CHAIN_ID`
+1. **3-step onboarding** - SessionKeyDialog now shows: Signing → Registering → Signing USDT Permit (via `OnboardingStep` type)
+2. **useUsdtPermit hook** - `client/src/core/wallet/useUsdtPermit.ts` signs EIP-2612 permit off-chain (no gas tx), stores in localStorage + sends to `POST /api/session/permit`
+3. **Gasless USDT deposits** - Users sign one off-chain EIP-2612 permit during onboarding. When oracle submits deposits, it calls `depositUSDTWithPermit` which executes the permit on-chain + transfers USDT in one tx. Oracle pays gas in BNB, reimbursed via `gasReserve` deducted in USDT.
+4. **Contract: depositUSDTWithPermit** - New function in `Skills2CryptoEscrow.sol` accepts permit data (deadline, v, r, s) for both players. Uses `_tryPermit` helper with try/catch to handle already-used or unsupported permits gracefully. Falls back to existing allowance if permit fails.
+5. **Server permit endpoints** - `GET /api/session/permit-nonce` fetches ERC-20 nonce + token name from BSC. `POST /api/session/permit` stores signed permit in Redis (30-day TTL).
+6. **Deposit route updated** - `POST /api/oracle/submit-deposit` checks Redis for stored permits before calling oracle. If permits exist, uses `submitDepositWithPermit`; otherwise falls back to `submitDeposit` (requires prior on-chain approval).
+7. **WalletProvider wiring** - After session key registration succeeds, auto-triggers USDT permit signing; `onboardingStep` state drives SessionKeyDialog UI; dialog auto-closes when both session key + permit complete
+8. **useSessionKey escrowAddress** - Hook now returns `escrowAddress` from server nonce response, used to set the spender for USDT permit
+9. **EvmEscrowAdapter** - `client/src/core/escrow/EvmEscrowAdapter.ts` with `lockFunds`, `submitDeposit` (calls `/api/oracle/submit-deposit`), `settleMatch`, `getEstimatedNetworkFee`
+10. **Escrow factory** - `client/src/core/escrow/index.ts` selects Mock vs Real adapter based on `VITE_USE_MOCK_ESCROW` env var (defaults to mock)
+11. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
+12. **Env vars** - Client: `VITE_USE_MOCK_ESCROW` (default true), `VITE_ESCROW_CHAIN_ID` (default 56); Server: `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`, `BSC_CHAIN_ID`, `SERVER_SESSION_WALLET`
 
 ### BSC Mainnet Deployment (Apr 15, 2026)
 1. **Contract deployed** - `Skills2CryptoEscrow` at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` on BSC Mainnet (chain 56)

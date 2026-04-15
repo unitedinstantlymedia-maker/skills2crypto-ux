@@ -30,7 +30,7 @@ export function SessionKeyDialog({
       case 'registering':
         return t('Registering...', 'Registering...');
       case 'approving':
-        return t('Approving USDT...', 'Approving USDT...');
+        return t('Signing USDT permit...', 'Signing USDT permit...');
       default:
         return t('Authorize', 'Authorize');
     }
@@ -97,7 +97,7 @@ export function SessionKeyDialog({
               {step === 'approving' && (
                 <div className="flex items-center gap-2 text-xs text-zinc-400">
                   <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                  <span>{t('Step 3: USDT approval', 'Step 3: USDT approval')}</span>
+                  <span>{t('Step 3: USDT permit', 'Step 3: USDT permit')}</span>
                 </div>
               )}
             </div>

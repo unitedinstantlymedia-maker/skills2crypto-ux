@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
     using ECDSA for bytes32;
@@ -179,6 +180,75 @@ contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
         });
 
         emit MatchActive(matchId, player1, player2, stake, AssetType.USDT, gasReserve);
+    }
+
+    struct PermitData {
+        uint256 deadline;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    function depositUSDTWithPermit(
+        bytes32 matchId,
+        uint256 stake,
+        address player1,
+        address player2,
+        bytes calldata sig1,
+        bytes calldata sig2,
+        PermitData calldata permit1,
+        PermitData calldata permit2
+    ) external onlyOracle nonReentrant {
+        require(matches[matchId].status == MatchStatus.None, "Match exists");
+        require(player1 != player2, "Same player");
+        require(player1 != address(0) && player2 != address(0), "Zero address");
+        require(stake > 0, "Zero stake");
+
+        _validateSession(player1, stake);
+        _validateSession(player2, stake);
+
+        _verifyDepositSignature(matchId, stake, AssetType.USDT, player1, sig1);
+        _verifyDepositSignature(matchId, stake, AssetType.USDT, player2, sig2);
+
+        uint256 gasReserve = _calculateGasReserve();
+        uint256 totalPerPlayer = stake + gasReserve;
+
+        _tryPermit(player1, permit1);
+        _tryPermit(player2, permit2);
+
+        usdtToken.safeTransferFrom(player1, address(this), totalPerPlayer);
+        usdtToken.safeTransferFrom(player2, address(this), totalPerPlayer);
+
+        uint256 totalGasReserve = gasReserve * 2;
+        if (totalGasReserve > 0) {
+            usdtToken.safeTransfer(oracle, totalGasReserve);
+        }
+
+        matches[matchId] = Match({
+            matchId: matchId,
+            player1: player1,
+            player2: player2,
+            stake: stake,
+            assetType: AssetType.USDT,
+            gasReservePerPlayer: 0,
+            status: MatchStatus.Active
+        });
+
+        emit MatchActive(matchId, player1, player2, stake, AssetType.USDT, gasReserve);
+    }
+
+    function _tryPermit(address owner, PermitData calldata pd) internal {
+        if (pd.deadline > 0) {
+            try IERC20Permit(address(usdtToken)).permit(
+                owner,
+                address(this),
+                type(uint256).max,
+                pd.deadline,
+                pd.v,
+                pd.r,
+                pd.s
+            ) {} catch {}
+        }
     }
 
     function depositNative(

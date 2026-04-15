@@ -444,6 +444,82 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/session/permit-nonce", async (req, res) => {
+    const owner = req.query.owner as string;
+    const token = req.query.token as string;
+
+    if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+      return res.status(400).json({ error: "Invalid owner address" });
+    }
+    if (!token || !/^0x[0-9a-fA-F]{40}$/.test(token)) {
+      return res.status(400).json({ error: "Invalid token address" });
+    }
+
+    try {
+      const { JsonRpcProvider, Contract } = await import("ethers");
+      const rpcUrl = process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org";
+      const provider = new JsonRpcProvider(rpcUrl);
+
+      const erc20PermitAbi = [
+        "function nonces(address owner) view returns (uint256)",
+        "function name() view returns (string)",
+      ];
+      const tokenContract = new Contract(token, erc20PermitAbi, provider);
+
+      let nonce = "0";
+      let tokenName = "Tether USD";
+      try {
+        nonce = (await tokenContract.nonces(owner)).toString();
+      } catch {
+        console.warn("[permit-nonce] Token may not support EIP-2612 nonces");
+      }
+      try {
+        tokenName = await tokenContract.name();
+      } catch {
+        console.warn("[permit-nonce] Could not read token name");
+      }
+
+      return res.json({ nonce, tokenName });
+    } catch (err: any) {
+      console.error("[permit-nonce] Error:", err.message);
+      return res.status(500).json({ error: "Failed to fetch permit nonce" });
+    }
+  });
+
+  app.post("/api/session/permit", async (req, res) => {
+    const { owner, spender, deadline, v, r, s, nonce } = req.body ?? {};
+
+    if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+      return res.status(400).json({ error: "Invalid owner address" });
+    }
+    if (!spender || !/^0x[0-9a-fA-F]{40}$/.test(spender)) {
+      return res.status(400).json({ error: "Invalid spender address" });
+    }
+    if (!deadline || !r || !s || v === undefined) {
+      return res.status(400).json({ error: "Missing permit fields" });
+    }
+
+    const expectedEscrow = process.env.BSC_ESCROW_ADDRESS;
+    if (expectedEscrow && spender.toLowerCase() !== expectedEscrow.toLowerCase()) {
+      return res.status(400).json({ error: "Spender must be the escrow contract" });
+    }
+
+    try {
+      const permitKey = `permit:${owner.toLowerCase()}:${spender.toLowerCase()}`;
+      await redis.set(
+        permitKey,
+        JSON.stringify({ owner, spender, deadline, v, r, s, nonce }),
+        { ex: 86400 * 30 }
+      );
+
+      console.log(`[session/permit] Stored permit for ${owner} → spender ${spender}`);
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("[session/permit] Error:", err.message);
+      return res.status(500).json({ error: "Failed to store permit" });
+    }
+  });
+
   app.post("/api/oracle/submit-deposit", async (req, res) => {
     const { matchId, stake, assetType, player1, player2, sig1, sig2 } = req.body ?? {};
 
@@ -476,14 +552,33 @@ export async function registerRoutes(
 
       let result;
       if (assetType === "usdt") {
-        result = await oracle.submitDeposit(
-          matchId,
-          stakeBigInt,
-          player1,
-          player2,
-          sig1,
-          sig2
-        );
+        const escrowAddr = process.env.BSC_ESCROW_ADDRESS?.toLowerCase() || "";
+        const permit1Raw = await redis.get(`permit:${player1.toLowerCase()}:${escrowAddr}`);
+        const permit2Raw = await redis.get(`permit:${player2.toLowerCase()}:${escrowAddr}`);
+        const permit1 = permit1Raw ? (typeof permit1Raw === "string" ? JSON.parse(permit1Raw) : permit1Raw) : null;
+        const permit2 = permit2Raw ? (typeof permit2Raw === "string" ? JSON.parse(permit2Raw) : permit2Raw) : null;
+
+        if (permit1 || permit2) {
+          result = await oracle.submitDepositWithPermit(
+            matchId,
+            stakeBigInt,
+            player1,
+            player2,
+            sig1,
+            sig2,
+            permit1,
+            permit2
+          );
+        } else {
+          result = await oracle.submitDeposit(
+            matchId,
+            stakeBigInt,
+            player1,
+            player2,
+            sig1,
+            sig2
+          );
+        }
       } else {
         const totalValue = stakeBigInt * 2n;
         result = await oracle.submitDepositNative(

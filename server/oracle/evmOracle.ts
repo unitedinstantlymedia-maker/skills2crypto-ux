@@ -10,6 +10,7 @@ import {
 const ESCROW_ABI = [
   "function registerSessionKey(address player, address sessionAddr, uint256 maxStakePerMatch, uint256 expiry, bytes signature)",
   "function depositUSDT(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2)",
+  "function depositUSDTWithPermit(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2, tuple(uint256 deadline, uint8 v, bytes32 r, bytes32 s) permit1, tuple(uint256 deadline, uint8 v, bytes32 r, bytes32 s) permit2)",
   "function depositNative(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2) payable",
   "function settleMatch(bytes32 matchId, address winner, uint8 reason)",
   "function updateGasPrice(uint256 _gasPricePerGasUnit)",
@@ -22,6 +23,13 @@ const ESCROW_ABI = [
   "event MatchActive(bytes32 indexed matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer)",
   "event MatchSettled(bytes32 indexed matchId, address winner, uint8 reason, uint256 payout, uint256 platformFee)",
 ];
+
+export interface PermitData {
+  deadline: string;
+  v: number;
+  r: string;
+  s: string;
+}
 
 const GAS_BUFFER_PERCENT = 20;
 const TX_CONFIRMATION_BLOCKS = 1;
@@ -233,6 +241,105 @@ export function createEvmOracle() {
       throw new EvmOracleError(
         `Deposit failed: ${reason}`,
         "DEPOSIT_FAILED",
+        err?.hash
+      );
+    }
+  }
+
+  async function submitDepositWithPermit(
+    matchId: string,
+    stake: bigint,
+    player1: string,
+    player2: string,
+    sig1: string,
+    sig2: string,
+    permit1: PermitData | null,
+    permit2: PermitData | null
+  ): Promise<DepositResult> {
+    await ensureChainVerified();
+
+    if (!matchId || matchId.length === 0) {
+      throw new EvmOracleError("matchId cannot be empty", "INVALID_INPUT");
+    }
+    if (stake <= 0n) {
+      throw new EvmOracleError("stake must be positive", "INVALID_INPUT");
+    }
+    if (!isValidAddress(player1) || !isValidAddress(player2)) {
+      throw new EvmOracleError("player1 and player2 must be valid EVM addresses", "INVALID_INPUT");
+    }
+    if (player1.toLowerCase() === player2.toLowerCase()) {
+      throw new EvmOracleError("player1 and player2 cannot be the same address", "INVALID_INPUT");
+    }
+    if (!isValidBytes(sig1) || !isValidBytes(sig2)) {
+      throw new EvmOracleError("sig1 and sig2 must be valid hex signatures", "INVALID_INPUT");
+    }
+
+    const emptyPermit = { deadline: "0", v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+
+    const p1 = permit1 && permit1.deadline !== "0"
+      ? { deadline: permit1.deadline, v: permit1.v, r: permit1.r, s: permit1.s }
+      : emptyPermit;
+    const p2 = permit2 && permit2.deadline !== "0"
+      ? { deadline: permit2.deadline, v: permit2.v, r: permit2.r, s: permit2.s }
+      : emptyPermit;
+
+    const matchIdBytes32 = toMatchIdBytes32(matchId);
+
+    console.log(`[EvmOracle] submitDepositWithPermit — match: ${matchId}`);
+    console.log(`[EvmOracle]   stake: ${stake.toString()}`);
+    console.log(`[EvmOracle]   player1: ${player1} (permit: ${p1.deadline !== "0"})`);
+    console.log(`[EvmOracle]   player2: ${player2} (permit: ${p2.deadline !== "0"})`);
+
+    try {
+      const estimatedGas = await escrow.depositUSDTWithPermit.estimateGas(
+        matchIdBytes32,
+        stake,
+        player1,
+        player2,
+        sig1,
+        sig2,
+        [p1.deadline, p1.v, p1.r, p1.s],
+        [p2.deadline, p2.v, p2.r, p2.s]
+      );
+      const gasLimit = addGasBuffer(estimatedGas);
+
+      console.log(
+        `[EvmOracle] Gas estimate: ${estimatedGas.toString()}, limit: ${gasLimit.toString()}`
+      );
+
+      const tx: ContractTransactionResponse = await escrow.depositUSDTWithPermit(
+        matchIdBytes32,
+        stake,
+        player1,
+        player2,
+        sig1,
+        sig2,
+        [p1.deadline, p1.v, p1.r, p1.s],
+        [p2.deadline, p2.v, p2.r, p2.s],
+        { gasLimit }
+      );
+
+      console.log(`[EvmOracle] DepositWithPermit tx sent: ${tx.hash}`);
+      const receipt = await waitForReceipt(tx);
+
+      console.log(
+        `[EvmOracle] DepositWithPermit confirmed in block ${receipt.blockNumber}, gas used: ${receipt.gasUsed.toString()}`
+      );
+
+      return {
+        txHash: tx.hash,
+        matchId,
+        gasUsed: receipt.gasUsed.toString(),
+        blockNumber: receipt.blockNumber,
+      };
+    } catch (err: any) {
+      if (err instanceof EvmOracleError) throw err;
+
+      const reason = err?.reason || err?.shortMessage || err?.message || "Unknown error";
+      console.error(`[EvmOracle] submitDepositWithPermit failed: ${reason}`);
+      throw new EvmOracleError(
+        `DepositWithPermit failed: ${reason}`,
+        "DEPOSIT_PERMIT_FAILED",
         err?.hash
       );
     }
@@ -512,6 +619,7 @@ export function createEvmOracle() {
     getSessionNonce,
     getSessionKeyOnChain,
     submitDeposit,
+    submitDepositWithPermit,
     submitDepositNative,
     submitSettlement,
     updateGasPrice,

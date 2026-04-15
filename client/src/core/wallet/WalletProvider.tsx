@@ -10,7 +10,7 @@ import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
 import { useSessionKey } from './useSessionKey';
-import { useUsdtApproval } from './useUsdtApproval';
+import { useUsdtPermit } from './useUsdtPermit';
 import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
@@ -98,12 +98,11 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   } = useSessionKey();
 
   const {
-    hasAllowance: hasUsdtAllowance,
-    isApproving: isApprovingUsdt,
-    approvalError,
-    approveUsdt,
-    checkAllowance,
-  } = useUsdtApproval();
+    hasPermit: hasUsdtAllowance,
+    isSigning: isApprovingUsdt,
+    permitError: approvalError,
+    signPermit: approveUsdt,
+  } = useUsdtPermit();
 
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('ready');
 
@@ -252,11 +251,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     }
   }, [hasSessionKey, hasUsdtAllowance, sessionDialogOpen]);
 
-  useEffect(() => {
-    if (sessionEscrowAddress) {
-      checkAllowance(sessionEscrowAddress);
-    }
-  }, [sessionEscrowAddress, checkAllowance]);
 
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
