@@ -10,10 +10,13 @@ import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
 import { useSessionKey } from './useSessionKey';
+import { useUsdtApproval } from './useUsdtApproval';
 import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
 import type { Asset } from '@/core/types';
+
+type OnboardingStep = 'ready' | 'signing' | 'registering' | 'approving' | 'done';
 
 const USDT_BSC_ADDRESS = '0x55d398326f99059fF775485246999027B3197955' as const;
 
@@ -90,8 +93,19 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     isSigningSession,
     isRegistering,
     sessionError,
+    escrowAddress: sessionEscrowAddress,
     promptSessionKey: doPromptSessionKey,
   } = useSessionKey();
+
+  const {
+    hasAllowance: hasUsdtAllowance,
+    isApproving: isApprovingUsdt,
+    approvalError,
+    approveUsdt,
+    checkAllowance,
+  } = useUsdtApproval();
+
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('ready');
 
   const {
     isTronLinkInstalled,
@@ -204,10 +218,45 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   }, [pendingSessionPrompt, nicknameFlowDone, isEvmConnected, evmAddress, hasSessionKey, sessionDialogOpen]);
 
   useEffect(() => {
-    if (hasSessionKey && sessionDialogOpen) {
+    if (isSigningSession) setOnboardingStep('signing');
+    else if (isRegistering) setOnboardingStep('registering');
+    else if (isApprovingUsdt) setOnboardingStep('approving');
+    else if (hasSessionKey && hasUsdtAllowance && sessionDialogOpen) {
+      setOnboardingStep('done');
       setSessionDialogOpen(false);
+    } else if (!isSigningSession && !isRegistering && !isApprovingUsdt && onboardingStep !== 'done') {
+      setOnboardingStep('ready');
     }
-  }, [hasSessionKey, sessionDialogOpen]);
+  }, [isSigningSession, isRegistering, isApprovingUsdt, hasSessionKey, hasUsdtAllowance, sessionDialogOpen]);
+
+  const approvalTriggered = useRef(false);
+
+  useEffect(() => {
+    if (hasSessionKey && sessionEscrowAddress && !hasUsdtAllowance && sessionDialogOpen && !isApprovingUsdt && !approvalError && !approvalTriggered.current) {
+      approvalTriggered.current = true;
+      setOnboardingStep('approving');
+      approveUsdt(sessionEscrowAddress);
+    }
+  }, [hasSessionKey, sessionEscrowAddress, hasUsdtAllowance, sessionDialogOpen, isApprovingUsdt, approvalError, approveUsdt]);
+
+  useEffect(() => {
+    if (!sessionDialogOpen) {
+      approvalTriggered.current = false;
+    }
+  }, [sessionDialogOpen]);
+
+  useEffect(() => {
+    if (hasSessionKey && hasUsdtAllowance && sessionDialogOpen) {
+      const timer = setTimeout(() => setSessionDialogOpen(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasSessionKey, hasUsdtAllowance, sessionDialogOpen]);
+
+  useEffect(() => {
+    if (sessionEscrowAddress) {
+      checkAllowance(sessionEscrowAddress);
+    }
+  }, [sessionEscrowAddress, checkAllowance]);
 
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
@@ -216,6 +265,7 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     hasPromptedNickname.current = false;
     setNicknameFlowDone(false);
     setPendingSessionPrompt(false);
+    setOnboardingStep('ready');
     wasEvmConnected.current = false;
     walletStore.disconnect();
   }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
@@ -310,9 +360,8 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
         open={sessionDialogOpen}
         onOpenChange={setSessionDialogOpen}
         onSign={handleSessionSign}
-        isSigning={isSigningSession}
-        isRegistering={isRegistering}
-        error={sessionError}
+        step={onboardingStep}
+        error={sessionError || approvalError}
       />
     </RealWalletContext.Provider>
   );

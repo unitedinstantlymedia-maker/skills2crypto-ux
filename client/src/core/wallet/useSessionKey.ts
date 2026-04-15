@@ -25,6 +25,7 @@ interface SessionKeyState {
   isRegistering: boolean;
   sessionError: string | null;
   storedSession: StoredSession | null;
+  escrowAddress: string | null;
   promptSessionKey: () => Promise<void>;
 }
 
@@ -64,6 +65,7 @@ export function useSessionKey(): SessionKeyState {
   const [isSigningSession, setIsSigningSession] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [escrowAddr, setEscrowAddr] = useState<string | null>(null);
   const inFlightRef = useRef(false);
 
   useEffect(() => {
@@ -97,6 +99,8 @@ export function useSessionKey(): SessionKeyState {
       if (!escrowAddress || !sessionAddr) {
         throw new Error('Server returned incomplete session configuration');
       }
+
+      setEscrowAddr(escrowAddress);
 
       const expiry = Math.floor(Date.now() / 1000) + SESSION_DURATION_DAYS * 86400;
 
@@ -188,6 +192,7 @@ export function useSessionKey(): SessionKeyState {
     isRegistering,
     sessionError,
     storedSession,
+    escrowAddress: escrowAddr,
     promptSessionKey,
   };
 }

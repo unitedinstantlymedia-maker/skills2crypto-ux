@@ -1,14 +1,15 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, ShieldCheck, AlertTriangle, Zap, Gamepad2 } from 'lucide-react';
+import { Loader2, ShieldCheck, AlertTriangle, Zap, Gamepad2, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
+
+type OnboardingStep = 'ready' | 'signing' | 'registering' | 'approving' | 'done';
 
 interface SessionKeyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSign: () => void;
-  isSigning: boolean;
-  isRegistering: boolean;
+  step: OnboardingStep;
   error: string | null;
 }
 
@@ -16,12 +17,24 @@ export function SessionKeyDialog({
   open,
   onOpenChange,
   onSign,
-  isSigning,
-  isRegistering,
+  step,
   error,
 }: SessionKeyDialogProps) {
   const { t } = useLanguage();
-  const isLoading = isSigning || isRegistering;
+  const isLoading = step === 'signing' || step === 'registering' || step === 'approving';
+
+  const getButtonText = () => {
+    switch (step) {
+      case 'signing':
+        return t('Signing...', 'Signing...');
+      case 'registering':
+        return t('Registering...', 'Registering...');
+      case 'approving':
+        return t('Approving USDT...', 'Approving USDT...');
+      default:
+        return t('Authorize', 'Authorize');
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={isLoading ? undefined : onOpenChange}>
@@ -52,6 +65,43 @@ export function SessionKeyDialog({
               </span>
             </div>
           </div>
+
+          {isLoading && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                {(step === 'signing' || step === 'registering' || step === 'approving') && (
+                  <>
+                    {step === 'signing' ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                    ) : (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    )}
+                    <span className={step !== 'signing' ? 'text-emerald-400' : ''}>
+                      {t('Step 1: Session key', 'Step 1: Session key')}
+                    </span>
+                  </>
+                )}
+              </div>
+              {(step === 'registering' || step === 'approving') && (
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  {step === 'registering' ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                  ) : (
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  )}
+                  <span className={step === 'approving' ? 'text-emerald-400' : ''}>
+                    {t('Step 2: On-chain registration', 'Step 2: On-chain registration')}
+                  </span>
+                </div>
+              )}
+              {step === 'approving' && (
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                  <span>{t('Step 3: USDT approval', 'Step 3: USDT approval')}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {error && (
@@ -75,13 +125,8 @@ export function SessionKeyDialog({
             disabled={isLoading}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
-            {isSigning && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {isRegistering && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {isSigning
-              ? t('Signing...', 'Signing...')
-              : isRegistering
-                ? t('Registering...', 'Registering...')
-                : t('Authorize', 'Authorize')}
+            {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {getButtonText()}
           </Button>
         </DialogFooter>
       </DialogContent>

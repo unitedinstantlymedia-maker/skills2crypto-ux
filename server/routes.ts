@@ -444,6 +444,72 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/oracle/submit-deposit", async (req, res) => {
+    const { matchId, stake, assetType, player1, player2, sig1, sig2 } = req.body ?? {};
+
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+    if (!stake) {
+      return res.status(400).json({ error: "Invalid stake" });
+    }
+    if (!assetType || !["usdt", "native"].includes(assetType)) {
+      return res.status(400).json({ error: "Invalid assetType. Must be 'usdt' or 'native'" });
+    }
+    if (!player1 || !/^0x[0-9a-fA-F]{40}$/.test(player1)) {
+      return res.status(400).json({ error: "Invalid player1 address" });
+    }
+    if (!player2 || !/^0x[0-9a-fA-F]{40}$/.test(player2)) {
+      return res.status(400).json({ error: "Invalid player2 address" });
+    }
+    if (!sig1 || !/^0x[0-9a-fA-F]+$/.test(sig1)) {
+      return res.status(400).json({ error: "Invalid sig1" });
+    }
+    if (!sig2 || !/^0x[0-9a-fA-F]+$/.test(sig2)) {
+      return res.status(400).json({ error: "Invalid sig2" });
+    }
+
+    try {
+      const { createEvmOracle } = await import("./oracle/evmOracle");
+      const oracle = createEvmOracle();
+      const stakeBigInt = BigInt(stake);
+
+      let result;
+      if (assetType === "usdt") {
+        result = await oracle.submitDeposit(
+          matchId,
+          stakeBigInt,
+          player1,
+          player2,
+          sig1,
+          sig2
+        );
+      } else {
+        const totalValue = stakeBigInt * 2n;
+        result = await oracle.submitDepositNative(
+          matchId,
+          stakeBigInt,
+          player1,
+          player2,
+          sig1,
+          sig2,
+          totalValue
+        );
+      }
+
+      console.log(`[oracle/submit-deposit] Deposit for match ${matchId}: tx=${result.txHash}`);
+      return res.json({
+        txHash: result.txHash,
+        matchId: result.matchId,
+        blockNumber: result.blockNumber,
+        gasUsed: result.gasUsed,
+      });
+    } catch (err: any) {
+      console.error("[oracle/submit-deposit] Error:", err.message);
+      return res.status(500).json({ error: err.message || "Deposit submission failed" });
+    }
+  });
+
   return httpServer;
 }
 

@@ -10,7 +10,7 @@ import { useState } from "react";
 import { ArrowLeft, Coins, Zap, Info, Loader2, X, Ship, UserPlus, Copy, Check, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
-import { mockEscrowAdapter } from "@/core/escrow/MockEscrowAdapter";
+import { escrowAdapter } from "@/core/escrow";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 import { ShareButton } from "@/components/ui/ShareButton";
@@ -103,7 +103,7 @@ export default function Lobby() {
       return;
     }
 
-    const networkFee = mockEscrowAdapter.getEstimatedNetworkFee(state.selectedAsset);
+    const networkFee = escrowAdapter.getEstimatedNetworkFee(state.selectedAsset);
     const totalCost = state.stakeAmount + networkFee;
     const currentBalance = state.wallet.balances[state.selectedAsset] || 0;
 

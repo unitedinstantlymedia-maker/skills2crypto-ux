@@ -274,3 +274,14 @@ npm run db:push     # Push database schema
    - `POST /api/session/register` — validates inputs, verifies session address matches server wallet, calls oracle's `registerSessionKey`
 5. **Oracle extension** - `evmOracle.ts` gains `registerSessionKey()`, `getSessionNonce()`, `getSessionKeyOnChain()`
 6. **Env vars** - `SERVER_SESSION_WALLET` (server-side), `VITE_SERVER_SESSION_WALLET` + `VITE_BSC_ESCROW_ADDRESS` (client-side)
+
+### Unified Onboarding & Deposit Pipeline (Apr 15, 2026)
+1. **3-step onboarding** - SessionKeyDialog now shows: Signing → Registering → Approving USDT (via `OnboardingStep` type)
+2. **useUsdtApproval hook** - `client/src/core/wallet/useUsdtApproval.ts` checks USDT allowance on BSC escrow contract and triggers `approve(MaxUint256)` via wagmi `useWriteContract`
+3. **WalletProvider wiring** - After session key registration succeeds, auto-triggers USDT approval; `onboardingStep` state drives SessionKeyDialog UI; dialog auto-closes when both session key + approval complete
+4. **useSessionKey escrowAddress** - Hook now returns `escrowAddress` from server nonce response, used to set the spender for USDT approval
+5. **EvmEscrowAdapter** - `client/src/core/escrow/EvmEscrowAdapter.ts` with `lockFunds`, `submitDeposit` (calls `/api/oracle/submit-deposit`), `settleMatch`, `getEstimatedNetworkFee`
+6. **Escrow factory** - `client/src/core/escrow/index.ts` selects Mock vs Real adapter based on `VITE_USE_MOCK_ESCROW` env var (defaults to mock)
+7. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
+8. **Server deposit endpoint** - `POST /api/oracle/submit-deposit` routes to `oracle.submitDeposit` (USDT) or `oracle.submitDepositNative` (ETH/BNB) based on `assetType`
+9. **Env vars** - Client: `VITE_USE_MOCK_ESCROW` (default true), `VITE_ESCROW_CHAIN_ID` (default 56); Server: `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`, `BSC_CHAIN_ID`

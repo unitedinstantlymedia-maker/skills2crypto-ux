@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
 import { walletStore } from '@/core/wallet/WalletStore';
-import { mockEscrowAdapter } from '@/core/escrow/MockEscrowAdapter';
+import { escrowAdapter } from '@/core/escrow';
 import { historyStore } from '@/core/history/HistoryStore';
 import type { WalletState, HistoryEntry } from '@/core/types';
 
@@ -115,10 +115,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         status: 'active',
       }));
 
-      // блокируем средства
-      void mockEscrowAdapter
+      void escrowAdapter
         .lockFunds(payload.matchId, selectedAsset, stakeAmount)
-        .catch((e) => console.error('lockFunds failed', e));
+        .catch((e: any) => console.error('lockFunds failed', e));
     });
 
     s.on('disconnect', (reason) => {
@@ -168,7 +167,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
 
     // можно показать предупреждение о балансе, но не блокируем прототип
-    const netFee = mockEscrowAdapter.getEstimatedNetworkFee(selectedAsset);
+    const netFee = escrowAdapter.getEstimatedNetworkFee(selectedAsset);
     const required = stakeAmount + netFee;
     if (!walletAdapter.canAfford(selectedAsset, required)) {
       console.warn('[GameContext] low balance (allowed to proceed in prototype)');
@@ -205,7 +204,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
         // присоединяемся к комнате и блокируем средства
         sock.emit('join-match', res.matchId);
-        await mockEscrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
+        await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
       } else {
         // waiting — ждём событие match-found
         console.log('[GameContext] queued, waiting for match-found');
@@ -228,7 +227,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const finishMatch = async (result: 'win' | 'loss' | 'draw') => {
     if (!currentMatch) return;
 
-    const { payout, fee } = await mockEscrowAdapter.settleMatch(
+    const { payout, fee } = await escrowAdapter.settleMatch(
       currentMatch.id,
       currentMatch.asset,
       currentMatch.stake,
