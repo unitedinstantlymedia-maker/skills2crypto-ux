@@ -369,6 +369,81 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/session/nonce", async (req, res) => {
+    const player = req.query.player as string;
+    const chainId = req.query.chainId as string;
+
+    if (!player || !/^0x[0-9a-fA-F]{40}$/.test(player)) {
+      return res.status(400).json({ error: "Invalid player address" });
+    }
+
+    const sessionAddr = process.env.SERVER_SESSION_WALLET;
+    if (!sessionAddr) {
+      return res.status(500).json({ error: "Server session wallet not configured" });
+    }
+
+    try {
+      const { createEvmOracle } = await import("./oracle/evmOracle");
+      const oracle = createEvmOracle();
+      const nonce = await oracle.getSessionNonce(player);
+
+      return res.json({
+        nonce: nonce.toString(),
+        sessionAddr,
+        escrowAddress: oracle.escrowAddress,
+      });
+    } catch (err: any) {
+      console.error("[session/nonce] Error:", err.message);
+      return res.status(500).json({ error: "Failed to fetch session nonce" });
+    }
+  });
+
+  app.post("/api/session/register", async (req, res) => {
+    const { player, sessionAddr, maxStakePerMatch, expiry, signature, chainId } = req.body ?? {};
+
+    if (!player || !/^0x[0-9a-fA-F]{40}$/.test(player)) {
+      return res.status(400).json({ error: "Invalid player address" });
+    }
+    if (!sessionAddr || !/^0x[0-9a-fA-F]{40}$/.test(sessionAddr)) {
+      return res.status(400).json({ error: "Invalid session address" });
+    }
+    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+    if (!maxStakePerMatch || !expiry) {
+      return res.status(400).json({ error: "Missing maxStakePerMatch or expiry" });
+    }
+
+    const expectedChainId = Number(process.env.BSC_CHAIN_ID || 56);
+    if (Number(chainId) !== expectedChainId) {
+      return res.status(400).json({ error: `Invalid chain ID. Expected ${expectedChainId}` });
+    }
+
+    const expectedSessionAddr = process.env.SERVER_SESSION_WALLET;
+    if (sessionAddr.toLowerCase() !== expectedSessionAddr?.toLowerCase()) {
+      return res.status(400).json({ error: "Session address does not match server wallet" });
+    }
+
+    try {
+      const { createEvmOracle } = await import("./oracle/evmOracle");
+      const oracle = createEvmOracle();
+
+      const result = await oracle.registerSessionKey(
+        player,
+        sessionAddr,
+        BigInt(maxStakePerMatch),
+        BigInt(expiry),
+        signature
+      );
+
+      console.log(`[session/register] Session registered for ${player}, tx: ${result.txHash}`);
+      return res.json({ txHash: result.txHash, blockNumber: result.blockNumber });
+    } catch (err: any) {
+      console.error("[session/register] Error:", err.message);
+      return res.status(500).json({ error: err.message || "Session registration failed" });
+    }
+  });
+
   return httpServer;
 }
 

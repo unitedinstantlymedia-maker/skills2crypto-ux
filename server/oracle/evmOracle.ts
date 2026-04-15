@@ -8,6 +8,7 @@ import {
 } from "ethers";
 
 const ESCROW_ABI = [
+  "function registerSessionKey(address player, address sessionAddr, uint256 maxStakePerMatch, uint256 expiry, bytes signature)",
   "function depositUSDT(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2)",
   "function depositNative(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2) payable",
   "function settleMatch(bytes32 matchId, address winner, uint8 reason)",
@@ -16,6 +17,8 @@ const ESCROW_ABI = [
   "function getGasReserveEstimate() view returns (uint256)",
   "function getDepositNonce(address player) view returns (uint256)",
   "function getSessionKey(address player) view returns (tuple(address player, address sessionAddr, uint256 maxStakePerMatch, uint256 expiry, bool revoked))",
+  "function sessionNonces(address player) view returns (uint256)",
+  "event SessionKeyRegistered(address indexed player, address indexed sessionAddr, uint256 expiry)",
   "event MatchActive(bytes32 indexed matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer)",
   "event MatchSettled(bytes32 indexed matchId, address winner, uint8 reason, uint256 payout, uint256 platformFee)",
 ];
@@ -419,6 +422,76 @@ export function createEvmOracle() {
     }
   }
 
+  async function registerSessionKey(
+    player: string,
+    sessionAddr: string,
+    maxStakePerMatch: bigint,
+    expiry: bigint,
+    signature: string
+  ): Promise<{ txHash: string; blockNumber: number }> {
+    await ensureChainVerified();
+
+    if (!isValidAddress(player)) {
+      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
+    }
+    if (!isValidAddress(sessionAddr)) {
+      throw new EvmOracleError("sessionAddr must be a valid EVM address", "INVALID_INPUT");
+    }
+    if (maxStakePerMatch <= 0n) {
+      throw new EvmOracleError("maxStakePerMatch must be positive", "INVALID_INPUT");
+    }
+    if (!isValidBytes(signature)) {
+      throw new EvmOracleError("signature must be valid hex", "INVALID_INPUT");
+    }
+
+    console.log(`[EvmOracle] registerSessionKey — player: ${player}, session: ${sessionAddr}`);
+
+    try {
+      const estimatedGas = await escrow.registerSessionKey.estimateGas(
+        player,
+        sessionAddr,
+        maxStakePerMatch,
+        expiry,
+        signature
+      );
+      const gasLimit = addGasBuffer(estimatedGas);
+
+      const tx: ContractTransactionResponse = await escrow.registerSessionKey(
+        player,
+        sessionAddr,
+        maxStakePerMatch,
+        expiry,
+        signature,
+        { gasLimit }
+      );
+
+      console.log(`[EvmOracle] RegisterSession tx sent: ${tx.hash}`);
+      const receipt = await waitForReceipt(tx);
+      console.log(`[EvmOracle] Session registered in block ${receipt.blockNumber}`);
+
+      return { txHash: tx.hash, blockNumber: receipt.blockNumber };
+    } catch (err: any) {
+      if (err instanceof EvmOracleError) throw err;
+      const reason = err?.reason || err?.shortMessage || err?.message || "Unknown error";
+      console.error(`[EvmOracle] registerSessionKey failed: ${reason}`);
+      throw new EvmOracleError(`Session registration failed: ${reason}`, "SESSION_REGISTER_FAILED", err?.hash);
+    }
+  }
+
+  async function getSessionNonce(player: string): Promise<bigint> {
+    if (!isValidAddress(player)) {
+      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
+    }
+    return escrow.sessionNonces(player);
+  }
+
+  async function getSessionKeyOnChain(player: string) {
+    if (!isValidAddress(player)) {
+      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
+    }
+    return escrow.getSessionKey(player);
+  }
+
   async function getMatchOnChain(matchId: string) {
     const matchIdBytes32 = toMatchIdBytes32(matchId);
     return escrow.getMatch(matchIdBytes32);
@@ -435,6 +508,9 @@ export function createEvmOracle() {
   }
 
   return {
+    registerSessionKey,
+    getSessionNonce,
+    getSessionKeyOnChain,
     submitDeposit,
     submitDepositNative,
     submitSettlement,

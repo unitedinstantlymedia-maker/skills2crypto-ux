@@ -253,3 +253,24 @@ npm run db:push     # Push database schema
 9. **Read helpers** - `getMatchOnChain()`, `getOracleBalance()`, `getGasReserveEstimate()` for monitoring
 10. **Env vars required** - `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`
 11. **Dependency** - ethers v6 added to root package.json
+
+### EIP-712 Session Key Signing (Apr 15, 2026)
+1. **useSessionKey hook** - `client/src/core/wallet/useSessionKey.ts` manages session key lifecycle
+   - Signs EIP-712 typed data matching contract's `SESSION_TYPEHASH` via wagmi's `useSignTypedData`
+   - Domain: `{name: "Skills2CryptoEscrow", version: "1", chainId, verifyingContract}`
+   - Message: `{player, sessionAddr, maxStakePerMatch, expiry, nonce}`
+   - Fetches current nonce from server → signs → sends signature to server → server registers on-chain
+   - Persists session in localStorage keyed by `sk_session_{address}_{chainId}`
+   - Auto-expires: removes stored session if expiry has passed
+   - 365-day validity, 10,000 USDT max stake per match
+2. **SessionKeyDialog** - `client/src/components/wallet/SessionKeyDialog.tsx` prompts user after first EVM wallet connect
+   - Shows signing/registering states with loading spinners
+   - "Skip for now" option; auto-closes on success
+   - Error display for rejected signatures or failed registration
+3. **WalletProvider integration** - Session dialog auto-opens after nickname dialog, only if no existing session key
+   - Context exposes `hasSessionKey` and `promptSessionKey` for Lobby/Play pages
+4. **Server routes** - Two new endpoints in `server/routes.ts`:
+   - `GET /api/session/nonce?player=0x...&chainId=56` — returns current nonce and server session wallet address
+   - `POST /api/session/register` — validates inputs, verifies session address matches server wallet, calls oracle's `registerSessionKey`
+5. **Oracle extension** - `evmOracle.ts` gains `registerSessionKey()`, `getSessionNonce()`, `getSessionKeyOnChain()`
+6. **Env vars** - `SERVER_SESSION_WALLET` (server-side), `VITE_SERVER_SESSION_WALLET` + `VITE_BSC_ESCROW_ADDRESS` (client-side)

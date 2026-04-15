@@ -8,6 +8,8 @@ import { wagmiConfig, appKit } from '@/config/wagmi';
 import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
+import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
+import { useSessionKey } from './useSessionKey';
 import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
@@ -57,6 +59,8 @@ interface RealWalletContextValue {
   isTonConnecting: boolean;
   connectTonWallet: () => void;
   disconnectTonWallet: () => void;
+  hasSessionKey: boolean;
+  promptSessionKey: () => Promise<void>;
 }
 
 const RealWalletContext = createContext<RealWalletContextValue | undefined>(undefined);
@@ -73,9 +77,19 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const { disconnect: disconnectEvm } = useAppKitDisconnect();
   const { chainId: currentChainId, switchNetwork } = useAppKitNetwork();
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
+  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [nickname, setNicknameState] = useState<string | null>(null);
   const [isSwitchingChain, setIsSwitchingChain] = useState(false);
   const hasPromptedNickname = useRef(false);
+  const hasPromptedSession = useRef(false);
+
+  const {
+    hasSession: hasSessionKey,
+    isSigningSession,
+    isRegistering,
+    sessionError,
+    promptSessionKey: doPromptSessionKey,
+  } = useSessionKey();
 
   const {
     isTronLinkInstalled,
@@ -147,20 +161,49 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isAnyConnected && primaryAddress && !hasPromptedNickname.current) {
       const storedNick = localStorage.getItem(`nickname_${primaryAddress}`);
+      hasPromptedNickname.current = true;
       if (!storedNick) {
-        hasPromptedNickname.current = true;
         setTimeout(() => setNicknameDialogOpen(true), 600);
       }
     }
   }, [primaryAddress, isAnyConnected]);
+
+  useEffect(() => {
+    if (
+      isEvmConnected &&
+      evmAddress &&
+      !hasSessionKey &&
+      !hasPromptedSession.current &&
+      !nicknameDialogOpen &&
+      hasPromptedNickname.current
+    ) {
+      hasPromptedSession.current = true;
+      setTimeout(() => setSessionDialogOpen(true), 400);
+    }
+  }, [isEvmConnected, evmAddress, hasSessionKey, nicknameDialogOpen]);
+
+  useEffect(() => {
+    if (hasSessionKey && sessionDialogOpen) {
+      setSessionDialogOpen(false);
+    }
+  }, [hasSessionKey, sessionDialogOpen]);
 
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
     if (isTronConnected) disconnectTronLink();
     if (isTonConnected) disconnectTonWallet();
     hasPromptedNickname.current = false;
+    hasPromptedSession.current = false;
     walletStore.disconnect();
   }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
+
+  const promptSessionKey = useCallback(async () => {
+    setSessionDialogOpen(true);
+  }, []);
+
+  const handleSessionSign = useCallback(async () => {
+    await doPromptSessionKey();
+  }, [doPromptSessionKey]);
 
   const setNickname = useCallback((name: string) => {
     if (primaryAddress) {
@@ -228,6 +271,8 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     isTonConnecting,
     connectTonWallet,
     disconnectTonWallet,
+    hasSessionKey,
+    promptSessionKey,
   };
 
   return (
@@ -237,6 +282,14 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
         open={nicknameDialogOpen}
         onOpenChange={setNicknameDialogOpen}
         onSave={setNickname}
+      />
+      <SessionKeyDialog
+        open={sessionDialogOpen}
+        onOpenChange={setSessionDialogOpen}
+        onSign={handleSessionSign}
+        isSigning={isSigningSession}
+        isRegistering={isRegistering}
+        error={sessionError}
       />
     </RealWalletContext.Provider>
   );
