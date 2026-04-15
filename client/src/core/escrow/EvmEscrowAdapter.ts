@@ -10,47 +10,50 @@ export class EvmEscrowAdapter {
   }
 
   async lockFunds(matchId: string, asset: Asset, stake: number): Promise<boolean> {
-    console.log(`[EvmEscrow] lockFunds called for match ${matchId}: ${stake} ${asset}`);
-    return true;
-  }
+    console.log(`[EvmEscrow] lockFunds: submitting deposit for match ${matchId}: ${stake} ${asset}`);
 
-  async submitDeposit(
-    matchId: string,
-    asset: Asset,
-    stake: number,
-    player1: string,
-    player2: string,
-    sig1: string,
-    sig2: string
-  ): Promise<{ txHash: string }> {
-    const isNative = asset === 'BNB' || asset === 'ETH';
-    const assetType = isNative ? 'native' : 'usdt';
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch('/api/oracle/submit-deposit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matchId }),
+        });
 
-    const decimals = asset === 'USDT' ? 18 : 18;
-    const stakeWei = BigInt(Math.round(stake * 10 ** decimals)).toString();
+        if (res.status === 409) {
+          console.log(`[EvmEscrow] Deposit in progress for match ${matchId}, polling...`);
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
 
-    const res = await fetch('/api/oracle/submit-deposit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        matchId,
-        stake: stakeWei,
-        assetType,
-        player1,
-        player2,
-        sig1,
-        sig2,
-      }),
-    });
+        const data = await res.json().catch(() => ({ error: 'Invalid response' }));
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Deposit submission failed' }));
-      throw new Error(err.error || 'Deposit submission failed');
+        if (!res.ok) {
+          throw new Error(data.error || `Deposit failed (HTTP ${res.status})`);
+        }
+
+        if (data.alreadyDeposited) {
+          console.log(`[EvmEscrow] Deposit already confirmed: tx=${data.txHash}`);
+          return true;
+        }
+
+        if (!data.txHash) {
+          throw new Error('Server returned success without txHash');
+        }
+
+        console.log(`[EvmEscrow] Deposit submitted: tx=${data.txHash}, block=${data.blockNumber}`);
+        return true;
+      } catch (e: any) {
+        if (attempt === maxRetries) {
+          console.error(`[EvmEscrow] lockFunds failed for match ${matchId} after ${maxRetries + 1} attempts:`, e.message);
+          return false;
+        }
+        console.warn(`[EvmEscrow] lockFunds attempt ${attempt + 1} failed, retrying...`, e.message);
+        await new Promise(r => setTimeout(r, 2000));
+      }
     }
-
-    const result = await res.json();
-    console.log(`[EvmEscrow] Deposit submitted: tx=${result.txHash}`);
-    return result;
+    return false;
   }
 
   async settleMatch(

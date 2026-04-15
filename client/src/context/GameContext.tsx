@@ -206,6 +206,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         asset: selectedAsset,
         stake: stakeAmount,
         socketId: sock.id,
+        walletAddress: walletState.address || '',
       });
 
       if (res.status === 'matched') {

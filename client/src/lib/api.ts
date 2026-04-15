@@ -4,8 +4,9 @@ export type Asset = 'USDT' | 'ETH' | 'BNB' | 'TON';
 export type FindMatchRequest = {
   game: Game;
   asset: Asset;
-  stake: number;      // числом, в единицах актива
-  socketId: string;   // текущий Socket.IO id клиента
+  stake: number;
+  socketId: string;
+  walletAddress: string;
 };
 
 export type FindMatchResponse =

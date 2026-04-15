@@ -1,0 +1,32 @@
+I need a deep diagnostic analysis. Do NOT make any code changes yet. Only analyze and report.
+
+Context:
+- Project: Skills2Crypto, BSC Mainnet contract deployed at 0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7
+- Environment: Replit Preview (not published), using real EVM escrow adapter (VITE_USE_MOCK_ESCROW=false confirmed in .replit config).
+- Two test wallets: MetaMask (Chrome) and Binance Web3 Wallet (connected via WalletConnect).
+- Both wallets onboarded successfully (session key registered).
+- Matchmaking and game logic work perfectly (chess game completed, server logs show matchmaking, moves, and game-end events).
+
+Critical Problem:
+Despite the game playing out fully, NO blockchain transactions occur. No deposit, no settlement, no history records on the platform. The server logs show ZERO [EvmOracle] entries (no submitDeposit, no tx sent). Money does not move.
+
+What We Know:
+1. The server logs show successful socket connections, matchmaking, game moves, and game-end.
+2. The `.replit` config has VITE_USE_MOCK_ESCROW="false" and other required vars.
+3. The browser console was not accessible due to Safari issues, but the lack of any [EvmOracle] logs on the server suggests the oracle is never invoked.
+
+Request:
+Analyze the full flow from "Find Match" click to `depositUSDTWithPermit`. Identify exactly where the chain breaks. Possible breakpoints:
+- Frontend: `GameContext.tsx` match-found handler → `escrowAdapter.lockFunds` not called or called on mock?
+- Adapter: `EvmEscrowAdapter.lockFunds` implementation → is it correctly generating permit signatures and calling the server endpoint?
+- Server endpoint: `/api/oracle/submit-deposit` → is it registered? Does it call `evmOracle.submitDepositUSDTWithPermit`?
+- Oracle service: `server/oracle/evmOracle.ts` → is it initialized with correct RPC and private key? Are there silent try-catch errors?
+
+Please trace the code and report:
+1. Is the `lockFunds` method actually invoked on the real `EvmEscrowAdapter` during match-found?
+2. Does the adapter make an HTTP request to the server? To which endpoint?
+3. Is the server endpoint implemented and mounted?
+4. Does the oracle service have the necessary environment variables (ORACLE_PRIVATE_KEY, BSC_RPC_URL) and are they loaded?
+5. Are there any conditional guards that prevent the oracle from running?
+
+Output a structured diagnostic report. Do not change code yet.

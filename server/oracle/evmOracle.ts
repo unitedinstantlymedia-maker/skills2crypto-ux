@@ -611,6 +611,39 @@ export function createEvmOracle() {
     }
   }
 
+  async function signDepositAuthorization(
+    matchId: string,
+    stake: bigint,
+    assetType: number,
+    player: string
+  ): Promise<string> {
+    const nonce = await escrow.getDepositNonce(player);
+    const matchIdBytes32 = toMatchIdBytes32(matchId);
+
+    const DEPOSIT_TYPEHASH = ethers.keccak256(
+      ethers.toUtf8Bytes("Deposit(bytes32 matchId,uint256 stake,uint8 assetType,uint256 nonce)")
+    );
+
+    const domainSeparator = await escrow.getDomainSeparator();
+
+    const structHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["bytes32", "bytes32", "uint256", "uint8", "uint256"],
+        [DEPOSIT_TYPEHASH, matchIdBytes32, stake, assetType, nonce]
+      )
+    );
+
+    const digest = ethers.keccak256(
+      ethers.solidityPacked(
+        ["string", "bytes32", "bytes32"],
+        ["\x19\x01", domainSeparator, structHash]
+      )
+    );
+
+    const sig = wallet.signingKey.sign(digest);
+    return ethers.Signature.from(sig).serialized;
+  }
+
   async function getSessionNonce(player: string): Promise<bigint> {
     if (!isValidAddress(player)) {
       throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
@@ -649,6 +682,7 @@ export function createEvmOracle() {
     submitDepositNative,
     submitSettlement,
     updateGasPrice,
+    signDepositAuthorization,
     getMatchOnChain,
     getOracleBalance,
     getGasReserveEstimate,

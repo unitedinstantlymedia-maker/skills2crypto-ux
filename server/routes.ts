@@ -41,6 +41,7 @@ type FindMatchBody = {
   asset: Asset;
   stake: number | string;
   socketId: string;
+  walletAddress?: string;
 };
 
 export async function registerRoutes(
@@ -50,9 +51,8 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   app.post("/api/find-match", async (req, res) => {
-    const { game, asset, stake, socketId } = (req.body ?? {}) as Partial<FindMatchBody>;
+    const { game, asset, stake, socketId, walletAddress } = (req.body ?? {}) as Partial<FindMatchBody>;
 
-  
     if (!isGame(game) || !isAsset(asset) || !socketId) {
       return res.status(400).json({ error: "bad params" });
     }
@@ -61,15 +61,19 @@ export async function registerRoutes(
       return res.status(400).json({ error: "invalid stake" });
     }
 
+    const cleanWallet = (walletAddress && /^0x[0-9a-fA-F]{40}$/.test(walletAddress))
+      ? walletAddress
+      : "";
+
     try {
       const result = await findOrCreateMatch({
         game,
         asset,
         stake: numericStake,
         socketId: String(socketId),
+        walletAddress: cleanWallet,
       });
 
-      
       if (result?.status === "matched" && Array.isArray(result.players)) {
         for (const sid of result.players) {
           io.to(String(sid)).emit("match-found", { matchId: result.matchId });
@@ -521,37 +525,56 @@ export async function registerRoutes(
   });
 
   app.post("/api/oracle/submit-deposit", async (req, res) => {
-    const { matchId, stake, assetType, player1, player2, sig1, sig2 } = req.body ?? {};
+    const { matchId } = req.body ?? {};
 
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
     }
-    if (!stake) {
-      return res.status(400).json({ error: "Invalid stake" });
-    }
-    if (!assetType || !["usdt", "native"].includes(assetType)) {
-      return res.status(400).json({ error: "Invalid assetType. Must be 'usdt' or 'native'" });
-    }
-    if (!player1 || !/^0x[0-9a-fA-F]{40}$/.test(player1)) {
-      return res.status(400).json({ error: "Invalid player1 address" });
-    }
-    if (!player2 || !/^0x[0-9a-fA-F]{40}$/.test(player2)) {
-      return res.status(400).json({ error: "Invalid player2 address" });
-    }
-    if (!sig1 || !/^0x[0-9a-fA-F]+$/.test(sig1)) {
-      return res.status(400).json({ error: "Invalid sig1" });
-    }
-    if (!sig2 || !/^0x[0-9a-fA-F]+$/.test(sig2)) {
-      return res.status(400).json({ error: "Invalid sig2" });
+
+    const lockKey = `deposit_lock:${matchId}`;
+    const locked = await redis.set(lockKey, "1", { ex: 300, nx: true });
+    if (!locked) {
+      const existingTx = await redis.get(`deposit_tx:${matchId}`);
+      if (existingTx) {
+        return res.json({ txHash: existingTx, matchId, alreadyDeposited: true });
+      }
+      return res.status(409).json({ error: "Deposit already in progress for this match" });
     }
 
     try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.addr1 || !matchData.addr2 || !matchData.stake || !matchData.asset) {
+        await redis.del(lockKey);
+        return res.status(404).json({ error: "Match not found or missing wallet addresses" });
+      }
+
+      const player1 = String(matchData.addr1);
+      const player2 = String(matchData.addr2);
+      const asset = String(matchData.asset);
+      const stakeNum = Number(matchData.stake);
+
+      if (!/^0x[0-9a-fA-F]{40}$/.test(player1) || !/^0x[0-9a-fA-F]{40}$/.test(player2)) {
+        await redis.del(lockKey);
+        return res.status(400).json({ error: "Invalid player addresses in match data" });
+      }
+
+      const isNative = asset === "BNB" || asset === "ETH";
+      const decimals = isNative ? 18 : 6;
+      const stakeBigInt = BigInt(Math.round(stakeNum * 10 ** decimals));
+      const assetTypeNum = isNative ? 1 : 0;
+
       const { createEvmOracle } = await import("./oracle/evmOracle");
       const oracle = createEvmOracle();
-      const stakeBigInt = BigInt(stake);
+
+      console.log(`[oracle/submit-deposit] Generating deposit sigs for match ${matchId}`);
+      console.log(`[oracle/submit-deposit]   player1: ${player1}, player2: ${player2}`);
+      console.log(`[oracle/submit-deposit]   stake: ${stakeNum} ${asset} (${stakeBigInt.toString()} wei)`);
+
+      const sig1 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player1);
+      const sig2 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player2);
 
       let result;
-      if (assetType === "usdt") {
+      if (!isNative) {
         const escrowAddr = process.env.BSC_ESCROW_ADDRESS?.toLowerCase() || "";
         const permit1Raw = await redis.get(`permit:${player1.toLowerCase()}:${escrowAddr}`);
         const permit2Raw = await redis.get(`permit:${player2.toLowerCase()}:${escrowAddr}`);
@@ -559,38 +582,16 @@ export async function registerRoutes(
         const permit2 = permit2Raw ? (typeof permit2Raw === "string" ? JSON.parse(permit2Raw) : permit2Raw) : null;
 
         if (permit1 || permit2) {
-          result = await oracle.submitDepositWithPermit(
-            matchId,
-            stakeBigInt,
-            player1,
-            player2,
-            sig1,
-            sig2,
-            permit1,
-            permit2
-          );
+          result = await oracle.submitDepositWithPermit(matchId, stakeBigInt, player1, player2, sig1, sig2, permit1, permit2);
         } else {
-          result = await oracle.submitDeposit(
-            matchId,
-            stakeBigInt,
-            player1,
-            player2,
-            sig1,
-            sig2
-          );
+          result = await oracle.submitDeposit(matchId, stakeBigInt, player1, player2, sig1, sig2);
         }
       } else {
         const totalValue = stakeBigInt * 2n;
-        result = await oracle.submitDepositNative(
-          matchId,
-          stakeBigInt,
-          player1,
-          player2,
-          sig1,
-          sig2,
-          totalValue
-        );
+        result = await oracle.submitDepositNative(matchId, stakeBigInt, player1, player2, sig1, sig2, totalValue);
       }
+
+      await redis.set(`deposit_tx:${matchId}`, result.txHash, { ex: 86400 });
 
       console.log(`[oracle/submit-deposit] Deposit for match ${matchId}: tx=${result.txHash}`);
       return res.json({
@@ -600,6 +601,7 @@ export async function registerRoutes(
         gasUsed: result.gasUsed,
       });
     } catch (err: any) {
+      await redis.del(lockKey);
       console.error("[oracle/submit-deposit] Error:", err.message);
       return res.status(500).json({ error: err.message || "Deposit submission failed" });
     }

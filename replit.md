@@ -303,3 +303,11 @@ npm run db:push     # Push database schema
 4. **Deployer** - `0x2ad7345E4ad7Fff0Ec5cB41B96e69035f96DFCB8` (same as oracle)
 5. **Hardhat setup** - `hardhat.config.cjs` with Solidity 0.8.24, cancun EVM, optimizer 200 runs; deploy script at `scripts/deploy-bsc.cjs`
 6. **Dependencies** - hardhat@^2.28, @nomicfoundation/hardhat-ethers, @openzeppelin/contracts@5.6.1
+
+### Real-Money Deposit & Settlement Pipeline (Apr 15, 2026)
+1. **Wallet addresses in matchmaking** - `findMatch` API now sends `walletAddress`; Redis `match:{id}` stores `addr1`/`addr2` alongside `p1`/`p2` (socket IDs)
+2. **Server-side deposit signatures** - Oracle generates EIP-712 `Deposit` signatures for both players using its private key (registered as session key). `signDepositAuthorization()` in `evmOracle.ts` fetches per-player deposit nonces, constructs EIP-712 digest, signs with oracle wallet.
+3. **Self-sufficient deposit endpoint** - `POST /api/oracle/submit-deposit` now accepts only `{ matchId }`. Looks up player addresses, stake, and asset from Redis. Generates deposit sigs server-side. Redis lock (`deposit_lock:{matchId}`) prevents double-deposit.
+4. **EvmEscrowAdapter.lockFunds wired** - Client `lockFunds()` now calls `/api/oracle/submit-deposit` with matchId. Handles 409 (already in progress) and `alreadyDeposited` responses gracefully.
+5. **Server-side auto-settlement** - `storeGameResult()` in `socket.ts` calls `settleMatchOnChain()` after DB save. Settlement uses Redis lock (`settle_lock:{matchId}`) to prevent double-settlement. Maps game result to contract settlement reason (0=Normal win, 1=Draw, 2=Disconnect).
+6. **Full pipeline flow**: Player connects wallet → onboarding (session key + USDT permit) → findMatch sends walletAddress → match formed with addresses in Redis → `lockFunds` triggers server deposit → oracle signs + submits `depositUSDTWithPermit` → game plays → `game-end` triggers server settlement → oracle calls `settleMatch` on-chain
