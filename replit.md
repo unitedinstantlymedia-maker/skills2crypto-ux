@@ -240,3 +240,16 @@ npm run db:push     # Push database schema
    - Session registration, deposit, settlement with 3 reasons
    - Built-in gas calculation in TON
 3. **Deployment Guide** - `contracts/DEPLOYMENT_GUIDE.md` covers gas oracle design, BSC/TON testnet deployment, full match cycle testing, and testnet-to-mainnet migration
+
+### EVM Oracle Service (Apr 15, 2026)
+1. **server/oracle/evmOracle.ts** - Server-side oracle using ethers.js v6 for on-chain escrow interaction
+2. **createEvmOracle()** - Factory function returns oracle instance; loads `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS` from env
+3. **submitDeposit()** - Calls `depositUSDT` on the escrow contract with matchId, stake, player addresses, and EIP-712 signatures
+4. **submitDepositNative()** - Calls `depositNative` for ETH/BNB wagers with msg.value
+5. **submitSettlement()** - Calls `settleMatch` with winner address and reason (0=Normal, 1=Draw, 2=Disconnect)
+6. **updateGasPrice()** - Calls `updateGasPrice` on contract to update the gas oracle
+7. **Gas estimation** - All tx functions estimate gas then add 20% buffer before sending
+8. **Error handling** - Custom `EvmOracleError` class with error codes (ENV_MISSING, DEPOSIT_FAILED, SETTLE_FAILED, TX_REVERTED, etc.)
+9. **Read helpers** - `getMatchOnChain()`, `getOracleBalance()`, `getGasReserveEstimate()` for monitoring
+10. **Env vars required** - `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`
+11. **Dependency** - ethers v6 added to root package.json
