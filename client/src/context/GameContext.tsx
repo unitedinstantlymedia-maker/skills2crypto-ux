@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
@@ -7,7 +7,6 @@ import { escrowAdapter } from '@/core/escrow';
 import { historyStore } from '@/core/history/HistoryStore';
 import type { WalletState, HistoryEntry } from '@/core/types';
 
-// типы и API-клиент
 import { findMatch } from '@/lib/api';
 import type { Game, Asset } from '@/lib/api';
 
@@ -44,13 +43,12 @@ interface GameContextValue {
     cancelSearch: () => void;
     finishMatch: (r: 'win' | 'loss' | 'draw') => Promise<void>;
   };
-  dispatch: React.Dispatch<any>; // совместимость со старым кодом
+  dispatch: React.Dispatch<any>;
 }
 
 const Ctx = createContext<GameContextValue | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
-  // ------- state
   const [walletState, setWalletState] = useState<WalletState>(walletStore.getState());
   const [selectedGame, setSelectedGame] = useState<Game | null>(() => {
     const s = localStorage.getItem('skills2crypto_selected_game');
@@ -62,10 +60,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [isFinding, setIsFinding] = useState(false);
 
-  // ------- socket
+  const isFindingRef = useRef(isFinding);
+  const selectedGameRef = useRef(selectedGame);
+  const selectedAssetRef = useRef(selectedAsset);
+  const stakeAmountRef = useRef(stakeAmount);
+
+  useEffect(() => { isFindingRef.current = isFinding; }, [isFinding]);
+  useEffect(() => { selectedGameRef.current = selectedGame; }, [selectedGame]);
+  useEffect(() => { selectedAssetRef.current = selectedAsset; }, [selectedAsset]);
+  useEffect(() => { stakeAmountRef.current = stakeAmount; }, [stakeAmount]);
+
   const socketRef = useRef<Socket | null>(null);
 
-  // создаём/храним одно подключение
   useEffect(() => {
     const s = io('/', {
       path: '/socket.io',
@@ -100,23 +106,31 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       console.error('[socket] reconnect_failed');
     });
 
-    // прилетел матч для нас
     s.on('match-found', (payload: { matchId: string }) => {
-      if (!isFinding || !selectedGame) return;
+      const game = selectedGameRef.current;
+      const asset = selectedAssetRef.current;
+      const stake = stakeAmountRef.current;
+
+      if (!isFindingRef.current || !game) {
+        console.warn('[socket] match-found ignored (not searching)', payload);
+        return;
+      }
       console.log('[socket] match-found', payload);
 
+      isFindingRef.current = false;
       setIsFinding(false);
-      // фиксируем активный матч
-      setCurrentMatch((prev) => ({
+      setCurrentMatch({
         id: payload.matchId,
-        game: selectedGame,
-        asset: selectedAsset,
-        stake: stakeAmount,
+        game,
+        asset,
+        stake,
         status: 'active',
-      }));
+      });
+
+      s.emit('join-match', { matchId: payload.matchId, playerId: walletStore.getState().address || '' });
 
       void escrowAdapter
-        .lockFunds(payload.matchId, selectedAsset, stakeAmount)
+        .lockFunds(payload.matchId, asset, stake)
         .catch((e: any) => console.error('lockFunds failed', e));
     });
 
@@ -129,7 +143,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       s.close();
       socketRef.current = null;
     };
-  }, [isFinding, selectedGame, selectedAsset, stakeAmount]);
+  }, []);
 
   // ------- persistence
   useEffect(() => {
@@ -173,6 +187,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       console.warn('[GameContext] low balance (allowed to proceed in prototype)');
     }
 
+    isFindingRef.current = true;
     setIsFinding(true);
     setCurrentMatch({
       id: 'pending',
@@ -202,8 +217,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           players: res.players,
         });
 
-        // присоединяемся к комнате и блокируем средства
-        sock.emit('join-match', res.matchId);
+        sock.emit('join-match', { matchId: res.matchId, playerId: walletState.address || '' });
         await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
       } else {
         // waiting — ждём событие match-found
@@ -217,6 +231,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   };
 
   const cancelSearch = () => {
+    isFindingRef.current = false;
     setIsFinding(false);
     // на сервере явного cancel нет — достаточно убрать локальный флаг ожидания
     if (currentMatch?.status === 'waiting') {

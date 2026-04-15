@@ -289,6 +289,11 @@ npm run db:push     # Push database schema
 11. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
 12. **Env vars** - Client: `VITE_USE_MOCK_ESCROW` (default true), `VITE_ESCROW_CHAIN_ID` (default 56); Server: `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`, `BSC_CHAIN_ID`, `SERVER_SESSION_WALLET`
 
+### Matchmaking & Oracle Fixes (Apr 15, 2026)
+1. **Socket stability** - Socket `useEffect` dependency array changed from `[isFinding, selectedGame, selectedAsset, stakeAmount]` to `[]` (mount-only). State accessed via refs (`isFindingRef`, `selectedGameRef`, etc.) to prevent stale closures and socket reconnection during matchmaking.
+2. **match-found handler** - Added missing `s.emit('join-match', ...)` call so the waiting player actually joins the socket room when matched. Both the match-found handler and the immediate-match branch now emit `join-match` with `{ matchId, playerId }` object format.
+3. **Oracle BNB balance guard** - `ensureOracleHasGas()` checks oracle wallet BNB balance before every on-chain tx (registerSessionKey, submitDeposit, submitDepositWithPermit, submitDepositNative, submitSettlement). Returns clear error message with wallet address when BNB is insufficient (< 0.001 BNB), error code `ORACLE_NO_GAS`.
+
 ### BSC Mainnet Deployment (Apr 15, 2026)
 1. **Contract deployed** - `Skills2CryptoEscrow` at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` on BSC Mainnet (chain 56)
 2. **Tx hash** - `0x823c59a298520e53bfcb2fc6309efe5c10c3df25af6e2878acb76dc511152599`

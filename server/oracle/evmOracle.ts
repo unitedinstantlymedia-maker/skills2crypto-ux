@@ -136,6 +136,20 @@ export function createEvmOracle() {
     return (estimatedGas * BigInt(100 + GAS_BUFFER_PERCENT)) / 100n;
   }
 
+  const MIN_ORACLE_BNB = ethers.parseEther("0.001");
+
+  async function ensureOracleHasGas(): Promise<void> {
+    const balance = await provider.getBalance(wallet.address);
+    if (balance < MIN_ORACLE_BNB) {
+      const balStr = ethers.formatEther(balance);
+      console.error(`[EvmOracle] Oracle BNB balance critically low: ${balStr} BNB. Please send BNB to ${wallet.address}`);
+      throw new EvmOracleError(
+        `Oracle wallet has insufficient BNB for gas (${balStr} BNB). Please top up ${wallet.address} with at least 0.01 BNB.`,
+        "ORACLE_NO_GAS"
+      );
+    }
+  }
+
   async function waitForReceipt(
     tx: ContractTransactionResponse
   ): Promise<TransactionReceipt> {
@@ -193,6 +207,8 @@ export function createEvmOracle() {
     console.log(`[EvmOracle]   stake: ${stake.toString()}`);
     console.log(`[EvmOracle]   player1: ${player1}`);
     console.log(`[EvmOracle]   player2: ${player2}`);
+
+    await ensureOracleHasGas();
 
     try {
       const estimatedGas = await escrow.depositUSDT.estimateGas(
@@ -290,6 +306,8 @@ export function createEvmOracle() {
     console.log(`[EvmOracle]   player1: ${player1} (permit: ${p1.deadline !== "0"})`);
     console.log(`[EvmOracle]   player2: ${player2} (permit: ${p2.deadline !== "0"})`);
 
+    await ensureOracleHasGas();
+
     try {
       const estimatedGas = await escrow.depositUSDTWithPermit.estimateGas(
         matchIdBytes32,
@@ -379,6 +397,8 @@ export function createEvmOracle() {
 
     console.log(`[EvmOracle] submitDepositNative — match: ${matchId}, value: ${totalValue.toString()}`);
 
+    await ensureOracleHasGas();
+
     try {
       const estimatedGas = await escrow.depositNative.estimateGas(
         matchIdBytes32,
@@ -460,6 +480,8 @@ export function createEvmOracle() {
     console.log(`[EvmOracle]   winner: ${winner}`);
     console.log(`[EvmOracle]   reason: ${reason} (${reasonLabels[reason] ?? "Unknown"})`);
 
+    await ensureOracleHasGas();
+
     try {
       const estimatedGas = await escrow.settleMatch.estimateGas(
         matchIdBytes32,
@@ -510,6 +532,8 @@ export function createEvmOracle() {
     await ensureChainVerified();
     console.log(`[EvmOracle] updateGasPrice: ${gasPricePerUnit.toString()}`);
 
+    await ensureOracleHasGas();
+
     try {
       const estimatedGas = await escrow.updateGasPrice.estimateGas(gasPricePerUnit);
       const gasLimit = addGasBuffer(estimatedGas);
@@ -552,6 +576,8 @@ export function createEvmOracle() {
     }
 
     console.log(`[EvmOracle] registerSessionKey — player: ${player}, session: ${sessionAddr}`);
+
+    await ensureOracleHasGas();
 
     try {
       const estimatedGas = await escrow.registerSessionKey.estimateGas(
