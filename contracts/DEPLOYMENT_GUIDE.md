@@ -93,14 +93,31 @@ Create `contracts/evm/scripts/deploy.js`:
 ```javascript
 const hre = require("hardhat");
 
+// Platform wallet addresses (Ledger) per network:
+//   BSC:      0x7F8Bc18A773f101194071aA559d15d2a59bf6832
+//   Ethereum: 0x7F8Bc18A773f101194071aA559d15d2a59bf6832
+//   Tron:     TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq
+
+const PLATFORM_WALLETS = {
+  bscTestnet:  "0x7F8Bc18A773f101194071aA559d15d2a59bf6832",
+  bscMainnet:  "0x7F8Bc18A773f101194071aA559d15d2a59bf6832",
+  sepolia:     "0x7F8Bc18A773f101194071aA559d15d2a59bf6832",
+  ethereum:    "0x7F8Bc18A773f101194071aA559d15d2a59bf6832",
+  // Tron uses a separate TronBox deploy script with address: TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq
+};
+
 async function main() {
+  const network = hre.network.name;
+  const PLATFORM_WALLET = PLATFORM_WALLETS[network];
+  if (!PLATFORM_WALLET) throw new Error(`No platform wallet configured for network: ${network}`);
+
   // BSC Testnet USDT (use a mock or testnet USDT)
   const USDT_ADDRESS = "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd"; // BSC Testnet USDT
-  const PLATFORM_WALLET = process.env.PLATFORM_WALLET;
   const ORACLE_ADDRESS = process.env.ORACLE_WALLET; // Your server's wallet
   const INITIAL_GAS_PRICE_USDT = 1; // Cost per gas unit in USDT smallest units (see guide for calculation)
-
   const USDT_DECIMALS = 6;
+
+  console.log(`Deploying to ${network} with platform wallet: ${PLATFORM_WALLET}`);
 
   const Escrow = await hre.ethers.getContractFactory("Skills2CryptoEscrow");
   const escrow = await Escrow.deploy(
@@ -120,11 +137,19 @@ main().catch(console.error);
 ### Deploy Commands
 
 ```bash
-# BSC Testnet
+# BSC Testnet (platform wallet: 0x7F8Bc18A773f101194071aA559d15d2a59bf6832)
 npx hardhat run scripts/deploy.js --network bscTestnet
 
-# BSC Mainnet (after testing)
+# BSC Mainnet (platform wallet: 0x7F8Bc18A773f101194071aA559d15d2a59bf6832)
 npx hardhat run scripts/deploy.js --network bscMainnet
+
+# Ethereum Sepolia (platform wallet: 0x7F8Bc18A773f101194071aA559d15d2a59bf6832)
+npx hardhat run scripts/deploy.js --network sepolia
+
+# Ethereum Mainnet (platform wallet: 0x7F8Bc18A773f101194071aA559d15d2a59bf6832)
+npx hardhat run scripts/deploy.js --network ethereum
+
+# Tron: Use TronBox with platform wallet TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq
 ```
 
 ---
@@ -173,13 +198,13 @@ async function deploy() {
   const wallet = WalletContractV4.create({ publicKey: keyPair.publicKey, workchain: 0 });
 
   const oracleAddress = Address.parse(process.env.ORACLE_TON_ADDRESS!);
-  const platformWallet = Address.parse(process.env.PLATFORM_TON_ADDRESS!);
+  const platformWallet = Address.parse("UQA5WizZJ5JCSJDnIonF12X5rbPINxgX6Y6dkpiCZ_-WB7x7"); // Ledger TON wallet
   const gasPriceInTon = toNano("0.01"); // Initial gas price estimate
 
   // Deploy using compiled contract from tact output
   // The exact deployment code depends on tact compiler output
   console.log("Deploy with oracle:", oracleAddress.toString());
-  console.log("Platform wallet:", platformWallet.toString());
+  console.log("Platform wallet:", platformWallet.toString()); // UQA5WizZJ5JCSJDnIonF12X5rbPINxgX6Y6dkpiCZ_-WB7x7
 }
 
 deploy().catch(console.error);
@@ -319,12 +344,17 @@ await contract.send(oracle, { value: toNano("0.1") }, {
    BSC_CHAIN_ID=56
    BSC_USDT_ADDRESS=0x55d398326f99059fF775485246999027B3197955
    BSC_ESCROW_ADDRESS=<your-mainnet-deployment>
+   BSC_PLATFORM_WALLET=0x7F8Bc18A773f101194071aA559d15d2a59bf6832
 
    ETH_RPC_URL=https://mainnet.infura.io/v3/YOUR_KEY
    ETH_CHAIN_ID=1
+   ETH_PLATFORM_WALLET=0x7F8Bc18A773f101194071aA559d15d2a59bf6832
+
+   TRON_PLATFORM_WALLET=TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq
 
    TON_RPC_URL=https://toncenter.com/api/v2/jsonRPC
    TON_ESCROW_ADDRESS=<your-mainnet-deployment>
+   TON_PLATFORM_WALLET=UQA5WizZJ5JCSJDnIonF12X5rbPINxgX6Y6dkpiCZ_-WB7x7
    ```
 
 2. **Client `vite` env**:
@@ -363,7 +393,21 @@ await contract.send(oracle, { value: toNano("0.1") }, {
 
 The same Solidity contract works on Tron with these differences:
 - Compile with `tronbox` instead of Hardhat
+- Platform wallet (Ledger): `TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq`
 - USDT TRC-20 address: `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
 - Use `tronWeb` SDK for deployment
 - Session key signatures use the same EIP-712 format (TronLink supports it)
 - Gas is measured in "energy" and "bandwidth" on Tron — adjust `estimatedSettlementGas` accordingly
+
+---
+
+## Platform Wallet Summary (Ledger Addresses)
+
+| Network | Address |
+|---------|---------|
+| BSC (BNB Smart Chain) | `0x7F8Bc18A773f101194071aA559d15d2a59bf6832` |
+| Ethereum | `0x7F8Bc18A773f101194071aA559d15d2a59bf6832` |
+| Tron | `TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq` |
+| TON | `UQA5WizZJ5JCSJDnIonF12X5rbPINxgX6Y6dkpiCZ_-WB7x7` |
+
+All platform fees (3% of total pot on normal wins and draws) are sent to these addresses. The EVM address is the same for BSC and Ethereum since your Ledger uses the same address across EVM chains.
