@@ -43,6 +43,7 @@ interface GameContextValue {
     cancelSearch: () => void;
     finishMatch: (r: 'win' | 'loss' | 'draw') => Promise<void>;
   };
+  socket: Socket | null;
   dispatch: React.Dispatch<any>;
 }
 
@@ -71,6 +72,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { stakeAmountRef.current = stakeAmount; }, [stakeAmount]);
 
   const socketRef = useRef<Socket | null>(null);
+  const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
 
   useEffect(() => {
     const s = io('/', {
@@ -85,6 +87,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       withCredentials: true
     });
     socketRef.current = s;
+    setSocketInstance(s);
 
     s.on('connect', () => {
       console.log('[socket] connected', s.id);
@@ -286,9 +289,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         cancelSearch,
         finishMatch,
       },
+      socket: socketInstance,
       dispatch: () => {},
     }),
-    [selectedGame, selectedAsset, stakeAmount, walletState, currentMatch, history, isFinding]
+    [selectedGame, selectedAsset, stakeAmount, walletState, currentMatch, history, isFinding, socketInstance]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

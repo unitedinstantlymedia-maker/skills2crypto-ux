@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { useLanguage } from "@/context/LanguageContext";
 import { useGame } from "@/context/GameContext";
 import { TetrisEngine, GameState, BOARD_DIMENSIONS, PIECE_SHAPES, PIECE_COLORS, PieceType } from './tetris/TetrisEngine';
@@ -23,27 +22,26 @@ interface OpponentState {
 
 export function TetrisGame({ onFinish }: TetrisGameProps) {
   const { t } = useLanguage();
-  const { state } = useGame();
+  const { state, socket } = useGame();
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [opponentState, setOpponentState] = useState<OpponentState | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   const [gameEnded, setGameEnded] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   
   const engineRef = useRef<TetrisEngine | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const gameEndedRef = useRef(false);
   const onFinishCalledRef = useRef(false);
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
+  const isConnected = !!socket?.connected;
 
   const sendStateUpdate = useCallback(() => {
-    if (!socketRef.current || !engineRef.current || !matchId) return;
+    if (!socket || !engineRef.current || !matchId) return;
     const currentState = engineRef.current.getState();
-    socketRef.current.emit('tetris-state', {
+    socket.emit('tetris-state', {
       matchId,
       board: currentState.board,
       score: currentState.score,
@@ -51,7 +49,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
       level: currentState.level,
       gameOver: currentState.gameOver
     });
-  }, [matchId]);
+  }, [socket, matchId]);
 
   const handleStateChange = useCallback((newState: GameState) => {
     setGameState(newState);
@@ -61,98 +59,76 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
       setGameEnded(true);
       setResultMessage(t('You lost!', 'You lost!'));
       
-      if (socketRef.current && matchId) {
-        socketRef.current.emit('tetris-game-over', { matchId, playerId });
+      if (socket && matchId) {
+        socket.emit('tetris-game-over', { matchId, playerId });
       }
     }
-  }, [matchId, playerId, t]);
+  }, [socket, matchId, playerId, t]);
 
   useEffect(() => {
-    if (!matchId || matchId === 'pending') return;
+    if (!socket || !matchId || matchId === 'pending') return;
 
-    const socket = io('/', {
-      path: '/socket.io',
-      transports: ['websocket'],
-      reconnection: true,
-      withCredentials: true
-    });
-    socketRef.current = socket;
+    socket.emit('join-tetris-match', { matchId, playerId });
+    console.log('[TetrisGame] join-tetris-match emitted via shared socket', matchId);
 
-    socket.on('connect', () => {
-      console.log('[TetrisGame] socket connected');
-      setIsConnected(true);
-      socket.emit('join-tetris-match', { matchId, playerId });
-    });
-
-    socket.on('tetris-game-start', () => {
+    const onGameStart = () => {
       console.log('[TetrisGame] game started');
       setWaitingForOpponent(false);
-      
       const engine = new TetrisEngine(handleStateChange);
       engineRef.current = engine;
       engine.start();
-    });
+    };
 
-    socket.on('opponent-tetris-state', (data: OpponentState) => {
+    const onOpponentState = (data: OpponentState) => {
       setOpponentState(data);
-    });
+    };
 
-    socket.on('opponent-tetris-game-over', () => {
+    const onOpponentGameOver = () => {
       if (!gameEndedRef.current) {
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('You win!', 'You win!'));
-        
-        if (engineRef.current) {
-          engineRef.current.stop();
-        }
+        if (engineRef.current) engineRef.current.stop();
       }
-    });
+    };
 
-    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
+    const onOpponentDisconnected = (data: { forfeit: boolean }) => {
       if (data.forfeit && !gameEndedRef.current) {
         console.log('[TetrisGame] opponent disconnected - forfeit');
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
-        
-        if (engineRef.current) {
-          engineRef.current.stop();
-        }
+        if (engineRef.current) engineRef.current.stop();
       }
-    });
+    };
 
-    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+    const onGameResult = (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
       console.log('[TetrisGame] game-result received:', data);
       if (onFinishCalledRef.current) return;
       onFinishCalledRef.current = true;
-      
       gameEndedRef.current = true;
       setGameEnded(true);
-      
-      if (engineRef.current) {
-        engineRef.current.stop();
-      }
-      
+      if (engineRef.current) engineRef.current.stop();
       const playerWins = data.winnerId === playerId;
       setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lost!', 'You lost!'));
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
-    });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('[TetrisGame] socket disconnected');
-      setIsConnected(false);
-    });
+    socket.on('tetris-game-start', onGameStart);
+    socket.on('opponent-tetris-state', onOpponentState);
+    socket.on('opponent-tetris-game-over', onOpponentGameOver);
+    socket.on('opponent-disconnected', onOpponentDisconnected);
+    socket.on('game-result', onGameResult);
 
     return () => {
-      socket.removeAllListeners();
-      socket.close();
-      socketRef.current = null;
-      if (engineRef.current) {
-        engineRef.current.stop();
-      }
+      socket.off('tetris-game-start', onGameStart);
+      socket.off('opponent-tetris-state', onOpponentState);
+      socket.off('opponent-tetris-game-over', onOpponentGameOver);
+      socket.off('opponent-disconnected', onOpponentDisconnected);
+      socket.off('game-result', onGameResult);
+      if (engineRef.current) engineRef.current.stop();
     };
-  }, [matchId, playerId, handleStateChange, onFinish, t]);
+  }, [socket, matchId, playerId, handleStateChange, onFinish, t]);
 
   useEffect(() => {
     if (!gameState || gameEnded) return;

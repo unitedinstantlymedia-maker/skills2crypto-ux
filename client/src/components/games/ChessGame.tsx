@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Chess, Square } from 'chess.js';
-import { io, Socket } from 'socket.io-client';
 import { useLanguage } from "@/context/LanguageContext";
 import { useGame } from "@/context/GameContext";
 import { PIECE_COMPONENTS } from './chess/ChessPieces';
@@ -21,7 +20,7 @@ const INITIAL_TIME = 30 * 60 * 1000;
 
 export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
-  const { state } = useGame();
+  const { state, socket } = useGame();
   
   const [game, setGame] = useState(() => new Chess());
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
@@ -35,12 +34,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPiece, setDragPiece] = useState<{ square: Square; x: number; y: number } | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
   const gameRef = useRef(game);
   const onFinishCalledRef = useRef(false);
 
@@ -52,38 +49,28 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const playerId = state.wallet.address || 'anonymous';
 
   const isPlayerTurn = playerColor && game.turn() === (playerColor === 'white' ? 'w' : 'b');
+  const isConnected = !!socket?.connected;
 
   useEffect(() => {
-    if (!matchId || matchId === 'pending') return;
+    if (!socket || !matchId || matchId === 'pending') return;
 
-    const socket = io('/', {
-      path: '/socket.io',
-      transports: ['websocket'],
-      reconnection: true,
-      withCredentials: true
-    });
-    socketRef.current = socket;
+    socket.emit('join-match', { matchId, playerId });
+    console.log('[ChessGame] join-match emitted via shared socket', matchId);
 
-    socket.on('connect', () => {
-      console.log('[ChessGame] socket connected');
-      setIsConnected(true);
-      socket.emit('join-match', { matchId, playerId });
-    });
-
-    socket.on('color-assigned', (data: { color: 'white' | 'black' }) => {
+    const onColorAssigned = (data: { color: 'white' | 'black' }) => {
       console.log('[ChessGame] color assigned:', data.color);
       setPlayerColor(data.color);
-    });
+    };
 
-    socket.on('game-start', (data: { fen: string; whiteTime: number; blackTime: number }) => {
+    const onGameStart = (data: { fen: string; whiteTime: number; blackTime: number }) => {
       console.log('[ChessGame] game started');
       setWaitingForOpponent(false);
       setGame(new Chess(data.fen));
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
-    });
+    };
 
-    socket.on('opponent-move', (data: { from: string; to: string; fen: string; san: string; whiteTime: number; blackTime: number }) => {
+    const onOpponentMove = (data: { from: string; to: string; fen: string; san: string; whiteTime: number; blackTime: number }) => {
       console.log('[ChessGame] opponent move:', data.san);
       const newGame = new Chess(data.fen);
       setGame(newGame);
@@ -98,32 +85,32 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       } else if (newGame.isStalemate() || newGame.isDraw()) {
         handleGameEnd('draw', 'draw');
       }
-    });
+    };
 
-    socket.on('opponent-resigned', (data: { color: 'white' | 'black' }) => {
+    const onOpponentResigned = () => {
       console.log('[ChessGame] opponent resigned');
       setGameOver(true);
       setGameResult(t('Opponent resigned - You win!', 'Opponent resigned - You win!'));
       if (timerRef.current) clearInterval(timerRef.current);
-    });
+    };
 
-    socket.on('opponent-timeout', (data: { color: 'white' | 'black' }) => {
+    const onOpponentTimeout = () => {
       console.log('[ChessGame] opponent timeout');
       setGameOver(true);
       setGameResult(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
       if (timerRef.current) clearInterval(timerRef.current);
-    });
+    };
 
-    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
-      if (data.forfeit && !gameOver) {
+    const onOpponentDisconnected = (data: { forfeit: boolean }) => {
+      if (data.forfeit) {
         console.log('[ChessGame] opponent disconnected - forfeit');
         setGameOver(true);
         setGameResult(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
         if (timerRef.current) clearInterval(timerRef.current);
       }
-    });
+    };
 
-    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+    const onGameResult = (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
       console.log('[ChessGame] game-result received:', data);
       if (onFinishCalledRef.current) return;
       onFinishCalledRef.current = true;
@@ -141,19 +128,26 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
         setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
       }
-    });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('[ChessGame] socket disconnected');
-      setIsConnected(false);
-    });
+    socket.on('color-assigned', onColorAssigned);
+    socket.on('game-start', onGameStart);
+    socket.on('opponent-move', onOpponentMove);
+    socket.on('opponent-resigned', onOpponentResigned);
+    socket.on('opponent-timeout', onOpponentTimeout);
+    socket.on('opponent-disconnected', onOpponentDisconnected);
+    socket.on('game-result', onGameResult);
 
     return () => {
-      socket.removeAllListeners();
-      socket.close();
-      socketRef.current = null;
+      socket.off('color-assigned', onColorAssigned);
+      socket.off('game-start', onGameStart);
+      socket.off('opponent-move', onOpponentMove);
+      socket.off('opponent-resigned', onOpponentResigned);
+      socket.off('opponent-timeout', onOpponentTimeout);
+      socket.off('opponent-disconnected', onOpponentDisconnected);
+      socket.off('game-result', onGameResult);
     };
-  }, [matchId, playerId, onFinish, t]);
+  }, [socket, matchId, playerId, onFinish, t]);
 
   useEffect(() => {
     if (gameOver || waitingForOpponent) return;
@@ -195,8 +189,8 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
     }
     
-    if (socketRef.current && matchId) {
-      socketRef.current.emit('game-end', {
+    if (socket && matchId) {
+      socket.emit('game-end', {
         matchId,
         result: reason,
         winner,
@@ -204,7 +198,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         loserId: winner !== playerColor && winner !== 'draw' ? playerId : null
       });
     }
-  }, [playerColor, matchId, playerId, t]);
+  }, [socket, playerColor, matchId, playerId, t]);
 
   const handleTimeout = useCallback((color: 'white' | 'black') => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -212,10 +206,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     
     setGameResult(color === 'white' ? t('Black wins on time!', 'Black wins on time!') : t('White wins on time!', 'White wins on time!'));
     
-    if (color === playerColor && socketRef.current && matchId) {
-      socketRef.current.emit('chess-timeout', { matchId, color });
+    if (color === playerColor && socket && matchId) {
+      socket.emit('chess-timeout', { matchId, color });
     }
-  }, [playerColor, t, matchId]);
+  }, [socket, playerColor, t, matchId]);
 
   const checkGameEnd = useCallback(() => {
     if (game.isCheckmate()) {
@@ -243,8 +237,8 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         setSelectedSquare(null);
         setLegalMoves([]);
 
-        if (socketRef.current && matchId) {
-          socketRef.current.emit('chess-move', {
+        if (socket && matchId) {
+          socket.emit('chess-move', {
             matchId,
             from,
             to,
@@ -263,7 +257,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       return false;
     }
     return false;
-  }, [game, isPlayerTurn, playerColor, matchId, whiteTime, blackTime, checkGameEnd]);
+  }, [game, isPlayerTurn, playerColor, socket, matchId, whiteTime, blackTime, checkGameEnd]);
 
   const handleSquareClick = useCallback((square: Square) => {
     if (gameOver || !isPlayerTurn || waitingForOpponent) return;
@@ -374,10 +368,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     setGameResult(t('You resigned', 'You resigned'));
     if (timerRef.current) clearInterval(timerRef.current);
     
-    if (socketRef.current && matchId) {
-      socketRef.current.emit('chess-resign', { matchId, color: playerColor });
+    if (socket && matchId) {
+      socket.emit('chess-resign', { matchId, color: playerColor });
     }
-  }, [gameOver, playerColor, t, matchId]);
+  }, [gameOver, playerColor, socket, t, matchId]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);

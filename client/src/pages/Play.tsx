@@ -43,9 +43,7 @@ export default function Play() {
 
   if (!state.selectedGame || !state.currentMatch) return null;
 
-  const hasBothPlayers = (state.currentMatch?.players?.filter(Boolean).length ?? 0) === 2;
-
-  if (!hasBothPlayers) return <WaitingRoom />;
+  if (state.currentMatch.status === 'waiting') return <WaitingRoom />;
 
   const pot = ((state.currentMatch?.stake ?? 0) * 2).toFixed(0);
 

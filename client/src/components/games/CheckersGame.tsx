@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { useLanguage } from "@/context/LanguageContext";
 import { useGame } from "@/context/GameContext";
 import { CheckersEngine, GameState, Position, PieceColor, BOARD_SIZE_CONST, INITIAL_TIME_CONST } from './checkers/CheckersEngine';
@@ -23,11 +22,10 @@ interface MoveData {
 
 export function CheckersGame({ onFinish }: CheckersGameProps) {
   const { t } = useLanguage();
-  const { state } = useGame();
+  const { state, socket } = useGame();
   
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerColor, setPlayerColor] = useState<PieceColor | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   const [gameEnded, setGameEnded] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
@@ -35,13 +33,13 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
   const [blackTime, setBlackTime] = useState(INITIAL_TIME_CONST);
   
   const engineRef = useRef<CheckersEngine | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameEndedRef = useRef(false);
   const onFinishCalledRef = useRef(false);
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
+  const isConnected = !!socket?.connected;
 
   const isPlayerTurn = playerColor && gameState?.currentTurn === playerColor;
 
@@ -57,48 +55,36 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       
       if (timerRef.current) clearInterval(timerRef.current);
       
-      if (socketRef.current && matchId) {
-        socketRef.current.emit('checkers-game-end', {
+      if (socket && matchId) {
+        socket.emit('checkers-game-end', {
           matchId,
           winner: newState.winner,
           playerId
         });
       }
     }
-  }, [playerColor, matchId, playerId, t]);
+  }, [socket, playerColor, matchId, playerId, t]);
 
   useEffect(() => {
-    if (!matchId || matchId === 'pending') return;
+    if (!socket || !matchId || matchId === 'pending') return;
 
-    const socket = io('/', {
-      path: '/socket.io',
-      transports: ['websocket'],
-      reconnection: true,
-      withCredentials: true
-    });
-    socketRef.current = socket;
+    socket.emit('join-checkers-match', { matchId, playerId });
+    console.log('[CheckersGame] join-checkers-match emitted via shared socket', matchId);
 
-    socket.on('connect', () => {
-      console.log('[CheckersGame] socket connected');
-      setIsConnected(true);
-      socket.emit('join-checkers-match', { matchId, playerId });
-    });
-
-    socket.on('checkers-color-assigned', (data: { color: PieceColor }) => {
+    const onColorAssigned = (data: { color: PieceColor }) => {
       console.log('[CheckersGame] color assigned:', data.color);
       setPlayerColor(data.color);
-    });
+    };
 
-    socket.on('checkers-game-start', () => {
+    const onGameStart = () => {
       console.log('[CheckersGame] game started');
       setWaitingForOpponent(false);
-      
       const engine = new CheckersEngine(handleStateChange);
       engineRef.current = engine;
       engine.start();
-    });
+    };
 
-    socket.on('opponent-checkers-move', (data: MoveData) => {
+    const onOpponentMove = (data: MoveData) => {
       console.log('[CheckersGame] opponent move:', data);
       if (engineRef.current) {
         engineRef.current.applyOpponentMove(data.from, data.to, data.captures);
@@ -108,18 +94,18 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
           setBlackTime(data.blackTime);
         }
       }
-    });
+    };
 
-    socket.on('opponent-checkers-timeout', () => {
+    const onOpponentTimeout = () => {
       if (!gameEndedRef.current) {
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
         if (timerRef.current) clearInterval(timerRef.current);
       }
-    });
+    };
 
-    socket.on('opponent-disconnected', (data: { forfeit: boolean }) => {
+    const onOpponentDisconnected = (data: { forfeit: boolean }) => {
       if (data.forfeit && !gameEndedRef.current) {
         console.log('[CheckersGame] opponent disconnected - forfeit');
         gameEndedRef.current = true;
@@ -127,31 +113,34 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
         setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
         if (timerRef.current) clearInterval(timerRef.current);
       }
-    });
+    };
 
-    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+    const onGameResult = (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
       console.log('[CheckersGame] game-result received:', data);
       if (onFinishCalledRef.current) return;
       onFinishCalledRef.current = true;
-      
       gameEndedRef.current = true;
       setGameEnded(true);
       if (timerRef.current) clearInterval(timerRef.current);
-      
       const playerWins = data.winnerId === playerId;
       setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
-    });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('[CheckersGame] socket disconnected');
-      setIsConnected(false);
-    });
+    socket.on('checkers-color-assigned', onColorAssigned);
+    socket.on('checkers-game-start', onGameStart);
+    socket.on('opponent-checkers-move', onOpponentMove);
+    socket.on('opponent-checkers-timeout', onOpponentTimeout);
+    socket.on('opponent-disconnected', onOpponentDisconnected);
+    socket.on('game-result', onGameResult);
 
     return () => {
-      socket.removeAllListeners();
-      socket.close();
-      socketRef.current = null;
+      socket.off('checkers-color-assigned', onColorAssigned);
+      socket.off('checkers-game-start', onGameStart);
+      socket.off('opponent-checkers-move', onOpponentMove);
+      socket.off('opponent-checkers-timeout', onOpponentTimeout);
+      socket.off('opponent-disconnected', onOpponentDisconnected);
+      socket.off('game-result', onGameResult);
       if (engineRef.current) {
         engineRef.current.stop();
       }
@@ -159,7 +148,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
         clearInterval(timerRef.current);
       }
     };
-  }, [matchId, playerId, handleStateChange, onFinish, t]);
+  }, [socket, matchId, playerId, handleStateChange, onFinish, t]);
 
   useEffect(() => {
     if (waitingForOpponent || gameEnded || !gameState) return;
@@ -197,11 +186,11 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       setGameEnded(true);
       setResultMessage(t('Time is up - You lose!', 'Time is up - You lose!'));
       
-      if (socketRef.current && matchId) {
-        socketRef.current.emit('checkers-timeout', { matchId, color: playerColor });
+      if (socket && matchId) {
+        socket.emit('checkers-timeout', { matchId, color: playerColor });
       }
     }
-  }, [playerColor, matchId, t]);
+  }, [socket, playerColor, matchId, t]);
 
   const handleSquareClick = useCallback((row: number, col: number) => {
     if (!engineRef.current || !playerColor || gameEnded) return;
@@ -220,8 +209,8 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
           const newState = engineRef.current.getState();
           const turnChanged = newState.continuingCapture === null;
           
-          if (socketRef.current && matchId) {
-            socketRef.current.emit('checkers-move', {
+          if (socket && matchId) {
+            socket.emit('checkers-move', {
               matchId,
               from,
               to: { row, col },
@@ -241,7 +230,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
     } else if (piece && piece.color === playerColor) {
       engineRef.current.selectPiece({ row, col }, playerColor);
     }
-  }, [gameState, playerColor, matchId, gameEnded, redTime, blackTime]);
+  }, [gameState, playerColor, socket, matchId, gameEnded, redTime, blackTime]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);

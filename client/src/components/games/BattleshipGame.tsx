@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { useGame } from '@/context/GameContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { cn } from '@/lib/utils';
@@ -16,10 +15,9 @@ const TURN_TIME = 60000;
 
 export function BattleshipGame({ onFinish }: BattleshipGameProps) {
   const { t } = useLanguage();
-  const { state } = useGame();
+  const { state, socket } = useGame();
   const matchId = state.currentMatch?.id;
 
-  const socketRef = useRef<Socket | null>(null);
   const engineRef = useRef<BattleshipEngine | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameEndedRef = useRef(false);
@@ -29,7 +27,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   const [opponentReady, setOpponentReady] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
+  const isConnected = !!socket?.connected;
   const [gameEnded, setGameEnded] = useState(false);
   const [resultMessage, setResultMessage] = useState('');
   const [turnTime, setTurnTime] = useState(TURN_TIME);
@@ -41,71 +39,51 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
   const [hoverCell, setHoverCell] = useState<{ row: number; col: number } | null>(null);
 
   useEffect(() => {
-    if (!matchId) return;
+    if (!socket || !matchId || matchId === 'pending') return;
 
     const playerId = state.wallet?.address || localStorage.getItem('playerId') || `player-${Date.now()}`;
     localStorage.setItem('playerId', playerId);
 
-    const socket = io({
-      path: '/socket.io',
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
-    socketRef.current = socket;
+    socket.emit('join-battleship-match', { matchId, playerId });
+    console.log('[BattleshipGame] join-battleship-match emitted via shared socket', matchId);
 
-    socket.on('connect', () => {
-      console.log('[BattleshipGame] connected');
-      setIsConnected(true);
-      socket.emit('join-battleship-match', { matchId, playerId });
-    });
-
-    socket.on('battleship-role-assigned', (data: { role: 'player1' | 'player2' }) => {
+    const onRoleAssigned = (data: { role: 'player1' | 'player2' }) => {
       console.log('[BattleshipGame] role assigned:', data.role);
       setPlayerRole(data.role);
-
       const engine = new BattleshipEngine(setGameState, data.role);
       engineRef.current = engine;
       setGameState(engine.getState());
-    });
+    };
 
-    socket.on('battleship-game-start', () => {
+    const onGameStart = () => {
       console.log('[BattleshipGame] game start');
       setWaitingForOpponent(false);
-    });
+    };
 
-    socket.on('opponent-ready', () => {
+    const onOpponentReady = () => {
       console.log('[BattleshipGame] opponent ready');
       setOpponentReady(true);
-    });
+    };
 
-    socket.on('battle-phase-start', (data: { firstTurn: 'player1' | 'player2' }) => {
+    const onBattlePhaseStart = (data: { firstTurn: 'player1' | 'player2' }) => {
       console.log('[BattleshipGame] battle phase start, first turn:', data.firstTurn);
       if (engineRef.current) {
         engineRef.current.startBattle();
         engineRef.current.setTurn(data.firstTurn);
         setTurnTime(TURN_TIME);
       }
-    });
+    };
 
-    socket.on('attack-result', (data: {
-      row: number;
-      col: number;
-      hit: boolean;
-      sunkShip: Ship | null;
-      gameOver: boolean;
-      nextTurn: 'player1' | 'player2';
+    const onAttackResult = (data: {
+      row: number; col: number; hit: boolean; sunkShip: Ship | null; gameOver: boolean; nextTurn: 'player1' | 'player2';
     }) => {
       console.log('[BattleshipGame] attack result:', data);
       if (engineRef.current) {
         engineRef.current.recordMyAttack(data.row, data.col, data.hit, data.sunkShip, data.gameOver);
-
         if (data.sunkShip) {
           setLastSunkMessage(`You sunk the ${data.sunkShip.name}!`);
           setTimeout(() => setLastSunkMessage(null), 3000);
         }
-
         if (data.gameOver && !gameEndedRef.current) {
           gameEndedRef.current = true;
           setGameEnded(true);
@@ -114,25 +92,18 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
           setTurnTime(TURN_TIME);
         }
       }
-    });
+    };
 
-    socket.on('opponent-attack', (data: {
-      row: number;
-      col: number;
-      hit: boolean;
-      sunkShipCells?: { row: number; col: number }[];
-      sunkShipName?: string;
-      gameOver: boolean;
+    const onOpponentAttack = (data: {
+      row: number; col: number; hit: boolean; sunkShipCells?: { row: number; col: number }[]; sunkShipName?: string; gameOver: boolean;
     }) => {
       console.log('[BattleshipGame] opponent attack:', data);
       if (engineRef.current) {
         engineRef.current.recordOpponentAttack(data.row, data.col, data.hit, data.sunkShipCells);
-
         if (data.sunkShipName) {
           setLastSunkMessage(`Your ${data.sunkShipName} was sunk!`);
           setTimeout(() => setLastSunkMessage(null), 3000);
         }
-
         if (data.gameOver && !gameEndedRef.current) {
           gameEndedRef.current = true;
           setGameEnded(true);
@@ -141,61 +112,61 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
           setTurnTime(TURN_TIME);
         }
       }
-    });
+    };
 
-    socket.on('turn-skipped', (data: { skippedPlayer: 'player1' | 'player2' }) => {
+    const onTurnSkipped = (data: { skippedPlayer: 'player1' | 'player2' }) => {
       console.log('[BattleshipGame] turn skipped:', data.skippedPlayer);
       if (engineRef.current) {
         const nextTurn = data.skippedPlayer === 'player1' ? 'player2' : 'player1';
         engineRef.current.setTurn(nextTurn);
         setTurnTime(TURN_TIME);
       }
-    });
+    };
 
-    socket.on('opponent-disconnected', (data?: { forfeit: boolean }) => {
+    const onOpponentDisconnected = () => {
       if (!gameEndedRef.current) {
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('Opponent disconnected - You win!', 'Opponent disconnected - You win!'));
       }
-    });
+    };
 
-    socket.on('game-result', (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
+    const onGameResult = (data: { matchId: string; winnerId: string; loserId: string; reason: string }) => {
       console.log('[BattleshipGame] game-result received:', data);
       if (onFinishCalledRef.current) return;
       onFinishCalledRef.current = true;
-      
       gameEndedRef.current = true;
       setGameEnded(true);
       if (timerRef.current) clearInterval(timerRef.current);
-      
       const playerWins = data.winnerId === playerId;
       setResultMessage(playerWins 
         ? t('Victory! You sunk all enemy ships!', 'Victory! You sunk all enemy ships!') 
         : t('Defeat! All your ships were sunk!', 'Defeat! All your ships were sunk!'));
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
-    });
+    };
 
-    if (socket.connected) {
-      setIsConnected(true);
-      socket.emit('join-battleship-match', { matchId, playerId });
-    } else {
-      socket.connect();
-    }
+    socket.on('battleship-role-assigned', onRoleAssigned);
+    socket.on('battleship-game-start', onGameStart);
+    socket.on('opponent-ready', onOpponentReady);
+    socket.on('battle-phase-start', onBattlePhaseStart);
+    socket.on('attack-result', onAttackResult);
+    socket.on('opponent-attack', onOpponentAttack);
+    socket.on('turn-skipped', onTurnSkipped);
+    socket.on('opponent-disconnected', onOpponentDisconnected);
+    socket.on('game-result', onGameResult);
 
     return () => {
-      socket.off('connect');
-      socket.off('battleship-role-assigned');
-      socket.off('battleship-game-start');
-      socket.off('opponent-ready');
-      socket.off('battle-phase-start');
-      socket.off('attack-result');
-      socket.off('opponent-attack');
-      socket.off('turn-skipped');
-      socket.off('opponent-disconnected');
-      socket.disconnect();
+      socket.off('battleship-role-assigned', onRoleAssigned);
+      socket.off('battleship-game-start', onGameStart);
+      socket.off('opponent-ready', onOpponentReady);
+      socket.off('battle-phase-start', onBattlePhaseStart);
+      socket.off('attack-result', onAttackResult);
+      socket.off('opponent-attack', onOpponentAttack);
+      socket.off('turn-skipped', onTurnSkipped);
+      socket.off('opponent-disconnected', onOpponentDisconnected);
+      socket.off('game-result', onGameResult);
     };
-  }, [matchId, onFinish, t, state.wallet?.address]);
+  }, [socket, matchId, onFinish, t, state.wallet?.address]);
 
   useEffect(() => {
     if (!gameState || gameState.phase !== 'battle' || gameEnded) {
@@ -206,8 +177,8 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
     timerRef.current = setInterval(() => {
       setTurnTime(prev => {
         if (prev <= 1000) {
-          if (engineRef.current?.isMyTurn() && socketRef.current && matchId) {
-            socketRef.current.emit('battleship-timeout', { matchId, role: playerRole });
+          if (engineRef.current?.isMyTurn() && socket && matchId) {
+            socket.emit('battleship-timeout', { matchId, role: playerRole });
           }
           return TURN_TIME;
         }
@@ -235,20 +206,20 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
   }, []);
 
   const handleReady = useCallback(() => {
-    if (!engineRef.current || !socketRef.current || !matchId) return;
+    if (!engineRef.current || !socket || !matchId) return;
     if (!engineRef.current.isAllShipsPlaced()) return;
 
     const placements = engineRef.current.getShipPlacements();
-    socketRef.current.emit('battleship-ready', { matchId, placements });
+    socket.emit('battleship-ready', { matchId, placements });
     setMyReady(true);
-  }, [matchId]);
+  }, [socket, matchId]);
 
   const handleAttack = useCallback((row: number, col: number) => {
-    if (!engineRef.current || !socketRef.current || !matchId) return;
+    if (!engineRef.current || !socket || !matchId) return;
     if (!engineRef.current.canAttack(row, col)) return;
 
-    socketRef.current.emit('battleship-attack', { matchId, row, col });
-  }, [matchId]);
+    socket.emit('battleship-attack', { matchId, row, col });
+  }, [socket, matchId]);
 
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
