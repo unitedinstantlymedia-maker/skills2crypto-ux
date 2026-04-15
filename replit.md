@@ -285,3 +285,11 @@ npm run db:push     # Push database schema
 7. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
 8. **Server deposit endpoint** - `POST /api/oracle/submit-deposit` routes to `oracle.submitDeposit` (USDT) or `oracle.submitDepositNative` (ETH/BNB) based on `assetType`
 9. **Env vars** - Client: `VITE_USE_MOCK_ESCROW` (default true), `VITE_ESCROW_CHAIN_ID` (default 56); Server: `ORACLE_PRIVATE_KEY`, `BSC_RPC_URL`, `BSC_ESCROW_ADDRESS`, `BSC_CHAIN_ID`
+
+### BSC Mainnet Deployment (Apr 15, 2026)
+1. **Contract deployed** - `Skills2CryptoEscrow` at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` on BSC Mainnet (chain 56)
+2. **Tx hash** - `0x823c59a298520e53bfcb2fc6309efe5c10c3df25af6e2878acb76dc511152599`
+3. **Constructor params** - USDT=`0x55d398326f99059fF775485246999027B3197955` (6 decimals), Platform=`0x7F8Bc18A773f101194071aA559d15d2a59bf6832`, Oracle=`0x2ad7345E4ad7Fff0Ec5cB41B96e69035f96DFCB8`, initialGasPrice=1
+4. **Deployer** - `0x2ad7345E4ad7Fff0Ec5cB41B96e69035f96DFCB8` (same as oracle)
+5. **Hardhat setup** - `hardhat.config.cjs` with Solidity 0.8.24, cancun EVM, optimizer 200 runs; deploy script at `scripts/deploy-bsc.cjs`
+6. **Dependencies** - hardhat@^2.28, @nomicfoundation/hardhat-ethers, @openzeppelin/contracts@5.6.1
