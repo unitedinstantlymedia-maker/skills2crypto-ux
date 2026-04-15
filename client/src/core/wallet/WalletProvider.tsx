@@ -81,7 +81,9 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const [nickname, setNicknameState] = useState<string | null>(null);
   const [isSwitchingChain, setIsSwitchingChain] = useState(false);
   const hasPromptedNickname = useRef(false);
-  const hasPromptedSession = useRef(false);
+  const [nicknameFlowDone, setNicknameFlowDone] = useState(false);
+  const [pendingSessionPrompt, setPendingSessionPrompt] = useState(false);
+  const wasEvmConnected = useRef(isEvmConnected);
 
   const {
     hasSession: hasSessionKey,
@@ -164,23 +166,42 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
       hasPromptedNickname.current = true;
       if (!storedNick) {
         setTimeout(() => setNicknameDialogOpen(true), 600);
+      } else {
+        setNicknameFlowDone(true);
       }
     }
   }, [primaryAddress, isAnyConnected]);
 
   useEffect(() => {
+    if (!nicknameDialogOpen && hasPromptedNickname.current) {
+      setNicknameFlowDone(true);
+    }
+  }, [nicknameDialogOpen]);
+
+  useEffect(() => {
+    const justConnected = isEvmConnected && !wasEvmConnected.current;
+    wasEvmConnected.current = isEvmConnected;
+    if (justConnected && evmAddress && !hasSessionKey) {
+      setPendingSessionPrompt(true);
+    }
+  }, [isEvmConnected, evmAddress, hasSessionKey]);
+
+  useEffect(() => {
     if (
+      pendingSessionPrompt &&
+      nicknameFlowDone &&
       isEvmConnected &&
       evmAddress &&
       !hasSessionKey &&
-      !hasPromptedSession.current &&
-      !nicknameDialogOpen &&
-      hasPromptedNickname.current
+      !sessionDialogOpen
     ) {
-      hasPromptedSession.current = true;
-      setTimeout(() => setSessionDialogOpen(true), 400);
+      const timer = setTimeout(() => {
+        setSessionDialogOpen(true);
+        setPendingSessionPrompt(false);
+      }, 400);
+      return () => clearTimeout(timer);
     }
-  }, [isEvmConnected, evmAddress, hasSessionKey, nicknameDialogOpen]);
+  }, [pendingSessionPrompt, nicknameFlowDone, isEvmConnected, evmAddress, hasSessionKey, sessionDialogOpen]);
 
   useEffect(() => {
     if (hasSessionKey && sessionDialogOpen) {
@@ -193,7 +214,9 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     if (isTronConnected) disconnectTronLink();
     if (isTonConnected) disconnectTonWallet();
     hasPromptedNickname.current = false;
-    hasPromptedSession.current = false;
+    setNicknameFlowDone(false);
+    setPendingSessionPrompt(false);
+    wasEvmConnected.current = false;
     walletStore.disconnect();
   }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
 

@@ -44,7 +44,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.',
     'Fair. Anonymous. Borderless.': 'Fair. Anonymous. Borderless.',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.',
-    'True freedom begins where control ends.': 'True freedom begins where control ends.'
+    'True freedom begins where control ends.': 'True freedom begins where control ends.',
+    'Authorize Seamless Gaming': 'Authorize Seamless Gaming',
+    'session_key_description': 'To let you play matches instantly without approving every transaction, please sign a one-time permission. This allows the game server to handle deposits and payouts automatically.',
+    'session_key_benefit_1': 'No more popups when you find a match.',
+    'session_key_benefit_2': "Just click 'Find Match' and play.",
+    'Skip for now': 'Skip for now',
+    'Signing...': 'Signing...',
+    'Registering...': 'Registering...',
+    'Authorize': 'Authorize'
   },
   'ru': {
     'Select Language': 'Выбрать язык', 'Search language...': 'Поиск языка...', 'No language found.': 'Язык не найден.',
@@ -93,7 +101,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'Выиграл? Деньги мгновенно в твоём кошельке. Никаких задержек, «верификаций карты», замороженных счетов.',
     'Fair. Anonymous. Borderless.': 'Честно. Анонимно. Без границ.',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Вызывай друзей или находи соперников по всему миру. Играй с USDT, ETH, BNB или TON.',
-    'True freedom begins where control ends.': 'Настоящая свобода начинается там, где заканчивается контроль.'
+    'True freedom begins where control ends.': 'Настоящая свобода начинается там, где заканчивается контроль.',
+    'Authorize Seamless Gaming': 'Авторизация быстрой игры',
+    'session_key_description': 'Чтобы вы могли играть мгновенно без подтверждения каждой транзакции, подпишите одноразовое разрешение. Это позволит серверу автоматически обрабатывать депозиты и выплаты.',
+    'session_key_benefit_1': 'Больше никаких всплывающих окон при поиске матча.',
+    'session_key_benefit_2': "Просто нажмите 'Найти матч' и играйте.",
+    'Skip for now': 'Пропустить',
+    'Signing...': 'Подписание...',
+    'Registering...': 'Регистрация...',
+    'Authorize': 'Авторизовать'
   },
   'es': {
     'Select Language': 'Seleccionar Idioma', 'Search language...': 'Buscar idioma...', 'No language found.': 'Idioma no encontrado.',
@@ -141,7 +157,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': '¿Ganaste? El dinero está instantáneamente en tu billetera. Sin demoras, sin "verificación de tarjeta", sin cuentas congeladas.',
     'Fair. Anonymous. Borderless.': 'Justo. Anónimo. Sin fronteras.',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Desafía a amigos o compite con rivales de todo el mundo. Juega con USDT, ETH, BNB o TON.',
-    'True freedom begins where control ends.': 'La verdadera libertad comienza donde termina el control.'
+    'True freedom begins where control ends.': 'La verdadera libertad comienza donde termina el control.',
+    'Authorize Seamless Gaming': 'Autorizar juego sin interrupciones',
+    'session_key_description': 'Para jugar partidas al instante sin aprobar cada transacción, firma un permiso único. Esto permite al servidor gestionar depósitos y pagos automáticamente.',
+    'session_key_benefit_1': 'Sin más ventanas emergentes al buscar partida.',
+    'session_key_benefit_2': "Solo haz clic en 'Buscar Partida' y juega.",
+    'Skip for now': 'Omitir por ahora',
+    'Signing...': 'Firmando...',
+    'Registering...': 'Registrando...',
+    'Authorize': 'Autorizar'
   },
   'he': {
     'Select Language': 'בחר שפה', 'Search language...': 'חפש שפה...', 'No language found.': 'לא נמצאה שפה.',
@@ -189,7 +213,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'ניצחת? הכסף מיד בארנק שלך. ללא עיכובים, ללא "אימות כרטיס", ללא חשבונות מוקפאים.',
     'Fair. Anonymous. Borderless.': 'הוגן. אנונימי. ללא גבולות.',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'אתגר חברים או התמודד עם יריבים ברחבי העולם. שחק עם USDT, ETH, BNB או TON.',
-    'True freedom begins where control ends.': 'חופש אמיתי מתחיל היכן שהשליטה נגמרת.'
+    'True freedom begins where control ends.': 'חופש אמיתי מתחיל היכן שהשליטה נגמרת.',
+    'Authorize Seamless Gaming': 'אישור משחק חלק',
+    'session_key_description': 'כדי לשחק מיידית בלי לאשר כל עסקה, חתום על הרשאה חד-פעמית. זה מאפשר לשרת המשחק לטפל בהפקדות ובתשלומים באופן אוטומטי.',
+    'session_key_benefit_1': 'בלי עוד חלונות קופצים כשמוצאים משחק.',
+    'session_key_benefit_2': "פשוט לחצו 'מצא משחק' ושחקו.",
+    'Skip for now': 'דלג לעת עתה',
+    'Signing...': 'חותם...',
+    'Registering...': 'רושם...',
+    'Authorize': 'אשר'
   },
   'hi': {
     'Select Language': 'भाषा चुनें', 'Search language...': 'भाषा खोजें...', 'No language found.': 'कोई भाषा नहीं मिली।',
@@ -237,7 +269,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'जीत गए? पैसा तुरंत आपके वॉलेट में। कोई देरी नहीं, कोई "कार्ड सत्यापन" नहीं, कोई फ्रोज़न खाता नहीं।',
     'Fair. Anonymous. Borderless.': 'निष्पक्ष। गुमनाम। सीमाहीन।',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'दोस्तों को चुनौती दें या दुनिया भर के प्रतिद्वंद्वियों से खेलें। USDT, ETH, BNB या TON से खेलें।',
-    'True freedom begins where control ends.': 'सच्ची आज़ादी वहीं शुरू होती है जहाँ नियंत्रण खत्म होता है।'
+    'True freedom begins where control ends.': 'सच्ची आज़ादी वहीं शुरू होती है जहाँ नियंत्रण खत्म होता है।',
+    'Authorize Seamless Gaming': 'सहज गेमिंग अधिकृत करें',
+    'session_key_description': 'हर लेन-देन को मंजूरी दिए बिना तुरंत मैच खेलने के लिए, एक बार की अनुमति पर हस्ताक्षर करें। इससे गेम सर्वर जमा और भुगतान स्वचालित रूप से संभाल सकेगा।',
+    'session_key_benefit_1': 'मैच खोजते समय कोई पॉपअप नहीं।',
+    'session_key_benefit_2': "बस 'मैच खोजें' पर क्लिक करें और खेलें।",
+    'Skip for now': 'अभी छोड़ें',
+    'Signing...': 'हस्ताक्षर हो रहा है...',
+    'Registering...': 'पंजीकरण हो रहा है...',
+    'Authorize': 'अधिकृत करें'
   },
   'vi': {
     'Select Language': 'Chọn ngôn ngữ', 'Search language...': 'Tìm ngôn ngữ...', 'No language found.': 'Không tìm thấy ngôn ngữ.',
@@ -286,7 +326,15 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'Thắng? Tiền ngay lập tức trong ví. Không chậm trễ, không "xác minh thẻ", không đóng băng tài khoản.',
     'Fair. Anonymous. Borderless.': 'Công bằng. Ẩn danh. Không biên giới.',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'Thách đấu bạn bè hoặc đối đầu đối thủ toàn cầu. Chơi với USDT, ETH, BNB hoặc TON.',
-    'True freedom begins where control ends.': 'Tự do thực sự bắt đầu nơi kiểm soát kết thúc.'
+    'True freedom begins where control ends.': 'Tự do thực sự bắt đầu nơi kiểm soát kết thúc.',
+    'Authorize Seamless Gaming': 'Cho phép chơi liền mạch',
+    'session_key_description': 'Để bạn chơi ngay lập tức mà không cần phê duyệt từng giao dịch, hãy ký một lần cấp phép. Điều này cho phép máy chủ tự động xử lý nạp tiền và thanh toán.',
+    'session_key_benefit_1': 'Không còn cửa sổ bật lên khi tìm trận.',
+    'session_key_benefit_2': "Chỉ cần nhấn 'Tìm Trận' và chơi.",
+    'Skip for now': 'Bỏ qua',
+    'Signing...': 'Đang ký...',
+    'Registering...': 'Đang đăng ký...',
+    'Authorize': 'Cho phép'
   },
   'th': {
     'Select Language': 'เลือกภาษา', 'Search language...': 'ค้นหาภาษา...', 'No language found.': 'ไม่พบภาษา',
@@ -335,6 +383,14 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
     'You win? The money is instantly in your wallet. No delays, no "card verification", no frozen accounts.': 'ชนะ? เงินอยู่ในกระเป๋าทันที ไม่ล่าช้า ไม่มี "ยืนยันบัตร" ไม่มีบัญชีถูกอายัด',
     'Fair. Anonymous. Borderless.': 'ยุติธรรม ไม่ระบุตัวตน ไร้พรมแดน',
     'Challenge friends or match with rivals worldwide. Play with USDT, ETH, BNB, or TON.': 'ท้าทายเพื่อนหรือแข่งกับคู่ต่อสู้ทั่วโลก เล่นด้วย USDT, ETH, BNB หรือ TON',
-    'True freedom begins where control ends.': 'อิสรภาพที่แท้จริงเริ่มต้นตรงที่การควบคุมสิ้นสุด'
+    'True freedom begins where control ends.': 'อิสรภาพที่แท้จริงเริ่มต้นตรงที่การควบคุมสิ้นสุด',
+    'Authorize Seamless Gaming': 'อนุญาตการเล่นเกมอย่างราบรื่น',
+    'session_key_description': 'เพื่อให้คุณเล่นแมตช์ได้ทันทีโดยไม่ต้องอนุมัติทุกธุรกรรม กรุณาลงนามอนุญาตครั้งเดียว เซิร์ฟเวอร์จะจัดการฝากเงินและจ่ายเงินให้อัตโนมัติ',
+    'session_key_benefit_1': 'ไม่มีป๊อปอัพอีกต่อไปเมื่อค้นหาแมตช์',
+    'session_key_benefit_2': "แค่คลิก 'ค้นหาแมตช์' แล้วเล่นเลย",
+    'Skip for now': 'ข้ามไปก่อน',
+    'Signing...': 'กำลังลงนาม...',
+    'Registering...': 'กำลังลงทะเบียน...',
+    'Authorize': 'อนุญาต'
   }
 };
