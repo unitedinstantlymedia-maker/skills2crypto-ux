@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { walletAdapter } from '@/core/wallet/WalletAdapter';
 import { walletStore } from '@/core/wallet/WalletStore';
 import { escrowAdapter } from '@/core/escrow';
+import { ensureTronUsdtReadyForStake } from '@/core/escrow/TronEscrowAdapter';
 import { historyStore } from '@/core/history/HistoryStore';
 import { useRealWallet } from '@/core/wallet/WalletProvider';
 import type { WalletState, HistoryEntry } from '@/core/types';
@@ -262,6 +263,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setIsFinding(false);
         setCurrentMatch(null);
         return;
+      }
+
+      // Pre-flight for USDT/Tron: ensure the player has approved the escrow
+      // (prompts TronLink approve + auto-sponsors TRX if needed). This makes
+      // the eventual /api/find-match call pass the server-side allowance
+      // gate so we don't queue a player who can't actually fund.
+      if (selectedAsset === 'USDT') {
+        try {
+          await ensureTronUsdtReadyForStake(stakeAmount);
+        } catch (e: any) {
+          console.error('[GameContext] USDT readiness failed:', e?.message || e);
+          setIsFinding(false);
+          setCurrentMatch(null);
+          return;
+        }
       }
 
       const res = await findMatch({

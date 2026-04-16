@@ -431,6 +431,50 @@ function build() {
     return sun / 1_000_000;
   }
 
+  async function getPlayerBalanceTrx(playerBase58: string): Promise<number> {
+    const sun = await tw.trx.getBalance(playerBase58);
+    return sun / 1_000_000;
+  }
+
+  /**
+   * Send TRX from the oracle wallet to a player so they can pay the
+   * one-time USDT approve() cost. Players never need to own TRX themselves
+   * — the oracle covers it. Caller is responsible for idempotency.
+   */
+  async function sponsorPlayerTrx(playerBase58: string, amountTrx: number): Promise<{ txid: string }> {
+    await ensureOracleHasGas();
+    const amountSun = Math.round(amountTrx * 1_000_000);
+    const tx = await tw.trx.sendTransaction(playerBase58, amountSun);
+    if (!tx?.result || !tx?.txid) {
+      throw new TronOracleError(`sponsorPlayerTrx broadcast failed: ${JSON.stringify(tx)}`, "BROADCAST_FAILED");
+    }
+    console.log(`[TronOracle] sponsored ${amountTrx} TRX → ${playerBase58} (tx=${tx.txid})`);
+    return { txid: tx.txid };
+  }
+
+  /**
+   * Read the player's USDT allowance to the escrow contract (in 6-decimal
+   * smallest units). Used by the matchmaking pre-flight to prevent matches
+   * from being created if the player has not yet approved.
+   */
+  async function getUsdtAllowance(playerBase58: string): Promise<bigint> {
+    const fnSelector = "allowance(address,address)";
+    const params = [
+      { type: "address", value: tronAddressToEvmHex(playerBase58, tw) },
+      { type: "address", value: escrowEvmHex },
+    ];
+    const tx = await tw.transactionBuilder.triggerConstantContract(
+      cfg.usdtBase58,
+      fnSelector,
+      {},
+      params,
+      playerBase58
+    );
+    const result = tx?.constant_result?.[0];
+    if (!result) return 0n;
+    return BigInt("0x" + result);
+  }
+
   return {
     chain: "TRON" as const,
     chainId: cfg.chainId,
@@ -454,6 +498,9 @@ function build() {
     submitSettlement,
     getMatchOnChain,
     getOracleBalanceTrx,
+    getPlayerBalanceTrx,
+    sponsorPlayerTrx,
+    getUsdtAllowance,
   };
 }
 

@@ -31,4 +31,12 @@ module.exports = async function (deployer) {
 
   const instance = await Skills2CryptoEscrow.deployed();
   console.log("Skills2CryptoEscrow deployed at:", instance.address);
+
+  // Tron deployments do not use the EVM session-key onboarding flow —
+  // each per-match deposit signature is sufficient authorization.
+  // Disable session validation so depositUSDT* don't revert with
+  // "No session key" for Tron players.
+  console.log("Disabling sessionRequired (Tron-specific)…");
+  await instance.setSessionRequired(false);
+  console.log("sessionRequired = false");
 };

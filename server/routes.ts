@@ -80,6 +80,36 @@ export async function registerRoutes(
       });
     }
 
+    // USDT pre-flight: a Tron player must have already approved at least
+    // (stake + gasReserve buffer) USDT to the escrow before we queue them.
+    // Otherwise depositUSDT will revert at funding time and the opponent's
+    // stake gets locked unproductively. The frontend should call
+    // /api/tron/sponsor-trx + approve before reaching this endpoint.
+    if (asset === "USDT") {
+      try {
+        const { createTronOracle } = await import("./oracle/tronOracle");
+        const tron = createTronOracle();
+        const allowance = await tron.getUsdtAllowance(cleanWallet);
+        const stakeUnits = BigInt(Math.round(numericStake * 1_000_000));
+        const required = (stakeUnits * 110n) / 100n;
+        if (allowance < required) {
+          return res.status(412).json({
+            error: "usdt_not_approved",
+            message: `USDT allowance (${allowance.toString()}) is below required (${required.toString()}). Approve USDT to the escrow before searching.`,
+            requiredUnits: required.toString(),
+            currentAllowanceUnits: allowance.toString(),
+          });
+        }
+      } catch (err: any) {
+        console.error("[find-match] USDT readiness check failed:", err?.message || err);
+        // Fail open with a clear message rather than silently queueing.
+        return res.status(503).json({
+          error: "tron_readiness_unavailable",
+          message: "Could not verify USDT allowance — try again shortly.",
+        });
+      }
+    }
+
     try {
       const result = await findOrCreateMatch({
         game,
@@ -793,6 +823,99 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[tron/match-status] Error:", err?.message || err);
       return res.status(500).json({ error: err?.message || "Status lookup failed" });
+    }
+  });
+
+  /**
+   * GET /api/tron/config
+   * Public Tron config so the frontend can call approve() against the right
+   * escrow contract without hardcoding addresses per environment.
+   */
+  app.get("/api/tron/config", async (_req, res) => {
+    try {
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      return res.json({
+        chainId: tron.chainId,
+        escrowBase58: tron.escrowAddressBase58,
+        escrowEvmHex: tron.escrowAddressEvmHex,
+        usdtBase58: tron.usdtAddressBase58,
+      });
+    } catch (err: any) {
+      console.error("[tron/config] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Config unavailable" });
+    }
+  });
+
+  /**
+   * GET /api/tron/readiness?wallet=<base58>&stake=<usdt>
+   * Returns whether the player has enough TRX to pay the one-time approve()
+   * tx and whether their USDT allowance to the escrow already covers the
+   * requested stake. Used as a pre-flight before /api/find-match for USDT.
+   */
+  app.get("/api/tron/readiness", async (req, res) => {
+    const wallet = String(req.query.wallet || "");
+    const stake = Number(req.query.stake || 0);
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
+      return res.status(400).json({ error: "Invalid Tron wallet" });
+    }
+    if (!Number.isFinite(stake) || stake <= 0) {
+      return res.status(400).json({ error: "Invalid stake" });
+    }
+    try {
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      const trx = await tron.getPlayerBalanceTrx(wallet);
+      const allowance = await tron.getUsdtAllowance(wallet);
+      const stakeUnits = BigInt(Math.round(stake * 1_000_000));
+      // Need a small buffer over stakeUnits for gasReserve. ~10% is safe.
+      const requiredAllowance = (stakeUnits * 110n) / 100n;
+      const APPROVE_TRX_COST = 30; // approx USDT TRC-20 approve cost
+      return res.json({
+        wallet,
+        trxBalance: trx,
+        usdtAllowance: allowance.toString(),
+        approveReady: allowance >= requiredAllowance,
+        trxReady: allowance >= requiredAllowance || trx >= APPROVE_TRX_COST,
+      });
+    } catch (err: any) {
+      console.error("[tron/readiness] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Readiness check failed" });
+    }
+  });
+
+  /**
+   * POST /api/tron/sponsor-trx
+   * Body: { wallet: <base58> }
+   * One-time per-wallet TRX sponsorship so the player can submit their USDT
+   * approve() without ever owning TRX. Idempotent via Redis (24h window).
+   */
+  app.post("/api/tron/sponsor-trx", async (req, res) => {
+    const wallet = String(req.body?.wallet || "");
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
+      return res.status(400).json({ error: "Invalid Tron wallet" });
+    }
+    const sponsorKey = `tron_sponsor:${wallet}`;
+    const claimed = await redis.set(sponsorKey, "1", { ex: 60 * 60 * 24, nx: true });
+    if (!claimed) {
+      return res.status(429).json({ error: "Already sponsored within 24h", wallet });
+    }
+    try {
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      // Skip if player already has more than enough TRX for the approve.
+      const trx = await tron.getPlayerBalanceTrx(wallet);
+      if (trx >= 30) {
+        return res.json({ status: "skipped", wallet, trxBalance: trx });
+      }
+      const SPONSOR_TRX = Number(process.env.TRON_PLAYER_SPONSOR_TRX ?? 35);
+      const result = await tron.sponsorPlayerTrx(wallet, SPONSOR_TRX);
+      return res.json({ status: "sent", wallet, amount: SPONSOR_TRX, txid: result.txid });
+    } catch (err: any) {
+      // Release the lock on failure so the user can retry.
+      await redis.del(sponsorKey);
+      console.error("[tron/sponsor-trx] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Sponsor failed" });
     }
   });
 

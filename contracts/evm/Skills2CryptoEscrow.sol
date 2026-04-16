@@ -142,7 +142,22 @@ contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
         emit SessionKeyRevoked(msg.sender);
     }
 
+    // When false, session-key registration is skipped on deposit. This is
+    // used on Tron deployments where TronLink's UX makes the EIP-712 session
+    // onboarding flow impractical and the per-match deposit signature
+    // already authorizes the stake. Default true preserves EVM behavior.
+    bool public sessionRequired = true;
+
+    event SessionRequiredSet(bool required);
+
+    function setSessionRequired(bool required) external {
+        require(msg.sender == oracle, "Only oracle");
+        sessionRequired = required;
+        emit SessionRequiredSet(required);
+    }
+
     function _validateSession(address player, uint256 stake) internal view {
+        if (!sessionRequired) return;
         SessionKey storage sk = sessionKeys[player];
         require(sk.player == player, "No session key");
         require(!sk.revoked, "Session revoked");

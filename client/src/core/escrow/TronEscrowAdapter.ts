@@ -75,11 +75,77 @@ async function ensureUsdtApproval(escrowBase58: string, requiredUnits: bigint): 
     return true;
   }
 
+  // Player needs ~30 TRX to broadcast approve(). The oracle sponsors them
+  // (one-time, idempotent server-side) so the player never has to own TRX.
+  const balanceSun: number = await tw.trx.getBalance(owner);
+  const balanceTrx = balanceSun / 1_000_000;
+  if (balanceTrx < 30) {
+    console.log(`[TronEscrow] Player TRX balance ${balanceTrx} insufficient — requesting sponsor`);
+    try {
+      const r = await fetch("/api/tron/sponsor-trx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: owner }),
+      });
+      const data = await r.json();
+      if (!r.ok && r.status !== 429) {
+        console.warn(`[TronEscrow] sponsor-trx returned ${r.status}: ${data?.error}`);
+      } else {
+        console.log(`[TronEscrow] sponsor-trx response:`, data);
+      }
+      // Wait briefly for the sponsor tx to confirm before broadcasting approve.
+      await new Promise((res) => setTimeout(res, 4000));
+    } catch (e: any) {
+      console.error(`[TronEscrow] sponsor-trx fetch failed:`, e?.message || e);
+    }
+  }
+
   console.log(`[TronEscrow] Allowance insufficient — sending approve()`);
   // Max uint256
   const MAX = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
   await usdt.approve(escrowBase58, MAX).send({ feeLimit: 100_000_000 });
   return true;
+}
+
+/**
+ * Pre-flight readiness ensure for the SEARCH path: makes sure the player's
+ * USDT allowance covers the requested stake before we even hit /find-match.
+ * Triggers a TronLink approve() (with TRX sponsorship if needed) the very
+ * first time. Safe to call repeatedly — it short-circuits when allowance
+ * is already sufficient.
+ */
+export async function ensureTronUsdtReadyForStake(stakeUsdt: number): Promise<void> {
+  const tw = (window as any).tronWeb;
+  if (!tw || !tw.ready || !tw.defaultAddress?.base58) {
+    throw new Error("TronLink is not connected");
+  }
+  const owner = tw.defaultAddress.base58;
+  const r = await fetch(
+    `/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(stakeUsdt))}`
+  );
+  const data = await r.json();
+  if (!r.ok) {
+    throw new Error(data?.error || "readiness check failed");
+  }
+  if (data.approveReady) return;
+
+  // Need to approve. Read escrow address from a per-asset config endpoint
+  // — for now derive via the deposit-auth pre-fetch is impractical without a
+  // matchId, so we read it from a small constant exposed by the server's
+  // tronOracle. We do that lazily by calling the readiness endpoint once
+  // more after running a sponsor + approve sequence.
+  const escrowBase58 = (window as any).__TRON_ESCROW_ADDRESS__ || (await fetchEscrowAddress());
+  const stakeUnits = BigInt(Math.round(stakeUsdt * 1_000_000));
+  const required = (stakeUnits * 110n) / 100n;
+  await ensureUsdtApproval(escrowBase58, required);
+}
+
+async function fetchEscrowAddress(): Promise<string> {
+  const r = await fetch("/api/tron/config");
+  if (!r.ok) throw new Error("Could not load Tron escrow address");
+  const data = await r.json();
+  (window as any).__TRON_ESCROW_ADDRESS__ = data.escrowBase58;
+  return data.escrowBase58;
 }
 
 export class TronEscrowAdapter {
