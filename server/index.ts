@@ -4,7 +4,7 @@ import cors from "cors";
 
 import { registerRoutes } from "./routes";
 import { setupVite } from "./vite";
-import { setupSocket } from "./socket";
+import { setupSocket, markMatchFunded } from "./socket";
 import { startChallengeCleanup } from "./matchmaking/challengeCleanup";
 import { redis } from "./redis";
 
@@ -85,6 +85,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
           const appMatchId = await resolveAppMatchId(evt.matchId);
           console.log(`[MatchActive:BSC] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
           if (!appMatchId) return;
+          markMatchFunded(appMatchId);
           io.to(`match:${appMatchId}`).emit("match-funded", {
             matchId: appMatchId,
             chain: "BSC",
@@ -107,6 +108,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
           const appMatchId = await resolveAppMatchId(evt.matchId);
           console.log(`[MatchActive:ETH] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
           if (!appMatchId) return;
+          markMatchFunded(appMatchId);
           io.to(`match:${appMatchId}`).emit("match-funded", {
             matchId: appMatchId,
             chain: "ETH",

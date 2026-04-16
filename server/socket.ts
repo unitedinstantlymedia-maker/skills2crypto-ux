@@ -251,6 +251,60 @@ interface BattleshipRoom {
 
 const battleshipRooms = new Map<string, BattleshipRoom>();
 
+// Tracks matches whose on-chain escrow has been funded by both players
+// (i.e. the contract emitted MatchActive). Game-start events are gated on
+// this set so gameplay never begins before crypto is locked.
+const fundedMatches = new Set<string>();
+let ioRef: SocketIOServer | null = null;
+
+export function isMatchFunded(matchId: string): boolean {
+  return fundedMatches.has(matchId);
+}
+
+/**
+ * Called by the on-chain MatchActive listener once both players have
+ * deposited. Marks the match as funded and re-fires any pending game-start
+ * events for game rooms that already have both players waiting.
+ */
+export function markMatchFunded(matchId: string): void {
+  if (fundedMatches.has(matchId)) return;
+  fundedMatches.add(matchId);
+  console.log("[socket] match funded — releasing game-start gate", matchId);
+  const io = ioRef;
+  if (!io) return;
+
+  const chess = matchRooms.get(matchId);
+  if (chess && chess.players.size === 2) {
+    io.to(`match:${matchId}`).emit('game-start', {
+      fen: chess.fen,
+      whiteTime: chess.whiteTime,
+      blackTime: chess.blackTime,
+    });
+    console.log("[socket] game-start (post-funding)", matchId);
+  }
+
+  const tetris = tetrisRooms.get(matchId);
+  if (tetris && tetris.players.size === 2 && !tetris.started) {
+    tetris.started = true;
+    io.to(`tetris:${matchId}`).emit('tetris-game-start');
+    console.log("[socket] tetris-game-start (post-funding)", matchId);
+  }
+
+  const checkers = checkersRooms.get(matchId);
+  if (checkers && checkers.players.size === 2 && !checkers.started) {
+    checkers.started = true;
+    io.to(`checkers:${matchId}`).emit('checkers-game-start');
+    console.log("[socket] checkers-game-start (post-funding)", matchId);
+  }
+
+  const battleship = battleshipRooms.get(matchId);
+  if (battleship && battleship.players.size === 2 && !battleship.started) {
+    battleship.started = true;
+    io.to(`battleship:${matchId}`).emit('battleship-game-start');
+    console.log("[socket] battleship-game-start (post-funding)", matchId);
+  }
+}
+
 const GRID_SIZE = 10;
 
 function validateShipPlacements(placements: ShipPlacement[]): { valid: boolean; error?: string } {
@@ -312,6 +366,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       credentials: true
     }
   });
+  ioRef = io;
 
   io.on("connection", (socket) => {
     console.log("[socket] connected", socket.id);
@@ -353,7 +408,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         socket.emit('color-assigned', { color: existingPlayer.color });
         console.log("[socket] reconnect, color preserved:", existingPlayer.color);
         
-        if (room.players.size === 2) {
+        if (room.players.size === 2 && fundedMatches.has(matchId)) {
           socket.emit('game-start', {
             fen: room.fen,
             whiteTime: room.whiteTime,
@@ -378,12 +433,17 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] color assigned", matchId, playerId, assignedColor);
 
       if (room.players.size === 2) {
-        io.to(`match:${matchId}`).emit('game-start', {
-          fen: room.fen,
-          whiteTime: room.whiteTime,
-          blackTime: room.blackTime
-        });
-        console.log("[socket] game-start", matchId);
+        if (fundedMatches.has(matchId)) {
+          io.to(`match:${matchId}`).emit('game-start', {
+            fen: room.fen,
+            whiteTime: room.whiteTime,
+            blackTime: room.blackTime
+          });
+          console.log("[socket] game-start", matchId);
+        } else {
+          console.log("[socket] game-start gated on funding", matchId);
+          io.to(`match:${matchId}`).emit('awaiting-funding', { matchId });
+        }
       }
     });
 
@@ -578,9 +638,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       if (room.players.size === 2 && !room.started) {
-        room.started = true;
-        io.to(`tetris:${matchId}`).emit('tetris-game-start');
-        console.log("[socket] tetris-game-start", matchId);
+        if (fundedMatches.has(matchId)) {
+          room.started = true;
+          io.to(`tetris:${matchId}`).emit('tetris-game-start');
+          console.log("[socket] tetris-game-start", matchId);
+        } else {
+          console.log("[socket] tetris-game-start gated on funding", matchId);
+        }
       }
     });
 
@@ -684,9 +748,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] checkers color assigned", matchId, playerId, assignedColor);
 
       if (room.players.size === 2 && !room.started) {
-        room.started = true;
-        io.to(`checkers:${matchId}`).emit('checkers-game-start');
-        console.log("[socket] checkers-game-start", matchId);
+        if (fundedMatches.has(matchId)) {
+          room.started = true;
+          io.to(`checkers:${matchId}`).emit('checkers-game-start');
+          console.log("[socket] checkers-game-start", matchId);
+        } else {
+          console.log("[socket] checkers-game-start gated on funding", matchId);
+        }
       }
     });
 
@@ -859,9 +927,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] battleship role assigned", matchId, playerId, assignedRole);
 
       if (room.players.size === 2 && !room.started) {
-        room.started = true;
-        io.to(`battleship:${matchId}`).emit('battleship-game-start');
-        console.log("[socket] battleship-game-start", matchId);
+        if (fundedMatches.has(matchId)) {
+          room.started = true;
+          io.to(`battleship:${matchId}`).emit('battleship-game-start');
+          console.log("[socket] battleship-game-start", matchId);
+        } else {
+          console.log("[socket] battleship-game-start gated on funding", matchId);
+        }
       }
     });
 

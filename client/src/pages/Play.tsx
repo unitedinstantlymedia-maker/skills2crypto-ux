@@ -43,7 +43,7 @@ export default function Play() {
 
   if (!state.selectedGame || !state.currentMatch) return null;
 
-  if (state.currentMatch.status === 'waiting') return <WaitingRoom />;
+  if (state.currentMatch.status === 'waiting' || state.currentMatch.status === 'funding') return <WaitingRoom />;
 
   const pot = ((state.currentMatch?.stake ?? 0) * 2).toFixed(0);
 
