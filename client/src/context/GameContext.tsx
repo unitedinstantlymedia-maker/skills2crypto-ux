@@ -5,6 +5,7 @@ import { walletAdapter } from '@/core/wallet/WalletAdapter';
 import { walletStore } from '@/core/wallet/WalletStore';
 import { escrowAdapter } from '@/core/escrow';
 import { ensureTronUsdtReadyForStake } from '@/core/escrow/TronEscrowAdapter';
+import { ensureTonReadyForStake } from '@/core/escrow/TonEscrowAdapter';
 import { historyStore } from '@/core/history/HistoryStore';
 import { useRealWallet } from '@/core/wallet/WalletProvider';
 import type { WalletState, HistoryEntry } from '@/core/types';
@@ -274,6 +275,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           await ensureTronUsdtReadyForStake(stakeAmount);
         } catch (e: any) {
           console.error('[GameContext] USDT readiness failed:', e?.message || e);
+          setIsFinding(false);
+          setCurrentMatch(null);
+          return;
+        }
+      }
+
+      // TON pre-flight: confirm a TonConnect wallet is connected and that the
+      // wallet has enough TON to cover the stake + on-chain gas reserve. The
+      // server independently re-checks this in /api/find-match, but doing it
+      // client-side first lets us surface the error immediately instead of
+      // showing a queued / waiting state that would just bounce.
+      if (selectedAsset === 'TON') {
+        try {
+          await ensureTonReadyForStake(stakeAmount);
+        } catch (e: any) {
+          console.error('[GameContext] TON readiness failed:', e?.message || e);
           setIsFinding(false);
           setCurrentMatch(null);
           return;

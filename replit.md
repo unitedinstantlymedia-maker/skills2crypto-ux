@@ -377,6 +377,64 @@ Native (BNB & ETH) matches now use a **player-submitted** model.
 - `lockFunds(matchId, asset, stake)` now: fetches MatchAuth, calls `depositNativeAsPlayer` via `@wagmi/core` `writeContract` with `value = stake + gasReserve`, waits for the receipt, then polls `/api/oracle/match-status/:matchId` until status === Active.
 - No retries on user-facing tx failures; the user must explicitly try again.
 
+---
+
+## Task #14 — Native TON Escrow Integration
+
+TON uses its own contract, oracle key, and player flow because it sits on a
+different VM (TVM) and curve (Ed25519) than the EVM/Tron stack.
+
+### Smart contracts (`contracts/ton/`)
+- `skills2crypto_escrow_simple.tact` — production contract. `PrepareMatch`
+  (oracle), `PlayerDeposit` (player via TonConnect), `Settle` (oracle),
+  `CancelMatch` (oracle). 3% platform fee, per-player gas reserve baked into
+  the deposit so the oracle is always reimbursed for `Settle` gas.
+- `skills2crypto_escrow.tact` — original session-key draft, kept for jetton
+  exploration; **not deployed**.
+- `contracts/ton/README.md` — Tact compile + deploy instructions.
+
+### Oracle (`server/oracle/tonOracle.ts`)
+- Derives an Ed25519 keypair from `TON_ORACLE_MNEMONIC` (24 words) into a
+  `WalletContractV4`. Independent of the EVM/Tron oracle.
+- Builds Tact message bodies (`PrepareMatch`, `PlayerDeposit`,
+  `Settle`, `CancelMatch`) with explicit opcodes hashed via
+  `server/oracle/tonCrc32.ts` — keeps the server free of generated wrappers.
+- `prepareMatch / submitSettlement / cancelMatch / getMatchOnChain /
+  encodePlayerDepositPayload`. Match IDs are sha256 → uint256 (TVM-friendly;
+  doesn't need to match EVM's keccak256 since the contracts are separate).
+
+### Backend routes (`server/routes.ts`)
+- `GET /api/ton/config` — public escrow / oracle / gas-reserve info.
+- `GET /api/ton/readiness` — pre-search wallet balance check.
+- `POST /api/ton/deposit-info` — idempotently calls `PrepareMatch` on-chain
+  and returns `{ escrowAddress, amountNano, payloadBoc, validUntilSec }`.
+- `GET /api/ton/match-status/:matchId` — reads the on-chain `Match` struct;
+  emits `match-funded` once status flips to `ACTIVE` (status==2).
+- `POST /api/ton/notify-deposit` — informational breadcrumb from client.
+- `/api/find-match` gated on TON balance ≥ stake + gasReserve + 0.05.
+- `server/socket.ts settleMatchOnChain` dispatches `asset === 'TON'` to
+  `tonOracle.submitSettlement(matchId, winnerFriendlyAddress, reason)`.
+
+### Frontend
+- `client/src/core/escrow/TonEscrowAdapter.ts` — `lockFunds` fetches
+  deposit-info, calls `tc.sendTransaction` (TonConnect), then polls
+  `/api/ton/match-status` until `ACTIVE`. `ensureTonReadyForStake` is the
+  pre-find-match readiness check.
+- `client/src/core/wallet/useTonConnect.ts` — caches the `TonConnectUI`
+  instance on `window.__TON_CONNECT_UI__` so adapters can reuse it (and to
+  avoid the "already initialized" error on re-mount).
+- `client/src/core/escrow/index.ts` — `EscrowRouter` routes `TON` to
+  `tonEscrowAdapter` when not in mock mode.
+
+### Env vars (server)
+- `TON_ESCROW_CONTRACT` — bounceable EQ… address of the deployed contract.
+- `TON_ORACLE_MNEMONIC` — 24-word mnemonic for the oracle wallet.
+- `TON_PLATFORM_WALLET` — friendly TON address that receives the 3% fee.
+- `TON_RPC_URL` (optional, default toncenter v2 jsonRPC).
+- `TON_API_KEY` (optional, recommended for toncenter rate limits).
+- `TON_MIN_GAS` (optional, default 1.0 TON).
+- `TON_WORKCHAIN` (optional, default 0).
+
 ### Deployment
 - BSC redeployment required (struct + new function). Use `scripts/deploy-bsc.cjs`.
 - ETH mainnet deployment is a manual op with funded deployer key. Use `scripts/deploy-eth.cjs`.

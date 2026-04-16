@@ -97,9 +97,16 @@ export function useTonConnect(): TonConnectState {
     const init = async () => {
       try {
         const { TonConnectUI } = await import('@tonconnect/ui');
-        const tonConnectUI = new TonConnectUI({
-          manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
-        });
+        // Reuse a single instance across hot-reloads / re-mounts. TonConnectUI
+        // throws "TonConnectUI is already initialized" if instantiated twice
+        // for the same manifest, so we cache it on window.
+        let tonConnectUI = (window as any).__TON_CONNECT_UI__;
+        if (!tonConnectUI) {
+          tonConnectUI = new TonConnectUI({
+            manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
+          });
+          (window as any).__TON_CONNECT_UI__ = tonConnectUI;
+        }
         tonConnectUIRef.current = tonConnectUI;
 
         const unsub = tonConnectUI.onStatusChange((wallet: any) => {

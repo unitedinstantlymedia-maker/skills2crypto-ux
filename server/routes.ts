@@ -81,6 +81,41 @@ export async function registerRoutes(
       });
     }
 
+    // TON pre-flight: confirm the player has enough TON to cover the stake +
+    // gasReserve before we queue them. The actual deposit happens after the
+    // server calls PrepareMatch on-chain (via tonOracle), but we still gate
+    // queueing so a player without funds doesn't lock the opponent.
+    if (asset === "TON") {
+      try {
+        const { createTonOracle } = await import("./oracle/tonOracle");
+        const ton = createTonOracle();
+        const { TonClient } = await import("@ton/ton");
+        const { Address, fromNano } = await import("@ton/core");
+        const client = new TonClient({
+          endpoint: process.env.TON_RPC_URL || "https://toncenter.com/api/v2/jsonRPC",
+          apiKey: process.env.TON_API_KEY,
+        });
+        const balanceNano = await client.getBalance(Address.parse(cleanWallet));
+        const balanceTon = Number(fromNano(balanceNano));
+        const gasReserve = await ton.getGasReservePerPlayerTon();
+        const required = numericStake + gasReserve + 0.05; // +0.05 TON buffer
+        if (balanceTon < required) {
+          return res.status(412).json({
+            error: "ton_insufficient_balance",
+            message: `Wallet balance (${balanceTon} TON) below required (${required} TON).`,
+            requiredTon: required,
+            balanceTon,
+          });
+        }
+      } catch (err: any) {
+        console.error("[find-match] TON readiness check failed:", err?.message || err);
+        return res.status(503).json({
+          error: "ton_readiness_unavailable",
+          message: "Could not verify TON balance — try again shortly.",
+        });
+      }
+    }
+
     // USDT pre-flight: a Tron player must have already approved at least
     // (stake + gasReserve buffer) USDT to the escrow before we queue them.
     // Otherwise depositUSDT will revert at funding time and the opponent's
@@ -990,6 +1025,248 @@ export async function registerRoutes(
       console.error("[tron/sponsor-trx] Error:", err?.message || err);
       return res.status(500).json({ error: err?.message || "Sponsor failed" });
     }
+  });
+
+  // ============================================================
+  // TON native escrow endpoints (Task #14)
+  // ============================================================
+
+  /**
+   * GET /api/ton/config
+   * Public TON config so the frontend knows the escrow address + chain info.
+   */
+  app.get("/api/ton/config", async (_req, res) => {
+    try {
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+      return res.json({
+        chain: "TON",
+        escrowAddress: ton.escrowAddressFriendly,
+        platformWallet: ton.platformWalletFriendly,
+        oracleAddress: await ton.getOracleAddressFriendly(),
+        gasReservePerPlayerTon: await ton.getGasReservePerPlayerTon(),
+      });
+    } catch (err: any) {
+      console.error("[ton/config] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "TON config unavailable" });
+    }
+  });
+
+  /**
+   * GET /api/ton/readiness?wallet=<friendly>&stake=<ton>
+   * Confirms the player wallet exists on-chain and has enough TON to cover
+   * stake + gas reserve. Used as a pre-flight before /api/find-match.
+   */
+  app.get("/api/ton/readiness", async (req, res) => {
+    const wallet = String(req.query.wallet || "");
+    const stake = Number(req.query.stake || 0);
+    if (!wallet) return res.status(400).json({ error: "wallet required" });
+    if (!Number.isFinite(stake) || stake <= 0) {
+      return res.status(400).json({ error: "Invalid stake" });
+    }
+    try {
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+      const { TonClient } = await import("@ton/ton");
+      const { Address, fromNano } = await import("@ton/core");
+      const client = new TonClient({
+        endpoint: process.env.TON_RPC_URL || "https://toncenter.com/api/v2/jsonRPC",
+        apiKey: process.env.TON_API_KEY,
+      });
+      const balanceNano = await client.getBalance(Address.parse(wallet));
+      const balanceTon = Number(fromNano(balanceNano));
+      const gasReserve = await ton.getGasReservePerPlayerTon();
+      const requiredTon = stake + gasReserve + 0.05;
+      return res.json({
+        wallet,
+        balanceTon,
+        requiredTon,
+        gasReserveTon: gasReserve,
+        ready: balanceTon >= requiredTon,
+        message: balanceTon >= requiredTon
+          ? null
+          : `Wallet has ${balanceTon} TON; needs ≥ ${requiredTon}`,
+      });
+    } catch (err: any) {
+      console.error("[ton/readiness] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Readiness check failed" });
+    }
+  });
+
+  /**
+   * POST /api/ton/deposit-info
+   * Body: { matchId }
+   *
+   * Server-side flow:
+   *   1. Validate the match is a TON match with both player addresses set.
+   *   2. Call PrepareMatch on-chain (idempotent — guarded by a Redis flag)
+   *      so the contract knows about the match before deposits arrive.
+   *   3. Return the deposit instructions: contract address, exact amount in
+   *      nanotons, and the base64 PlayerDeposit BOC payload the client must
+   *      attach to its TonConnect transaction.
+   */
+  app.post("/api/ton/deposit-info", async (req, res) => {
+    const { matchId } = req.body ?? {};
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.stake || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+      if (String(matchData.asset) !== "TON") {
+        return res.status(400).json({ error: `Asset '${matchData.asset}' is not TON` });
+      }
+      if (!matchData.addr1 || !matchData.addr2) {
+        return res.status(404).json({ error: "Match missing wallet addresses" });
+      }
+
+      const player1 = String(matchData.addr1);
+      const player2 = String(matchData.addr2);
+      const stakeNum = Number(matchData.stake);
+
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+
+      // Idempotent PrepareMatch — state-based, with a short Redis lock to
+      // avoid two concurrent requests both calling PrepareMatch in flight.
+      // The on-chain getMatch is the source of truth: tonOracle.prepareMatch
+      // itself short-circuits when the match already exists, so even if the
+      // lock expires we can never accidentally double-prepare.
+      // We MUST NOT return deposit instructions until the match is visible
+      // on-chain — otherwise the player will sign a PlayerDeposit tx that
+      // bounces with "Match not prepared" and burns their gas.
+      const prepLockKey = `ton_prepare_lock:${matchId}`;
+      let confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
+      if (!confirmed) {
+        const claimed = await redis.set(prepLockKey, "1", { ex: 120, nx: true });
+        if (claimed) {
+          try {
+            await ton.prepareMatch({
+              matchId,
+              player1,
+              player2,
+              stakeTon: stakeNum,
+            });
+            confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
+          } finally {
+            await redis.del(prepLockKey);
+          }
+        } else {
+          // Another request is in-flight. Wait briefly for them, then
+          // re-check. If still not visible, bail with a 409 so the client
+          // retries — never return a deposit payload for an unprepared match.
+          for (let i = 0; i < 12; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
+            if (confirmed) break;
+          }
+        }
+      }
+      if (!confirmed) {
+        return res.status(409).json({
+          error: "ton_prepare_pending",
+          message: "PrepareMatch in flight or unconfirmed — retry shortly.",
+        });
+      }
+
+      const gasReserve = await ton.getGasReservePerPlayerTon();
+      const amountTon = stakeNum + gasReserve;
+      const amountNano = BigInt(Math.round(amountTon * 1e9)).toString();
+      const payloadBoc = ton.encodePlayerDepositPayload(matchId);
+      const validUntilSec = Math.floor(Date.now() / 1000) + 15 * 60;
+
+      console.log(
+        `[ton/deposit-info] match=${matchId} amount=${amountTon} TON (stake=${stakeNum} + gas=${gasReserve})`
+      );
+      return res.json({
+        matchId,
+        escrowAddress: ton.escrowAddressFriendly,
+        amountNano,
+        amountTon,
+        gasReserveTon: gasReserve,
+        payloadBoc,
+        validUntilSec,
+      });
+    } catch (err: any) {
+      console.error("[ton/deposit-info] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to build deposit info" });
+    }
+  });
+
+  /**
+   * GET /api/ton/match-status/:matchId
+   * Polled by the client until the on-chain match flips to ACTIVE (= both
+   * players have funded). When that happens we also fire match-funded so
+   * the existing socket-based gameplay gate releases.
+   */
+  app.get("/api/ton/match-status/:matchId", async (req, res) => {
+    const { matchId } = req.params;
+    if (!matchId) return res.status(400).json({ error: "matchId required" });
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+      if (String(matchData.asset) !== "TON") {
+        return res.status(400).json({ error: "Not a TON match" });
+      }
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+      const m = await ton.getMatchOnChain(matchId);
+      const status = m?.status ?? 0;
+      const statusLabel = ["none", "pending", "active", "settled", "cancelled"][status] ?? "unknown";
+
+      // Once the match is active and we haven't already fired match-funded,
+      // emit it so the gameplay flow proceeds the same way as for EVM/Tron.
+      if (status === 2) {
+        const fundedKey = `ton_funded_emitted:${matchId}`;
+        const first = await redis.set(fundedKey, "1", { ex: 60 * 60 * 24, nx: true });
+        if (first) {
+          try {
+            const { markMatchFunded } = await import("./socket");
+            markMatchFunded(matchId);
+            io.to(`match:${matchId}`).emit("match-funded", {
+              matchId,
+              chain: "TON",
+              player1: matchData.addr1,
+              player2: matchData.addr2,
+            });
+            console.log(`[ton/match-status] match-funded emitted for ${matchId}`);
+          } catch (e: any) {
+            console.error("[ton/match-status] failed to emit match-funded:", e?.message || e);
+          }
+        }
+      }
+
+      return res.json({
+        matchId,
+        chain: "TON",
+        status,
+        statusLabel,
+        p1Funded: m?.p1Funded ?? false,
+        p2Funded: m?.p2Funded ?? false,
+      });
+    } catch (err: any) {
+      console.error("[ton/match-status] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Status lookup failed" });
+    }
+  });
+
+  /**
+   * POST /api/ton/notify-deposit
+   * Optional client breadcrumb so server logs can correlate the player's
+   * TonConnect tx boc with the matchId. Polling /api/ton/match-status is
+   * the source of truth — this endpoint is purely informational.
+   */
+  app.post("/api/ton/notify-deposit", async (req, res) => {
+    const { matchId, txInfo } = req.body ?? {};
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+    console.log(`[ton/notify-deposit] match=${matchId} txInfo=${JSON.stringify(txInfo || {})}`);
+    return res.json({ ok: true });
   });
 
   return httpServer;

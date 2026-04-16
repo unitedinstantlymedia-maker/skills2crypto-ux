@@ -223,6 +223,19 @@ async function settleMatchOnChain(
       return;
     }
 
+    if (asset === "TON") {
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+      // For non-NORMAL reasons (draw / disconnect) the contract ignores the
+      // winner field — pass the resolved winner string regardless; tonOracle
+      // will substitute a safe placeholder when reason !== 0.
+      const winnerFriendly = winner === ZERO_ADDRESS ? "" : winner;
+      console.log(`[settlement][TON] settling match ${matchId}: winner=${winnerFriendly}, reason=${reason}`);
+      const result = await ton.submitSettlement(matchId, winnerFriendly, reason);
+      console.log(`[settlement][TON] match ${matchId} settled: tx=${result.txHash}`);
+      return;
+    }
+
     const { createEvmOracle, chainForAsset } = await import("./oracle/evmOracle");
     const chain = chainForAsset(asset || "");
     if (!chain) {
