@@ -59,7 +59,7 @@ async function storeGameResult(
   reason: string
 ): Promise<{ result: GameResult; isFirst: boolean } | null> {
   const dedupKey = `gameresult_lock:${matchId}`;
-  const isFirst = await redis.set(dedupKey, "1", { ex: 600, nx: true });
+  const isFirst = await redis.set(dedupKey, "1", { ex: 7200, nx: true });
   if (!isFirst) {
     console.log("[socket] duplicate game-end ignored for match:", matchId);
     const cached = gameResults.get(matchId);
@@ -144,7 +144,7 @@ async function settleMatchOnChain(
   gameReason: string
 ): Promise<void> {
   const lockKey = `settle_lock:${matchId}`;
-  const locked = await redis.set(lockKey, "1", { ex: 300, nx: true });
+  const locked = await redis.set(lockKey, "1", { ex: 7200, nx: true });
   if (!locked) {
     console.log("[settlement] already in progress for match:", matchId);
     return;
