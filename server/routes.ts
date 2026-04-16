@@ -448,82 +448,6 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/session/permit-nonce", async (req, res) => {
-    const owner = req.query.owner as string;
-    const token = req.query.token as string;
-
-    if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
-      return res.status(400).json({ error: "Invalid owner address" });
-    }
-    if (!token || !/^0x[0-9a-fA-F]{40}$/.test(token)) {
-      return res.status(400).json({ error: "Invalid token address" });
-    }
-
-    try {
-      const { JsonRpcProvider, Contract } = await import("ethers");
-      const rpcUrl = process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org";
-      const provider = new JsonRpcProvider(rpcUrl);
-
-      const erc20PermitAbi = [
-        "function nonces(address owner) view returns (uint256)",
-        "function name() view returns (string)",
-      ];
-      const tokenContract = new Contract(token, erc20PermitAbi, provider);
-
-      let nonce = "0";
-      let tokenName = "Tether USD";
-      try {
-        nonce = (await tokenContract.nonces(owner)).toString();
-      } catch {
-        console.warn("[permit-nonce] Token may not support EIP-2612 nonces");
-      }
-      try {
-        tokenName = await tokenContract.name();
-      } catch {
-        console.warn("[permit-nonce] Could not read token name");
-      }
-
-      return res.json({ nonce, tokenName });
-    } catch (err: any) {
-      console.error("[permit-nonce] Error:", err.message);
-      return res.status(500).json({ error: "Failed to fetch permit nonce" });
-    }
-  });
-
-  app.post("/api/session/permit", async (req, res) => {
-    const { owner, spender, deadline, v, r, s, nonce } = req.body ?? {};
-
-    if (!owner || !/^0x[0-9a-fA-F]{40}$/.test(owner)) {
-      return res.status(400).json({ error: "Invalid owner address" });
-    }
-    if (!spender || !/^0x[0-9a-fA-F]{40}$/.test(spender)) {
-      return res.status(400).json({ error: "Invalid spender address" });
-    }
-    if (!deadline || !r || !s || v === undefined) {
-      return res.status(400).json({ error: "Missing permit fields" });
-    }
-
-    const expectedEscrow = process.env.BSC_ESCROW_ADDRESS;
-    if (expectedEscrow && spender.toLowerCase() !== expectedEscrow.toLowerCase()) {
-      return res.status(400).json({ error: "Spender must be the escrow contract" });
-    }
-
-    try {
-      const permitKey = `permit:${owner.toLowerCase()}:${spender.toLowerCase()}`;
-      await redis.set(
-        permitKey,
-        JSON.stringify({ owner, spender, deadline, v, r, s, nonce }),
-        { ex: 86400 * 30 }
-      );
-
-      console.log(`[session/permit] Stored permit for ${owner} → spender ${spender}`);
-      return res.json({ success: true });
-    } catch (err: any) {
-      console.error("[session/permit] Error:", err.message);
-      return res.status(500).json({ error: "Failed to store permit" });
-    }
-  });
-
   app.post("/api/oracle/submit-deposit", async (req, res) => {
     const { matchId } = req.body ?? {};
 
@@ -543,14 +467,30 @@ export async function registerRoutes(
 
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
-      if (!matchData || !matchData.addr1 || !matchData.addr2 || !matchData.stake || !matchData.asset) {
+      if (!matchData || !matchData.stake || !matchData.asset) {
         await redis.del(lockKey);
-        return res.status(404).json({ error: "Match not found or missing wallet addresses" });
+        return res.status(404).json({ error: "Match not found" });
+      }
+
+      const asset = String(matchData.asset);
+
+      // Asset gating MUST come before address validation so that
+      // USDT (Tron base58) / TON (non-EVM) matches get a clear
+      // "wrong endpoint" error instead of "invalid EVM address".
+      if (asset !== "BNB" && asset !== "ETH") {
+        await redis.del(lockKey);
+        return res.status(400).json({
+          error: `EVM oracle only supports BNB/ETH native deposits. Asset '${asset}' must use its dedicated chain (USDT → Tron, TON → TON).`,
+        });
+      }
+
+      if (!matchData.addr1 || !matchData.addr2) {
+        await redis.del(lockKey);
+        return res.status(404).json({ error: "Match missing wallet addresses" });
       }
 
       const player1 = String(matchData.addr1);
       const player2 = String(matchData.addr2);
-      const asset = String(matchData.asset);
       const stakeNum = Number(matchData.stake);
 
       if (!/^0x[0-9a-fA-F]{40}$/.test(player1) || !/^0x[0-9a-fA-F]{40}$/.test(player2)) {
@@ -558,11 +498,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid player addresses in match data" });
       }
 
-      const isNative = asset === "BNB" || asset === "ETH";
       const decimals = 18;
       const { ethers: ethersLib } = await import("ethers");
       const stakeBigInt = ethersLib.parseUnits(String(stakeNum), decimals);
-      const assetTypeNum = isNative ? 1 : 0;
+      const assetTypeNum = 1; // Native
 
       const { createEvmOracle } = await import("./oracle/evmOracle");
       const oracle = createEvmOracle();
@@ -571,7 +510,7 @@ export async function registerRoutes(
       console.log(`[oracle/submit-deposit]   player1: ${player1}, player2: ${player2}`);
       console.log(`[oracle/submit-deposit]   stake: ${stakeNum} ${asset} (${stakeBigInt.toString()} wei)`);
 
-      const preflight = await oracle.preflightDeposit(player1, player2, stakeBigInt, isNative);
+      const preflight = await oracle.preflightDeposit(player1, player2, stakeBigInt);
       if (!preflight.ok) {
         await redis.del(lockKey);
         console.error(`[oracle/submit-deposit] Preflight failed: ${preflight.reason}`);
@@ -581,15 +520,10 @@ export async function registerRoutes(
       const sig1 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player1);
       const sig2 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player2);
 
-      let result;
-      if (!isNative) {
-        result = await oracle.submitDepositWithPermit(matchId, stakeBigInt, player1, player2, sig1, sig2, null, null);
-      } else {
-        const gasReserve = await oracle.getGasReserveEstimate();
-        const totalPerPlayer = stakeBigInt + BigInt(gasReserve);
-        const totalValue = totalPerPlayer * 2n;
-        result = await oracle.submitDepositNative(matchId, stakeBigInt, player1, player2, sig1, sig2, totalValue);
-      }
+      const gasReserve = await oracle.getGasReserveEstimate();
+      const totalPerPlayer = stakeBigInt + BigInt(gasReserve);
+      const totalValue = totalPerPlayer * 2n;
+      const result = await oracle.submitDepositNative(matchId, stakeBigInt, player1, player2, sig1, sig2, totalValue);
 
       await redis.set(`deposit_tx:${matchId}`, result.txHash, { ex: 86400 });
 

@@ -28,13 +28,16 @@ export default function Lobby() {
   const [challengeLink, setChallengeLink] = useState("");
   const { toast } = useToast();
   const { t } = useLanguage();
-  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTonConnected, connectTonWallet } = useRealWallet();
+  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTronLinkInstalled, connectTronLink, isTonConnected, connectTonWallet } = useRealWallet();
 
-  const requiredChain = state.selectedAsset !== 'TON' ? REQUIRED_CHAIN[state.selectedAsset] : null;
+  const requiredChain = (state.selectedAsset === 'BNB' || state.selectedAsset === 'ETH')
+    ? REQUIRED_CHAIN[state.selectedAsset]
+    : null;
   const isAnyConnected = isEvmConnected || isTronConnected || isTonConnected;
-  const needsNetworkSwitch = state.selectedAsset === 'TON'
-    ? !isTonConnected
-    : isAnyConnected && !isCorrectChainForAsset(state.selectedAsset);
+  const needsNetworkSwitch =
+    state.selectedAsset === 'TON' ? !isTonConnected :
+    state.selectedAsset === 'USDT' ? !isTronConnected :
+    isAnyConnected && !isCorrectChainForAsset(state.selectedAsset);
 
   useEffect(() => {
     if (!state.selectedGame) {
@@ -83,9 +86,14 @@ export default function Lobby() {
     }
 
     if (needsNetworkSwitch) {
-      const desc = state.selectedAsset === 'TON'
-        ? `${t('Connect your TON wallet to play with', 'Connect your TON wallet to play with')} TON.`
-        : `${t('Please switch to', 'Please switch to')} ${requiredChain?.name ?? ''} ${t('to play with', 'to play with')} ${state.selectedAsset}.`;
+      let desc: string;
+      if (state.selectedAsset === 'TON') {
+        desc = `${t('Connect your TON wallet to play with', 'Connect your TON wallet to play with')} TON.`;
+      } else if (state.selectedAsset === 'USDT') {
+        desc = `${t('Connect TronLink', 'Connect TronLink')} ${t('to play with', 'to play with')} USDT.`;
+      } else {
+        desc = `${t('Please switch to', 'Please switch to')} ${requiredChain?.name ?? ''} ${t('to play with', 'to play with')} ${state.selectedAsset}.`;
+      }
       toast({
         title: t("Wrong Network", "Wrong Network"),
         description: desc,
@@ -216,7 +224,33 @@ export default function Lobby() {
           </Card>
         )}
 
-        {needsNetworkSwitch && state.selectedAsset !== 'TON' && requiredChain && (
+        {needsNetworkSwitch && state.selectedAsset === 'USDT' && (
+          <Card className="bg-red-500/5 border-red-500/30 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm text-red-200">
+                  {t('Connect TronLink')} {t('to play with')} <span className="font-bold text-white">USDT</span> (TRC-20)
+                </p>
+                {isTronLinkInstalled ? (
+                  <Button
+                    size="sm"
+                    onClick={connectTronLink}
+                    className="h-9 px-4 text-sm font-display font-bold uppercase tracking-wider bg-red-500 text-white hover:bg-red-400"
+                  >
+                    {t('Connect TronLink')}
+                  </Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t('TronLink extension not detected', 'TronLink extension not detected')}
+                  </p>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {needsNetworkSwitch && state.selectedAsset !== 'TON' && state.selectedAsset !== 'USDT' && requiredChain && (
           <Card className="bg-amber-500/5 border-amber-500/30 p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />

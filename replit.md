@@ -320,6 +320,17 @@ npm run db:push     # Push database schema
 5. **Client settlement clarified** - `EvmEscrowAdapter.settleMatch` calculates expected payout/fee locally for UI display but notes that actual settlement is handled server-side.
 6. **Contract validation note** - If the deployed contract at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` was deployed from an older Solidity source without `getDomainSeparator()` or `depositUSDTWithPermit()`, redeployment is required. The startup diagnostic will detect this and log a clear error.
 
+### BSC USDT Removed — USDT Moves to Tron Only (Apr 16, 2026)
+1. **No USDT on BSC** — All BSC USDT (BEP-20) support removed from frontend, backend, and oracle. USDT is now exclusively a TRC-20 asset on the Tron network. EVM oracle on BSC handles only BNB native deposits.
+2. **Frontend removed** — Deleted `client/src/core/wallet/useUsdtApproval.ts` and `useUsdtPermit.ts`. WalletProvider no longer reads BSC USDT balance, no `usdtBscBalance` context value, no on-chain approval flow. `REQUIRED_CHAIN` reduced to `{ BNB, ETH }` only — USDT routes through TronLink, TON through TonConnect.
+3. **Onboarding simplified** — `SessionKeyDialog` now has 2 steps (Sign session key → Register on-chain). `OnboardingStep` type dropped `'approving'`. No more USDT approval transaction during EVM onboarding.
+4. **Wallet page** — USDT card now shows only Tron (TRC-20) balance with a "Connect TronLink" prompt when extension is detected but not connected. EVM card title updated to "EVM (ETH / BNB)".
+5. **Lobby** — Selecting USDT triggers a Tron-specific banner ("Connect TronLink to play with USDT"); BNB/ETH still show the network-switch banner.
+6. **Backend removed** — `GET /api/session/permit-nonce` and `POST /api/session/permit` deleted from `server/routes.ts`. The `/api/oracle/submit-deposit` endpoint now rejects any non-BNB/ETH asset with HTTP 400 and the message "EVM oracle only supports BNB/ETH native deposits".
+7. **EVM oracle slimmed** — `submitDeposit`, `submitDepositWithPermit`, `getUsdtAllowance`, and `PermitData` interface removed from `server/oracle/evmOracle.ts`. ABI no longer references `depositUSDT`, `depositUSDTWithPermit`, or `usdtToken`. `preflightDeposit` simplified to just session-key checks (USDT allowance branch removed).
+8. **Contracts untouched** — `contracts/evm/Skills2CryptoEscrow.sol` still defines `depositUSDT` / `depositUSDTWithPermit`; the source is preserved for future Tron USDT contract deployment (Task #13). The deployed BSC contract simply leaves those functions unused.
+9. **Follow-up tasks** — Task #12 (player-submitted native BNB+ETH deposits) and Task #13 (Tron USDT TRC-20 oracle integration) build on this clean baseline.
+
 ### Deposit Pipeline Fix — Permit & Session (Apr 16, 2026)
 1. **BSC USDT decimals fixed** — BSC USDT (0x55d398326f99059fF775485246999027B3197955) uses 18 decimals, not 6. Changed `routes.ts` to always use 18 decimals for stake conversion. Uses `ethers.parseUnits()` for precision safety (avoids floating point errors beyond Number.MAX_SAFE_INTEGER).
 2. **Session key maxStake fixed** — Changed from `parseUnits('10000', 6)` (10 billion) to `parseUnits('1000000', 18)` (10^24). Old limit was too small for 18-decimal native coins (0.0075 BNB = 7.5 * 10^15 > 10^10). Stale cached sessions with old maxStake are auto-invalidated from localStorage.

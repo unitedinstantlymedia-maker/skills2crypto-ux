@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ShieldCheck, AlertTriangle, Zap, Gamepad2, CheckCircle2 } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 
-type OnboardingStep = 'ready' | 'signing' | 'registering' | 'approving' | 'done';
+type OnboardingStep = 'ready' | 'signing' | 'registering' | 'done';
 
 interface SessionKeyDialogProps {
   open: boolean;
@@ -21,7 +21,7 @@ export function SessionKeyDialog({
   error,
 }: SessionKeyDialogProps) {
   const { t } = useLanguage();
-  const isLoading = step === 'signing' || step === 'registering' || step === 'approving';
+  const isLoading = step === 'signing' || step === 'registering';
 
   const getButtonText = () => {
     switch (step) {
@@ -29,8 +29,6 @@ export function SessionKeyDialog({
         return t('Signing...', 'Signing...');
       case 'registering':
         return t('Registering...', 'Registering...');
-      case 'approving':
-        return t('Approving USDT...', 'Approving USDT...');
       default:
         return t('Authorize', 'Authorize');
     }
@@ -69,35 +67,19 @@ export function SessionKeyDialog({
           {isLoading && (
             <div className="space-y-2 pt-1">
               <div className="flex items-center gap-2 text-xs text-zinc-400">
-                {(step === 'signing' || step === 'registering' || step === 'approving') && (
-                  <>
-                    {step === 'signing' ? (
-                      <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                    ) : (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    )}
-                    <span className={step !== 'signing' ? 'text-emerald-400' : ''}>
-                      {t('Step 1: Session key', 'Step 1: Session key')}
-                    </span>
-                  </>
+                {step === 'signing' ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                 )}
+                <span className={step !== 'signing' ? 'text-emerald-400' : ''}>
+                  {t('Step 1: Session key', 'Step 1: Session key')}
+                </span>
               </div>
-              {(step === 'registering' || step === 'approving') && (
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  {step === 'registering' ? (
-                    <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                  ) : (
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  )}
-                  <span className={step === 'approving' ? 'text-emerald-400' : ''}>
-                    {t('Step 2: On-chain registration', 'Step 2: On-chain registration')}
-                  </span>
-                </div>
-              )}
-              {step === 'approving' && (
+              {step === 'registering' && (
                 <div className="flex items-center gap-2 text-xs text-zinc-400">
                   <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                  <span>{t('Step 3: USDT approval', 'Step 3: USDT approval')}</span>
+                  <span>{t('Step 2: On-chain registration', 'Step 2: On-chain registration')}</span>
                 </div>
               )}
             </div>

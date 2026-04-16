@@ -3,35 +3,20 @@ import { WagmiProvider } from 'wagmi';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { mainnet, bsc } from '@reown/appkit/networks';
 import { useAppKit, useAppKitAccount, useAppKitNetwork, useDisconnect as useAppKitDisconnect } from '@reown/appkit/react';
-import { useBalance, useReadContract } from 'wagmi';
+import { useBalance } from 'wagmi';
 import { wagmiConfig, appKit } from '@/config/wagmi';
 import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
 import { useSessionKey } from './useSessionKey';
-import { useUsdtApproval } from './useUsdtApproval';
-import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
 import type { Asset } from '@/core/types';
 
-type OnboardingStep = 'ready' | 'signing' | 'registering' | 'approving' | 'done';
+type OnboardingStep = 'ready' | 'signing' | 'registering' | 'done';
 
-const USDT_BSC_ADDRESS = '0x55d398326f99059fF775485246999027B3197955' as const;
-
-const ERC20_BALANCE_ABI = [
-  {
-    inputs: [{ name: 'account', type: 'address' }],
-    name: 'balanceOf',
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
-
-export const REQUIRED_CHAIN: Record<Exclude<Asset, 'TON'>, { chainId: number; name: string }> = {
-  USDT: { chainId: 56, name: 'BNB Smart Chain' },
+export const REQUIRED_CHAIN: Record<'BNB' | 'ETH', { chainId: number; name: string }> = {
   BNB: { chainId: 56, name: 'BNB Smart Chain' },
   ETH: { chainId: 1, name: 'Ethereum' },
 };
@@ -55,7 +40,6 @@ interface RealWalletContextValue {
   isTronConnecting: boolean;
   connectTronLink: () => Promise<void>;
   disconnectTronLink: () => void;
-  usdtBscBalance: number;
   isTonConnected: boolean;
   tonAddress: string | null;
   tonBalance: number;
@@ -93,17 +77,8 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     isSigningSession,
     isRegistering,
     sessionError,
-    escrowAddress: sessionEscrowAddress,
     promptSessionKey: doPromptSessionKey,
   } = useSessionKey();
-
-  const {
-    hasAllowance: hasUsdtAllowance,
-    isApproving: isApprovingUsdt,
-    approvalError,
-    approveUsdt,
-    checkAllowance,
-  } = useUsdtApproval();
 
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('ready');
 
@@ -140,18 +115,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     query: { enabled: !!evmAddr },
   });
 
-  const usdtBscResult = useReadContract({
-    address: USDT_BSC_ADDRESS,
-    abi: ERC20_BALANCE_ABI,
-    functionName: 'balanceOf',
-    args: evmAddr ? [evmAddr] : undefined,
-    chainId: bsc.id,
-    query: { enabled: !!evmAddr, refetchInterval: 30000 },
-  });
-
-  const usdtBsc = usdtBscResult.data ? parseFloat(formatUnits(usdtBscResult.data, 18)) : 0;
-  const usdtTotal = usdtBsc + usdtTrc20Balance;
-
   const isAnyConnected = isEvmConnected || isTronConnected || isTonConnected;
   const primaryAddress = evmAddress ?? tronAddress ?? tonAddress ?? null;
 
@@ -167,12 +130,12 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
       balances: {
         ETH: ethBalance.data ? parseFloat(ethBalance.data.formatted) : 0,
         BNB: bnbBalance.data ? parseFloat(bnbBalance.data.formatted) : 0,
-        USDT: usdtTotal,
+        USDT: usdtTrc20Balance,
         TON: tonBalance,
       },
       nickname: primaryAddress ? localStorage.getItem(`nickname_${primaryAddress}`) : null,
     });
-  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, usdtTotal, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected, isTonConnected, tonAddress, tonBalance]);
+  }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected, isTonConnected, tonAddress, tonBalance]);
 
   useEffect(() => {
     if (isAnyConnected && primaryAddress && !hasPromptedNickname.current) {
@@ -220,46 +183,13 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isSigningSession) setOnboardingStep('signing');
     else if (isRegistering) setOnboardingStep('registering');
-    else if (isApprovingUsdt) setOnboardingStep('approving');
-    else if (hasSessionKey && hasUsdtAllowance && sessionDialogOpen) {
+    else if (hasSessionKey && sessionDialogOpen) {
       setOnboardingStep('done');
       setSessionDialogOpen(false);
-    } else if (!isSigningSession && !isRegistering && !isApprovingUsdt && onboardingStep !== 'done') {
+    } else if (!isSigningSession && !isRegistering && onboardingStep !== 'done') {
       setOnboardingStep('ready');
     }
-  }, [isSigningSession, isRegistering, isApprovingUsdt, hasSessionKey, hasUsdtAllowance, sessionDialogOpen]);
-
-  const approvalTriggered = useRef(false);
-
-  useEffect(() => {
-    const escrow = sessionEscrowAddress || import.meta.env.VITE_BSC_ESCROW_ADDRESS;
-    if (escrow && isEvmConnected && evmAddress) {
-      checkAllowance(escrow);
-    }
-  }, [sessionEscrowAddress, isEvmConnected, evmAddress, checkAllowance]);
-
-  useEffect(() => {
-    const escrow = sessionEscrowAddress || import.meta.env.VITE_BSC_ESCROW_ADDRESS;
-    if (hasSessionKey && escrow && !hasUsdtAllowance && sessionDialogOpen && !isApprovingUsdt && !approvalError && !approvalTriggered.current) {
-      approvalTriggered.current = true;
-      setOnboardingStep('approving');
-      approveUsdt(escrow);
-    }
-  }, [hasSessionKey, sessionEscrowAddress, hasUsdtAllowance, sessionDialogOpen, isApprovingUsdt, approvalError, approveUsdt]);
-
-  useEffect(() => {
-    if (!sessionDialogOpen) {
-      approvalTriggered.current = false;
-    }
-  }, [sessionDialogOpen]);
-
-  useEffect(() => {
-    if (hasSessionKey && hasUsdtAllowance && sessionDialogOpen) {
-      const timer = setTimeout(() => setSessionDialogOpen(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [hasSessionKey, hasUsdtAllowance, sessionDialogOpen]);
-
+  }, [isSigningSession, isRegistering, hasSessionKey, sessionDialogOpen]);
 
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
@@ -307,10 +237,12 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
 
   const isCorrectChainForAsset = useCallback((asset: Asset) => {
     if (asset === 'TON') return isTonConnected;
-    if (asset === 'USDT' && isTronConnected) return true;
+    if (asset === 'USDT') return isTronConnected;
     if (!currentChainId) return false;
-    const required = REQUIRED_CHAIN[asset];
-    return Number(currentChainId) === required.chainId;
+    if (asset === 'BNB' || asset === 'ETH') {
+      return Number(currentChainId) === REQUIRED_CHAIN[asset].chainId;
+    }
+    return false;
   }, [currentChainId, isTronConnected, isTonConnected]);
 
   useEffect(() => {
@@ -340,7 +272,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     isTronConnecting,
     connectTronLink,
     disconnectTronLink,
-    usdtBscBalance: usdtBsc,
     isTonConnected,
     tonAddress,
     tonBalance,
@@ -364,7 +295,7 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
         onOpenChange={setSessionDialogOpen}
         onSign={handleSessionSign}
         step={onboardingStep}
-        error={sessionError || approvalError}
+        error={sessionError}
       />
     </RealWalletContext.Provider>
   );

@@ -6,7 +6,6 @@ import { useLanguage } from "@/context/LanguageContext";
 import { useRealWallet, REQUIRED_CHAIN } from "@/core/wallet/WalletProvider";
 import { useState } from "react";
 import { NicknameDialog } from "@/components/wallet/NicknameDialog";
-import type { Asset } from "@/core/types";
 
 export default function Wallet() {
   const { state } = useGame();
@@ -30,7 +29,6 @@ export default function Wallet() {
     isTronConnecting,
     connectTronLink,
     disconnectTronLink,
-    usdtBscBalance,
     isTonConnected,
     tonAddress,
     tonBalance,
@@ -149,7 +147,7 @@ export default function Wallet() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4 text-blue-400" />
-                    <CardTitle className="text-xs text-blue-400 font-bold uppercase tracking-wider">EVM (ETH / BNB / USDT)</CardTitle>
+                    <CardTitle className="text-xs text-blue-400 font-bold uppercase tracking-wider">EVM (ETH / BNB)</CardTitle>
                   </div>
                   <div className="flex items-center gap-2 font-mono text-sm text-white">
                     {shortenAddr(evmAddress)}
@@ -308,38 +306,27 @@ export default function Wallet() {
                 </svg>
                 <div>
                   <span className="font-display font-bold">USDT</span>
-                  <div className="text-[10px] text-green-400">{t('Multi-Network')}</div>
+                  <div className="text-[10px] text-red-400">Tron (TRC-20)</div>
                 </div>
               </div>
               <div className="font-mono font-bold text-lg">
-                {(wallet.balances.USDT ?? 0).toFixed(4)}
+                {usdtTrc20Balance.toFixed(4)}
               </div>
             </div>
 
-            <div className="space-y-1.5 pl-11">
-              <div className="flex justify-between text-xs">
-                <span className="text-yellow-400/70">BNB Smart Chain (BEP-20)</span>
-                <span className="font-mono text-muted-foreground">{usdtBscBalance.toFixed(4)}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-red-400/70">Tron (TRC-20)</span>
-                <span className="font-mono text-muted-foreground">{usdtTrc20Balance.toFixed(4)}</span>
-              </div>
-            </div>
-
-            {isEvmConnected && !isCorrectChainForAsset('USDT') && !isTronConnected && (
-              <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
-                <span className="text-[11px] text-amber-400">
-                  {t('Switch to')} {REQUIRED_CHAIN.USDT.name} {t('to play with')} USDT
+            {!isTronConnected && isTronLinkInstalled && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-red-500/10 border border-red-500/20">
+                <span className="text-[11px] text-red-400">
+                  {t('Connect TronLink')} {t('to play with')} USDT
                 </span>
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={isSwitchingChain}
-                  onClick={() => switchToChain(REQUIRED_CHAIN.USDT.chainId)}
-                  className="h-7 text-[10px] px-3 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300 whitespace-nowrap"
+                  disabled={isTronConnecting}
+                  onClick={connectTronLink}
+                  className="h-7 text-[10px] px-3 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300 whitespace-nowrap"
                 >
-                  {isSwitchingChain ? t('Switching...') : `${t('Switch to')} ${REQUIRED_CHAIN.USDT.name}`}
+                  {isTronConnecting ? t('Connecting...') : t('Connect TronLink')}
                 </Button>
               </div>
             )}
