@@ -61,7 +61,7 @@ export async function findOrCreateMatch(
         createdAt: String(Date.now()),
         status: "matched",
       });
-      await redis.expire(`match:${matchId}`, 60 * 10);
+      await redis.expire(`match:${matchId}`, 60 * 120);
 
       return {
         status: "matched",

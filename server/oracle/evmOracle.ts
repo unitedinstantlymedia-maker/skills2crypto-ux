@@ -14,6 +14,12 @@ const ESCROW_ABI = [
   "function depositNative(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2) payable",
   "function settleMatch(bytes32 matchId, address winner, uint8 reason)",
   "function updateGasPrice(uint256 _gasPricePerGasUnit)",
+  "function getDomainSeparator() view returns (bytes32)",
+  "function oracle() view returns (address)",
+  "function owner() view returns (address)",
+  "function usdtToken() view returns (address)",
+  "function platformWallet() view returns (address)",
+  "function depositNonces(address player) view returns (uint256)",
   "function getMatch(bytes32 matchId) view returns (tuple(bytes32 matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer, uint8 status))",
   "function getGasReserveEstimate() view returns (uint256)",
   "function getDepositNonce(address player) view returns (uint256)",
@@ -92,6 +98,8 @@ function redactUrl(url: string): string {
   }
 }
 
+let _startupDiagRun = false;
+
 export function createEvmOracle() {
   const privateKey = loadEnvOrThrow("ORACLE_PRIVATE_KEY");
   const rpcUrl = loadEnvOrThrow("BSC_RPC_URL");
@@ -112,6 +120,33 @@ export function createEvmOracle() {
   console.log(`[EvmOracle] Escrow contract: ${escrowAddress}`);
   console.log(`[EvmOracle] RPC: ${redactUrl(rpcUrl)}`);
   console.log(`[EvmOracle] Expected chain ID: ${EXPECTED_CHAIN_ID}`);
+
+  if (!_startupDiagRun) {
+    _startupDiagRun = true;
+    (async () => {
+      try {
+        const network = await provider.getNetwork();
+        console.log(`[EvmOracle] [startup] Connected to chain ${network.chainId}`);
+        const balance = await provider.getBalance(wallet.address);
+        console.log(`[EvmOracle] [startup] Oracle BNB balance: ${ethers.formatEther(balance)}`);
+        if (balance < ethers.parseEther("0.001")) {
+          console.warn(`[EvmOracle] [startup] WARNING: Oracle BNB balance too low for gas!`);
+        }
+        const domainSep = await escrow.getDomainSeparator();
+        console.log(`[EvmOracle] [startup] Contract getDomainSeparator() OK: ${domainSep.slice(0, 18)}...`);
+        const onChainOracle = await escrow.oracle();
+        console.log(`[EvmOracle] [startup] Contract oracle address: ${onChainOracle}`);
+        if (onChainOracle.toLowerCase() !== wallet.address.toLowerCase()) {
+          console.error(`[EvmOracle] [startup] MISMATCH: Contract oracle is ${onChainOracle}, but our wallet is ${wallet.address}`);
+        } else {
+          console.log(`[EvmOracle] [startup] Oracle address matches — contract is ready`);
+        }
+      } catch (err: any) {
+        console.error(`[EvmOracle] [startup] Contract validation FAILED: ${err?.message || err}`);
+        console.error(`[EvmOracle] [startup] The deployed contract may be outdated. Redeployment may be needed.`);
+      }
+    })();
+  }
 
   async function verifyChainId(): Promise<void> {
     const network = await provider.getNetwork();

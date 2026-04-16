@@ -84,7 +84,7 @@ export class EvmEscrowAdapter {
       fee = 0;
     }
 
-    console.log(`[EvmEscrow] Settled match ${matchId}: ${result}, payout=${payout}, fee=${fee}`);
+    console.log(`[EvmEscrow] Match ${matchId} result: ${result} (settlement handled server-side), estimated payout=${payout}, fee=${fee}`);
     return { payout, fee };
   }
 }

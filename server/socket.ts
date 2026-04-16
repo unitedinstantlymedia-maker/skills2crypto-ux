@@ -57,7 +57,14 @@ async function storeGameResult(
   winnerId: string | null,
   loserId: string | null,
   reason: string
-): Promise<GameResult> {
+): Promise<GameResult | null> {
+  const dedupKey = `gameresult_lock:${matchId}`;
+  const isFirst = await redis.set(dedupKey, "1", { ex: 600, nx: true });
+  if (!isFirst) {
+    console.log("[socket] duplicate game-end ignored for match:", matchId);
+    return gameResults.get(matchId) || null;
+  }
+
   let resultType: 'win' | 'loss' | 'draw';
   if (winnerId && loserId) {
     resultType = 'win';
@@ -113,6 +120,10 @@ async function storeGameResult(
         timestamp,
       });
       console.log("[socket] match saved to database:", matchId);
+
+      settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
+        console.error("[socket] on-chain settlement failed:", matchId, err?.message || err);
+      });
     } else {
       console.warn("[socket] could not fetch match data from Redis for DB save:", matchId);
     }
@@ -121,6 +132,62 @@ async function storeGameResult(
   }
 
   return result;
+}
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+async function settleMatchOnChain(
+  matchId: string,
+  winnerId: string | null,
+  resultType: 'win' | 'loss' | 'draw',
+  gameReason: string
+): Promise<void> {
+  const lockKey = `settle_lock:${matchId}`;
+  const locked = await redis.set(lockKey, "1", { ex: 300, nx: true });
+  if (!locked) {
+    console.log("[settlement] already in progress for match:", matchId);
+    return;
+  }
+
+  try {
+    const matchData = await redis.hgetall(`match:${matchId}`);
+    const addr1 = matchData?.addr1 ? String(matchData.addr1) : null;
+    const addr2 = matchData?.addr2 ? String(matchData.addr2) : null;
+
+    if (!addr1 || !addr2) {
+      console.warn("[settlement] skipping — no wallet addresses for match:", matchId);
+      return;
+    }
+
+    const { createEvmOracle } = await import("./oracle/evmOracle");
+    const oracle = createEvmOracle();
+
+    let winner: string;
+    let reason: number;
+
+    const isDisconnect = gameReason === 'disconnect' || gameReason === 'forfeit' || gameReason === 'abandoned';
+
+    if (resultType === 'draw') {
+      winner = ZERO_ADDRESS;
+      reason = 1;
+    } else if (isDisconnect) {
+      winner = winnerId || ZERO_ADDRESS;
+      reason = 2;
+    } else if (resultType === 'win' && winnerId) {
+      winner = winnerId;
+      reason = 0;
+    } else {
+      winner = ZERO_ADDRESS;
+      reason = 2;
+    }
+
+    console.log(`[settlement] settling match ${matchId}: winner=${winner}, reason=${reason}`);
+    const result = await oracle.submitSettlement(matchId, winner, reason);
+    console.log(`[settlement] match ${matchId} settled on-chain: tx=${result.txHash}`);
+  } catch (err: any) {
+    console.error(`[settlement] match ${matchId} failed:`, err?.message || err);
+    await redis.del(lockKey);
+  }
 }
 
 interface TetrisRoom {
