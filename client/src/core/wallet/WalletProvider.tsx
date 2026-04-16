@@ -10,7 +10,7 @@ import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
 import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
 import { useSessionKey } from './useSessionKey';
-import { useUsdtPermit } from './useUsdtPermit';
+import { useUsdtApproval } from './useUsdtApproval';
 import { formatUnits } from 'viem';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
@@ -98,11 +98,12 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   } = useSessionKey();
 
   const {
-    hasPermit: hasUsdtAllowance,
-    isSigning: isApprovingUsdt,
-    permitError: approvalError,
-    signPermit: approveUsdt,
-  } = useUsdtPermit();
+    hasAllowance: hasUsdtAllowance,
+    isApproving: isApprovingUsdt,
+    approvalError,
+    approveUsdt,
+    checkAllowance,
+  } = useUsdtApproval();
 
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('ready');
 
@@ -231,10 +232,18 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const approvalTriggered = useRef(false);
 
   useEffect(() => {
-    if (hasSessionKey && sessionEscrowAddress && !hasUsdtAllowance && sessionDialogOpen && !isApprovingUsdt && !approvalError && !approvalTriggered.current) {
+    const escrow = sessionEscrowAddress || import.meta.env.VITE_BSC_ESCROW_ADDRESS;
+    if (escrow && isEvmConnected && evmAddress) {
+      checkAllowance(escrow);
+    }
+  }, [sessionEscrowAddress, isEvmConnected, evmAddress, checkAllowance]);
+
+  useEffect(() => {
+    const escrow = sessionEscrowAddress || import.meta.env.VITE_BSC_ESCROW_ADDRESS;
+    if (hasSessionKey && escrow && !hasUsdtAllowance && sessionDialogOpen && !isApprovingUsdt && !approvalError && !approvalTriggered.current) {
       approvalTriggered.current = true;
       setOnboardingStep('approving');
-      approveUsdt(sessionEscrowAddress);
+      approveUsdt(escrow);
     }
   }, [hasSessionKey, sessionEscrowAddress, hasUsdtAllowance, sessionDialogOpen, isApprovingUsdt, approvalError, approveUsdt]);
 

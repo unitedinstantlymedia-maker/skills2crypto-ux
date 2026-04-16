@@ -708,6 +708,71 @@ export function createEvmOracle() {
     return estimate.toString();
   }
 
+  async function getUsdtAllowance(owner: string): Promise<bigint> {
+    const USDT_ABI = ["function allowance(address owner, address spender) view returns (uint256)"];
+    const usdtAddr = await escrow.usdtToken();
+    const usdt = new Contract(usdtAddr, USDT_ABI, provider);
+    return usdt.allowance(owner, escrowAddress);
+  }
+
+  async function preflightDeposit(
+    player1: string,
+    player2: string,
+    stake: bigint,
+    isNative: boolean
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const checks: string[] = [];
+
+    const [sk1, sk2] = await Promise.all([
+      escrow.getSessionKey(player1),
+      escrow.getSessionKey(player2),
+    ]);
+
+    if (sk1.player === ethers.ZeroAddress || sk1.player.toLowerCase() !== player1.toLowerCase()) {
+      checks.push(`Player1 (${player1}) has no session key registered`);
+    } else {
+      if (sk1.revoked) checks.push(`Player1 session key is revoked`);
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      if (BigInt(sk1.expiry) <= now) checks.push(`Player1 session key expired`);
+      if (stake > BigInt(sk1.maxStakePerMatch)) {
+        checks.push(`Player1 stake ${stake} exceeds session limit ${sk1.maxStakePerMatch}`);
+      }
+    }
+
+    if (sk2.player === ethers.ZeroAddress || sk2.player.toLowerCase() !== player2.toLowerCase()) {
+      checks.push(`Player2 (${player2}) has no session key registered`);
+    } else {
+      if (sk2.revoked) checks.push(`Player2 session key is revoked`);
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      if (BigInt(sk2.expiry) <= now) checks.push(`Player2 session key expired`);
+      if (stake > BigInt(sk2.maxStakePerMatch)) {
+        checks.push(`Player2 stake ${stake} exceeds session limit ${sk2.maxStakePerMatch}`);
+      }
+    }
+
+    if (!isNative) {
+      const gasReserve = await escrow.getGasReserveEstimate();
+      const totalPerPlayer = stake + BigInt(gasReserve);
+
+      const [allowance1, allowance2] = await Promise.all([
+        getUsdtAllowance(player1),
+        getUsdtAllowance(player2),
+      ]);
+
+      if (allowance1 < totalPerPlayer) {
+        checks.push(`Player1 USDT allowance ${allowance1} < required ${totalPerPlayer}`);
+      }
+      if (allowance2 < totalPerPlayer) {
+        checks.push(`Player2 USDT allowance ${allowance2} < required ${totalPerPlayer}`);
+      }
+    }
+
+    if (checks.length > 0) {
+      return { ok: false, reason: checks.join("; ") };
+    }
+    return { ok: true };
+  }
+
   return {
     registerSessionKey,
     getSessionNonce,
@@ -721,6 +786,8 @@ export function createEvmOracle() {
     getMatchOnChain,
     getOracleBalance,
     getGasReserveEstimate,
+    getUsdtAllowance,
+    preflightDeposit,
     get address() {
       return wallet.address;
     },

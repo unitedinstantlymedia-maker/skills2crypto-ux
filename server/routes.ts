@@ -559,8 +559,9 @@ export async function registerRoutes(
       }
 
       const isNative = asset === "BNB" || asset === "ETH";
-      const decimals = isNative ? 18 : 6;
-      const stakeBigInt = BigInt(Math.round(stakeNum * 10 ** decimals));
+      const decimals = 18;
+      const { ethers: ethersLib } = await import("ethers");
+      const stakeBigInt = ethersLib.parseUnits(String(stakeNum), decimals);
       const assetTypeNum = isNative ? 1 : 0;
 
       const { createEvmOracle } = await import("./oracle/evmOracle");
@@ -570,24 +571,23 @@ export async function registerRoutes(
       console.log(`[oracle/submit-deposit]   player1: ${player1}, player2: ${player2}`);
       console.log(`[oracle/submit-deposit]   stake: ${stakeNum} ${asset} (${stakeBigInt.toString()} wei)`);
 
+      const preflight = await oracle.preflightDeposit(player1, player2, stakeBigInt, isNative);
+      if (!preflight.ok) {
+        await redis.del(lockKey);
+        console.error(`[oracle/submit-deposit] Preflight failed: ${preflight.reason}`);
+        return res.status(400).json({ error: preflight.reason });
+      }
+
       const sig1 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player1);
       const sig2 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player2);
 
       let result;
       if (!isNative) {
-        const escrowAddr = process.env.BSC_ESCROW_ADDRESS?.toLowerCase() || "";
-        const permit1Raw = await redis.get(`permit:${player1.toLowerCase()}:${escrowAddr}`);
-        const permit2Raw = await redis.get(`permit:${player2.toLowerCase()}:${escrowAddr}`);
-        const permit1 = permit1Raw ? (typeof permit1Raw === "string" ? JSON.parse(permit1Raw) : permit1Raw) : null;
-        const permit2 = permit2Raw ? (typeof permit2Raw === "string" ? JSON.parse(permit2Raw) : permit2Raw) : null;
-
-        if (permit1 || permit2) {
-          result = await oracle.submitDepositWithPermit(matchId, stakeBigInt, player1, player2, sig1, sig2, permit1, permit2);
-        } else {
-          result = await oracle.submitDeposit(matchId, stakeBigInt, player1, player2, sig1, sig2);
-        }
+        result = await oracle.submitDepositWithPermit(matchId, stakeBigInt, player1, player2, sig1, sig2, null, null);
       } else {
-        const totalValue = stakeBigInt * 2n;
+        const gasReserve = await oracle.getGasReserveEstimate();
+        const totalPerPlayer = stakeBigInt + BigInt(gasReserve);
+        const totalValue = totalPerPlayer * 2n;
         result = await oracle.submitDepositNative(matchId, stakeBigInt, player1, player2, sig1, sig2, totalValue);
       }
 

@@ -4,8 +4,8 @@ import { parseUnits } from 'viem';
 
 const SESSION_STORAGE_PREFIX = 'sk_session_';
 const SESSION_DURATION_DAYS = 365;
-const MAX_STAKE_USDT = '10000';
-const MAX_STAKE_UNITS = parseUnits(MAX_STAKE_USDT, 6);
+const MAX_STAKE_RAW = '1000000';
+const MAX_STAKE_UNITS = parseUnits(MAX_STAKE_RAW, 18);
 
 interface StoredSession {
   player: string;
@@ -39,6 +39,11 @@ function loadSession(address: string, chainId: number): StoredSession | null {
     if (!raw) return null;
     const session: StoredSession = JSON.parse(raw);
     if (session.expiry * 1000 < Date.now()) {
+      localStorage.removeItem(getStorageKey(address, chainId));
+      return null;
+    }
+    if (session.maxStakePerMatch !== MAX_STAKE_UNITS.toString()) {
+      console.log('[SessionKey] Cached session has outdated maxStake, clearing');
       localStorage.removeItem(getStorageKey(address, chainId));
       return null;
     }
