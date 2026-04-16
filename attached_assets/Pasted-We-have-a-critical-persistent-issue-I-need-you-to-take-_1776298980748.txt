@@ -1,0 +1,19 @@
+We have a critical, persistent issue. I need you to take full ownership of diagnosing and fixing it. Do not just apply a patch; understand the root cause.
+
+Current state:
+- The frontend and matchmaking work perfectly. Two players can connect (MetaMask, Binance Web3), find each other, play a full game of chess, and see "You win" / "You lose".
+- However, NO blockchain transactions occur. None. Balances don't change, the in-app history remains empty, and nothing appears on BscScan.
+- This is despite VITE_USE_MOCK_ESCROW=false and all environment variables being set in .replit.
+- Your previous diagnostic correctly identified that EvmEscrowAdapter.lockFunds was a stub, but even after the recent large-scale fixes (which resolved socket and matchmaking issues), the financial pipeline is still completely silent. No server logs from [EvmOracle] appear when a match is found or ends.
+
+Additional context that may or may not be relevant:
+- The GitHub repository shows a red X on the latest commit (from a disconnected Vercel integration), but we don't know if this affects the Replit environment.
+- The entire project is still running inside the Replit sandbox, not on a dedicated VPS. This might be causing network restrictions or environment variable loading issues that prevent the oracle from reaching the RPC.
+
+Your mission:
+1. Conduct a full end-to-end trace of the transaction flow, starting from the user clicking "Find Match" all the way to the `depositUSDTWithPermit` function in the smart contract.
+2. Identify the exact point of failure. Is it the frontend not calling the server? Is the server endpoint unreachable? Is the oracle failing to send the transaction due to a missing private key, insufficient gas, or RPC connection error?
+3. Fix the root cause so that a real blockchain transaction is submitted for every match.
+4. After your fix, the in-app game history should record the match, and player balances should update on-chain.
+
+Do whatever you need to do. Analyze logs, check environment variable loading, test the RPC connection, add debugging output. Take the time you need, but solve this completely.
