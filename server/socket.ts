@@ -57,12 +57,13 @@ async function storeGameResult(
   winnerId: string | null,
   loserId: string | null,
   reason: string
-): Promise<GameResult | null> {
+): Promise<{ result: GameResult; isFirst: boolean } | null> {
   const dedupKey = `gameresult_lock:${matchId}`;
   const isFirst = await redis.set(dedupKey, "1", { ex: 600, nx: true });
   if (!isFirst) {
     console.log("[socket] duplicate game-end ignored for match:", matchId);
-    return gameResults.get(matchId) || null;
+    const cached = gameResults.get(matchId);
+    return cached ? { result: cached, isFirst: false } : null;
   }
 
   let resultType: 'win' | 'loss' | 'draw';
@@ -131,7 +132,7 @@ async function storeGameResult(
     console.error("[socket] failed to save match to database:", err);
   }
 
-  return result;
+  return { result, isFirst: true };
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -495,7 +496,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(data.matchId);
     });
 
-    socket.on("game-end", (data: { matchId: string; result: string; winner: string; winnerId?: string; loserId?: string }) => {
+    socket.on("game-end", async (data: { matchId: string; result: string; winner: string; winnerId?: string; loserId?: string }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
         return;
@@ -520,7 +521,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         loserId = data.loserId || null;
       }
 
-      storeGameResult(data.matchId, 'chess', winnerId, loserId, data.result);
+      const stored = await storeGameResult(data.matchId, 'chess', winnerId, loserId, data.result);
+      if (!stored || !stored.isFirst) return;
       
       io.to(`match:${data.matchId}`).emit('match-ended', data);
       io.to(`match:${data.matchId}`).emit('game-result', {
