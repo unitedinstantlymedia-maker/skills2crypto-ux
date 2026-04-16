@@ -1,5 +1,19 @@
 # Skills2Crypto Smart Contracts — Deployment & Testing Guide
 
+> **IMPORTANT — current model (Task #12)**
+>
+> Native **BNB** and **ETH** matches now use a **player-submitted** deposit
+> flow (`depositNativeAsPlayer` + EIP-712 `MatchAuth`). Each player sends
+> their own `stake + gasReserve` directly to the contract; the oracle wallet
+> only signs the authorization payload and pays gas for the final
+> `settleMatch` call.
+>
+> The gas-oracle / `submit-deposit` description below is **historical** and
+> applies only to the USDT (Tron) flow. For the authoritative description of
+> the current native-deposit flow, see the section
+> **"Player-Submitted Native Deposit Model (BNB & ETH)"** at the bottom of
+> this document.
+
 ## Architecture Overview
 
 ### Built-in Gas Oracle (No External Paymaster)
