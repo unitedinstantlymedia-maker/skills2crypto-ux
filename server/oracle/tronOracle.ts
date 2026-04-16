@@ -88,7 +88,7 @@ interface TronConfig {
 
 function resolveConfig(): TronConfig {
   return {
-    fullHost: loadEnvOrThrow("TRON_RPC_URL"),
+    fullHost: process.env.TRON_RPC_URL || "https://api.trongrid.io",
     escrowBase58: loadEnvOrThrow("TRON_ESCROW_CONTRACT"),
     usdtBase58: process.env.TRON_USDT_CONTRACT || "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
     platformWalletBase58: process.env.TRON_PLATFORM_WALLET || "TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq",
@@ -347,6 +347,18 @@ function build() {
     sig2: string;
   }): Promise<{ txid: string }> {
     const matchIdBytes32 = toMatchIdBytes32(params.matchId);
+    // Use depositUSDTWithPermit so the contract transfers the gas reserve
+    // (USDT) directly to the oracle wallet, reimbursing it for the TRX it
+    // burned on this deposit + the upcoming settle. We pass empty PermitData
+    // (deadline=0) because Tron USDT does not support EIP-2612; players have
+    // already granted allowance via TronLink approve.
+    const emptyPermit = {
+      deadline: "0",
+      v: 0,
+      r: "0x" + "00".repeat(32),
+      s: "0x" + "00".repeat(32),
+    };
+    const permitTuple = [emptyPermit.deadline, emptyPermit.v, emptyPermit.r, emptyPermit.s];
     const args = [
       { type: "bytes32", value: matchIdBytes32 },
       { type: "uint256", value: params.stakeUnits },
@@ -354,9 +366,11 @@ function build() {
       { type: "address", value: params.player2EvmHex },
       { type: "bytes", value: params.sig1.replace(/^0x/, "") },
       { type: "bytes", value: params.sig2.replace(/^0x/, "") },
+      { type: "tuple(uint256,uint8,bytes32,bytes32)", value: permitTuple },
+      { type: "tuple(uint256,uint8,bytes32,bytes32)", value: permitTuple },
     ];
-    console.log(`[TronOracle] depositUSDT — match: ${params.matchId}`);
-    const { txid } = await triggerWrite("depositUSDT", args, 300);
+    console.log(`[TronOracle] depositUSDTWithPermit — match: ${params.matchId}`);
+    const { txid } = await triggerWrite("depositUSDTWithPermit", args, 400);
     console.log(`[TronOracle] deposit tx broadcast: ${txid}`);
     await waitForTx(txid);
     console.log(`[TronOracle] deposit confirmed: ${txid}`);

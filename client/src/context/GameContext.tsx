@@ -67,11 +67,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const selectedGameRef = useRef(selectedGame);
   const selectedAssetRef = useRef(selectedAsset);
   const stakeAmountRef = useRef(stakeAmount);
+  // realWalletRef always carries the latest per-chain wallet addresses so the
+  // socket `match-found` handler (registered once on mount) can read them at
+  // event time. Without this, the closure would hold the empty wallet object
+  // from initial mount — causing join-match to emit playerId='' for users
+  // who connect their wallet after the GameProvider mounts.
+  const realWalletRef = useRef(realWallet);
 
   useEffect(() => { isFindingRef.current = isFinding; }, [isFinding]);
   useEffect(() => { selectedGameRef.current = selectedGame; }, [selectedGame]);
   useEffect(() => { selectedAssetRef.current = selectedAsset; }, [selectedAsset]);
   useEffect(() => { stakeAmountRef.current = stakeAmount; }, [stakeAmount]);
+  useEffect(() => { realWalletRef.current = realWallet; }, [realWallet]);
 
   const socketRef = useRef<Socket | null>(null);
   // Tracks matchIds for which a deposit attempt is already in flight, so
@@ -144,15 +151,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       });
 
       // Use the asset-appropriate wallet address as the playerId so the server
-      // and on-chain settlement reference the same chain identity.
+      // and on-chain settlement reference the same chain identity. Read from
+      // the ref (not the closure) so this is correct even when the user
+      // connected their wallet after the GameProvider mounted.
+      const rw = realWalletRef.current;
       const pid =
         asset === 'BNB' || asset === 'ETH'
-          ? realWallet.evmAddress || ''
+          ? rw.evmAddress || ''
           : asset === 'USDT'
-          ? realWallet.tronAddress || ''
+          ? rw.tronAddress || ''
           : asset === 'TON'
-          ? realWallet.tonAddress || ''
+          ? rw.tonAddress || ''
           : walletStore.getState().address || '';
+      if (!pid) {
+        console.warn(`[socket] cannot join-match for ${asset}: no wallet connected for that chain`);
+      }
       s.emit('join-match', { matchId: payload.matchId, playerId: pid });
 
       depositInFlightRef.current.add(payload.matchId);
