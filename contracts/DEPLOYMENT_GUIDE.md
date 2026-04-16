@@ -411,3 +411,70 @@ The same Solidity contract works on Tron with these differences:
 | TON | `UQA5WizZJ5JCSJDnIonF12X5rbPINxgX6Y6dkpiCZ_-WB7x7` |
 
 All platform fees (3% of total pot on normal wins and draws) are sent to these addresses. The EVM address is the same for BSC and Ethereum since your Ledger uses the same address across EVM chains.
+
+---
+
+## Player-Submitted Native Deposit Model (BNB & ETH)
+
+Native (BNB / ETH) matches now use a **player-submitted** deposit flow.
+The oracle no longer funds the stake — each player sends their own
+`stake + gasReserve` directly to the escrow contract.
+
+### Function
+
+```
+depositNativeAsPlayer(
+  bytes32 matchId,
+  address player1,
+  address player2,
+  uint256 stake,
+  uint256 gasReserve,
+  uint256 deadline,
+  bytes oracleSig
+) external payable
+```
+
+- `oracleSig` is an EIP-712 signature over the `MatchAuth` struct, produced
+  by the server-side oracle wallet. Both players submit the SAME signature
+  along with their own `msg.value == stake + gasReserve`.
+- The first caller flips the match to `WaitingForP2`. The second caller
+  flips it to `Active`, which emits `MatchActive` (the server listens for
+  this event and notifies both players via socket).
+- If the second player never shows up, the first depositor can call
+  `refundNoShow(matchId)` after `deadline` to reclaim their full deposit.
+
+### Backend endpoints
+
+- `POST /api/oracle/match-auth` → returns `{ player1, player2, stake,
+  gasReserve, deadline, oracleSig, chainId, escrowAddress }` for a given
+  matchId. Cached in Redis so both players receive identical params.
+- `GET /api/oracle/match-status/:matchId` → returns the on-chain match
+  status (used by the client to know when both players have deposited).
+
+### Per-chain configuration
+
+Required environment variables:
+
+| Var                   | Purpose                                  |
+|-----------------------|------------------------------------------|
+| `ORACLE_PRIVATE_KEY`  | Same key signs MatchAuth on both chains  |
+| `BSC_RPC_URL`         | BSC RPC endpoint                         |
+| `BSC_ESCROW_ADDRESS`  | Escrow contract on BSC                   |
+| `BSC_CHAIN_ID`        | Defaults to 56                           |
+| `ETH_RPC_URL`         | Ethereum mainnet RPC                     |
+| `ETH_ESCROW_ADDRESS`  | Escrow contract on Ethereum mainnet      |
+| `ETH_CHAIN_ID`        | Defaults to 1                            |
+
+### Deploy commands
+
+```
+# BSC mainnet
+npx hardhat run scripts/deploy-bsc.cjs --network bscMainnet
+
+# Ethereum mainnet (manual op — requires funded deployer key)
+npx hardhat run scripts/deploy-eth.cjs --network ethMainnet
+```
+
+The contract constructor takes a USDT token argument that is unused on
+the Ethereum deployment (USDT is only routed through Tron in this
+project — see Task #13).

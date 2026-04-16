@@ -339,3 +339,45 @@ npm run db:push     # Push database schema
 5. **Pre-flight deposit checks** — `oracle.preflightDeposit()` checks both players' session keys (registered, not revoked, not expired, maxStake sufficient) before attempting on-chain deposit. Returns a specific failure reason for each check. USDT allowance branch removed.
 6. **Deploy script updated** — `scripts/deploy-bsc.cjs` USDT_DECIMALS corrected from 6 to 18 for future redeployments.
 7. **SessionKeyDialog updated** — Step 3 text changed from "USDT permit" to "USDT approval" to reflect the actual on-chain approve flow.
+
+---
+
+## Task #12 — Player-submitted Native BNB & ETH Deposits (current model)
+
+The previous oracle-funded native deposit flow described above is **SUPERSEDED**.
+Native (BNB & ETH) matches now use a **player-submitted** model.
+
+### Contract changes (`contracts/evm/Skills2CryptoEscrow.sol`)
+- New `MatchStatus.WaitingForP2` (appended at end of enum to preserve ordinals).
+- `Match` struct gains `deadline` and `firstDepositor` fields.
+- New `MatchAuth` EIP-712 typehash and `depositNativeAsPlayer(matchId, player1, player2, stake, gasReserve, deadline, oracleSig)` — payable, player-callable. First caller opens match in `WaitingForP2`; second caller flips to `Active`.
+- `refundNoShow(matchId)` — first depositor reclaims funds after `deadline` if opponent never shows.
+- `depositNative` (oracle-funded) removed from contract; existing USDT paths preserved for the Tron task.
+
+### Multi-chain oracle (`server/oracle/evmOracle.ts`)
+- `createEvmOracle(chain: 'BSC' | 'ETH')` factory with per-chain caching.
+- BSC reads `BSC_RPC_URL` / `BSC_ESCROW_ADDRESS` / `BSC_CHAIN_ID` (default 56).
+- ETH reads `ETH_RPC_URL` / `ETH_ESCROW_ADDRESS` / `ETH_CHAIN_ID` (default 1).
+- Same `ORACLE_PRIVATE_KEY` signs MatchAuth on both chains.
+- New helpers: `signMatchAuth(...)`, `getMatchOnChain(...)`, `watchMatchActive(handler)`.
+- `submitDepositNative` removed.
+
+### Backend routes
+- `POST /api/oracle/submit-deposit` removed.
+- `POST /api/oracle/match-auth` — returns `{ matchIdBytes32, player1, player2, stake, gasReserve, deadline, oracleSig, chainId, escrowAddress }`. Cached in Redis (20-min TTL) so both players get identical params.
+- `GET /api/oracle/match-status/:matchId` — returns on-chain status (0=None, 1=Active, 2=Settled, 3=WaitingForP2).
+- `POST /api/session/register` and `GET /api/session/nonce` now route by chainId (1 → ETH oracle, 56 → BSC oracle).
+- `settleMatchOnChain` in `server/socket.ts` dispatches by asset (BNB → BSC oracle, ETH → ETH oracle).
+
+### Server bootstrap (`server/index.ts`)
+- Initialises BSC and ETH oracles independently (whichever env vars are set).
+- Subscribes to `MatchActive` events on each chain and emits `match-funded` socket event into `match:{matchId}` room.
+
+### Frontend (`client/src/core/escrow/EvmEscrowAdapter.ts`)
+- `lockFunds(matchId, asset, stake)` now: fetches MatchAuth, calls `depositNativeAsPlayer` via `@wagmi/core` `writeContract` with `value = stake + gasReserve`, waits for the receipt, then polls `/api/oracle/match-status/:matchId` until status === Active.
+- No retries on user-facing tx failures; the user must explicitly try again.
+
+### Deployment
+- BSC redeployment required (struct + new function). Use `scripts/deploy-bsc.cjs`.
+- ETH mainnet deployment is a manual op with funded deployer key. Use `scripts/deploy-eth.cjs`.
+- Set `ETH_RPC_URL` and `ETH_ESCROW_ADDRESS` after the ETH deployment to enable the ETH path.

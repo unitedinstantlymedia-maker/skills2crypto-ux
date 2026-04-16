@@ -154,14 +154,21 @@ async function settleMatchOnChain(
     const matchData = await redis.hgetall(`match:${matchId}`);
     const addr1 = matchData?.addr1 ? String(matchData.addr1) : null;
     const addr2 = matchData?.addr2 ? String(matchData.addr2) : null;
+    const asset = matchData?.asset ? String(matchData.asset) : null;
 
     if (!addr1 || !addr2) {
       console.warn("[settlement] skipping — no wallet addresses for match:", matchId);
       return;
     }
 
-    const { createEvmOracle } = await import("./oracle/evmOracle");
-    const oracle = createEvmOracle();
+    const { createEvmOracle, chainForAsset } = await import("./oracle/evmOracle");
+    const chain = chainForAsset(asset || "");
+    if (!chain) {
+      console.warn(`[settlement] asset '${asset}' is not an EVM native match — skipping EVM settlement for ${matchId}`);
+      await redis.del(lockKey);
+      return;
+    }
+    const oracle = createEvmOracle(chain);
 
     let winner: string;
     let reason: number;

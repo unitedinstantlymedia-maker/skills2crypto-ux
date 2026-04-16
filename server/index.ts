@@ -6,6 +6,16 @@ import { registerRoutes } from "./routes";
 import { setupVite } from "./vite";
 import { setupSocket } from "./socket";
 import { startChallengeCleanup } from "./matchmaking/challengeCleanup";
+import { redis } from "./redis";
+
+async function resolveAppMatchId(matchIdBytes32: string): Promise<string | null> {
+  try {
+    const v = await redis.get(`match_by_hash:${matchIdBytes32.toLowerCase()}`);
+    return v ? String(v) : null;
+  } catch {
+    return null;
+  }
+}
 
 const PORT = Number(process.env.PORT ?? 5000);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
@@ -61,15 +71,58 @@ if (NODE_ENV === "production") {
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[skills2crypto] server running on port ${PORT}`);
 
-  if (process.env.ORACLE_PRIVATE_KEY && process.env.BSC_RPC_URL && process.env.BSC_ESCROW_ADDRESS) {
-    import("./oracle/evmOracle").then(({ createEvmOracle }) => {
-      createEvmOracle();
-    }).catch(err => {
-      console.error("[startup] Failed to initialize oracle diagnostics:", err?.message || err);
-    });
-  } else {
-    console.warn("[startup] Oracle env vars not set — skipping contract diagnostics");
+  if (!process.env.ORACLE_PRIVATE_KEY) {
+    console.warn("[startup] ORACLE_PRIVATE_KEY not set — skipping EVM oracle init");
+    return;
   }
+
+  import("./oracle/evmOracle").then(({ createEvmOracle }) => {
+    // Start BSC oracle + MatchActive listener if configured.
+    if (process.env.BSC_RPC_URL && process.env.BSC_ESCROW_ADDRESS) {
+      try {
+        const bsc = createEvmOracle("BSC");
+        bsc.watchMatchActive(async (evt) => {
+          const appMatchId = await resolveAppMatchId(evt.matchId);
+          console.log(`[MatchActive:BSC] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
+          if (!appMatchId) return;
+          io.to(`match:${appMatchId}`).emit("match-funded", {
+            matchId: appMatchId,
+            chain: "BSC",
+            player1: evt.player1,
+            player2: evt.player2,
+          });
+        });
+      } catch (err: any) {
+        console.error("[startup] BSC oracle init failed:", err?.message || err);
+      }
+    } else {
+      console.warn("[startup] BSC_RPC_URL / BSC_ESCROW_ADDRESS not set — BSC oracle disabled");
+    }
+
+    // Start ETH oracle + MatchActive listener if configured.
+    if (process.env.ETH_RPC_URL && process.env.ETH_ESCROW_ADDRESS) {
+      try {
+        const eth = createEvmOracle("ETH");
+        eth.watchMatchActive(async (evt) => {
+          const appMatchId = await resolveAppMatchId(evt.matchId);
+          console.log(`[MatchActive:ETH] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
+          if (!appMatchId) return;
+          io.to(`match:${appMatchId}`).emit("match-funded", {
+            matchId: appMatchId,
+            chain: "ETH",
+            player1: evt.player1,
+            player2: evt.player2,
+          });
+        });
+      } catch (err: any) {
+        console.error("[startup] ETH oracle init failed:", err?.message || err);
+      }
+    } else {
+      console.warn("[startup] ETH_RPC_URL / ETH_ESCROW_ADDRESS not set — ETH oracle disabled");
+    }
+  }).catch(err => {
+    console.error("[startup] Failed to initialize oracle module:", err?.message || err);
+  });
 });
 
 

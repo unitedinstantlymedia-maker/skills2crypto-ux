@@ -7,9 +7,12 @@ import {
   type ContractTransactionResponse,
 } from "ethers";
 
+export type EvmChain = "BSC" | "ETH";
+
 const ESCROW_ABI = [
   "function registerSessionKey(address player, address sessionAddr, uint256 maxStakePerMatch, uint256 expiry, bytes signature)",
-  "function depositNative(bytes32 matchId, uint256 stake, address player1, address player2, bytes sig1, bytes sig2) payable",
+  "function depositNativeAsPlayer(bytes32 matchId, address player1, address player2, uint256 stake, uint256 gasReserve, uint256 deadline, bytes oracleSig) payable",
+  "function refundNoShow(bytes32 matchId)",
   "function settleMatch(bytes32 matchId, address winner, uint8 reason)",
   "function updateGasPrice(uint256 _gasPricePerGasUnit)",
   "function getDomainSeparator() view returns (bytes32)",
@@ -17,32 +20,38 @@ const ESCROW_ABI = [
   "function owner() view returns (address)",
   "function platformWallet() view returns (address)",
   "function depositNonces(address player) view returns (uint256)",
-  "function getMatch(bytes32 matchId) view returns (tuple(bytes32 matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer, uint8 status))",
+  "function getMatch(bytes32 matchId) view returns (tuple(bytes32 matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer, uint8 status, uint256 deadline, address firstDepositor))",
   "function getGasReserveEstimate() view returns (uint256)",
   "function getDepositNonce(address player) view returns (uint256)",
   "function getSessionKey(address player) view returns (tuple(address player, address sessionAddr, uint256 maxStakePerMatch, uint256 expiry, bool revoked))",
   "function sessionNonces(address player) view returns (uint256)",
   "event SessionKeyRegistered(address indexed player, address indexed sessionAddr, uint256 expiry)",
   "event MatchActive(bytes32 indexed matchId, address player1, address player2, uint256 stake, uint8 assetType, uint256 gasReservePerPlayer)",
+  "event PlayerDeposited(bytes32 indexed matchId, address indexed player, uint256 amount)",
   "event MatchSettled(bytes32 indexed matchId, address winner, uint8 reason, uint256 payout, uint256 platformFee)",
 ];
 
 const GAS_BUFFER_PERCENT = 20;
 const TX_CONFIRMATION_BLOCKS = 1;
-const EXPECTED_CHAIN_ID = Number(process.env.BSC_CHAIN_ID ?? 56);
-
-export interface DepositResult {
-  txHash: string;
-  matchId: string;
-  gasUsed: string;
-  blockNumber: number;
-}
 
 export interface SettleResult {
   txHash: string;
   matchId: string;
   gasUsed: string;
   blockNumber: number;
+}
+
+export interface MatchAuth {
+  matchId: string;
+  matchIdBytes32: string;
+  player1: string;
+  player2: string;
+  stake: string;
+  gasReserve: string;
+  deadline: number;
+  oracleSig: string;
+  chainId: number;
+  escrowAddress: string;
 }
 
 export class EvmOracleError extends Error {
@@ -88,110 +97,131 @@ function redactUrl(url: string): string {
   }
 }
 
-let _startupDiagRun = false;
+function resolveChainConfig(chain: EvmChain): {
+  rpcUrl: string;
+  escrowAddress: string;
+  chainId: number;
+  minNativeForGas: bigint;
+  nativeSymbol: string;
+} {
+  if (chain === "BSC") {
+    return {
+      rpcUrl: loadEnvOrThrow("BSC_RPC_URL"),
+      escrowAddress: loadEnvOrThrow("BSC_ESCROW_ADDRESS"),
+      chainId: Number(process.env.BSC_CHAIN_ID ?? 56),
+      minNativeForGas: ethers.parseEther("0.001"),
+      nativeSymbol: "BNB",
+    };
+  }
+  return {
+    rpcUrl: loadEnvOrThrow("ETH_RPC_URL"),
+    escrowAddress: loadEnvOrThrow("ETH_ESCROW_ADDRESS"),
+    chainId: Number(process.env.ETH_CHAIN_ID ?? 1),
+    minNativeForGas: ethers.parseEther("0.005"),
+    nativeSymbol: "ETH",
+  };
+}
 
-export function createEvmOracle() {
+const _oracleCache: Partial<Record<EvmChain, ReturnType<typeof buildOracle>>> = {};
+const _startupDiagRun: Partial<Record<EvmChain, boolean>> = {};
+
+export function createEvmOracle(chain: EvmChain = "BSC") {
+  const cached = _oracleCache[chain];
+  if (cached) return cached;
+  const built = buildOracle(chain);
+  _oracleCache[chain] = built;
+  return built;
+}
+
+export function chainForAsset(asset: string): EvmChain | null {
+  if (asset === "BNB") return "BSC";
+  if (asset === "ETH") return "ETH";
+  return null;
+}
+
+function buildOracle(chain: EvmChain) {
+  const cfg = resolveChainConfig(chain);
   const privateKey = loadEnvOrThrow("ORACLE_PRIVATE_KEY");
-  const rpcUrl = loadEnvOrThrow("BSC_RPC_URL");
-  const escrowAddress = loadEnvOrThrow("BSC_ESCROW_ADDRESS");
 
-  if (!isValidAddress(escrowAddress)) {
+  if (!isValidAddress(cfg.escrowAddress)) {
     throw new EvmOracleError(
-      `BSC_ESCROW_ADDRESS is not a valid EVM address: ${escrowAddress}`,
+      `${chain}_ESCROW_ADDRESS is not a valid EVM address: ${cfg.escrowAddress}`,
       "INVALID_CONFIG"
     );
   }
 
-  const provider = new JsonRpcProvider(rpcUrl);
+  const provider = new JsonRpcProvider(cfg.rpcUrl);
   const wallet = new Wallet(privateKey, provider);
-  const escrow = new Contract(escrowAddress, ESCROW_ABI, wallet);
+  const escrow = new Contract(cfg.escrowAddress, ESCROW_ABI, wallet);
 
-  console.log(`[EvmOracle] Oracle wallet: ${wallet.address}`);
-  console.log(`[EvmOracle] Escrow contract: ${escrowAddress}`);
-  console.log(`[EvmOracle] RPC: ${redactUrl(rpcUrl)}`);
-  console.log(`[EvmOracle] Expected chain ID: ${EXPECTED_CHAIN_ID}`);
+  console.log(`[EvmOracle:${chain}] Oracle wallet: ${wallet.address}`);
+  console.log(`[EvmOracle:${chain}] Escrow contract: ${cfg.escrowAddress}`);
+  console.log(`[EvmOracle:${chain}] RPC: ${redactUrl(cfg.rpcUrl)}`);
+  console.log(`[EvmOracle:${chain}] Expected chain ID: ${cfg.chainId}`);
 
-  if (!_startupDiagRun) {
-    _startupDiagRun = true;
+  if (!_startupDiagRun[chain]) {
+    _startupDiagRun[chain] = true;
     (async () => {
       try {
         const network = await provider.getNetwork();
-        console.log(`[EvmOracle] [startup] Connected to chain ${network.chainId}`);
+        console.log(`[EvmOracle:${chain}] [startup] Connected to chain ${network.chainId}`);
         const balance = await provider.getBalance(wallet.address);
-        console.log(`[EvmOracle] [startup] Oracle BNB balance: ${ethers.formatEther(balance)}`);
-        if (balance < ethers.parseEther("0.001")) {
-          console.warn(`[EvmOracle] [startup] WARNING: Oracle BNB balance too low for gas!`);
+        console.log(`[EvmOracle:${chain}] [startup] Oracle ${cfg.nativeSymbol} balance: ${ethers.formatEther(balance)}`);
+        if (balance < cfg.minNativeForGas) {
+          console.warn(`[EvmOracle:${chain}] [startup] WARNING: Oracle ${cfg.nativeSymbol} balance too low for gas!`);
         }
         const domainSep = await escrow.getDomainSeparator();
-        console.log(`[EvmOracle] [startup] Contract getDomainSeparator() OK: ${domainSep.slice(0, 18)}...`);
+        console.log(`[EvmOracle:${chain}] [startup] Contract getDomainSeparator() OK: ${domainSep.slice(0, 18)}...`);
         const onChainOracle = await escrow.oracle();
-        console.log(`[EvmOracle] [startup] Contract oracle address: ${onChainOracle}`);
+        console.log(`[EvmOracle:${chain}] [startup] Contract oracle address: ${onChainOracle}`);
         if (onChainOracle.toLowerCase() !== wallet.address.toLowerCase()) {
-          console.error(`[EvmOracle] [startup] MISMATCH: Contract oracle is ${onChainOracle}, but our wallet is ${wallet.address}`);
+          console.error(`[EvmOracle:${chain}] [startup] MISMATCH: Contract oracle is ${onChainOracle}, but our wallet is ${wallet.address}`);
         } else {
-          console.log(`[EvmOracle] [startup] Oracle address matches — contract is ready`);
+          console.log(`[EvmOracle:${chain}] [startup] Oracle address matches — contract is ready`);
         }
       } catch (err: any) {
-        console.error(`[EvmOracle] [startup] Contract validation FAILED: ${err?.message || err}`);
-        console.error(`[EvmOracle] [startup] The deployed contract may be outdated. Redeployment may be needed.`);
+        console.error(`[EvmOracle:${chain}] [startup] Contract validation FAILED: ${err?.message || err}`);
       }
     })();
   }
 
-  async function verifyChainId(): Promise<void> {
+  let chainVerified = false;
+  async function ensureChainVerified(): Promise<void> {
+    if (chainVerified) return;
     const network = await provider.getNetwork();
     const actual = Number(network.chainId);
-    if (actual !== EXPECTED_CHAIN_ID) {
+    if (actual !== cfg.chainId) {
       throw new EvmOracleError(
-        `Chain ID mismatch: expected ${EXPECTED_CHAIN_ID}, got ${actual}. Check BSC_RPC_URL.`,
+        `Chain ID mismatch on ${chain}: expected ${cfg.chainId}, got ${actual}.`,
         "CHAIN_MISMATCH"
       );
     }
-  }
-
-  let chainVerified = false;
-  async function ensureChainVerified(): Promise<void> {
-    if (!chainVerified) {
-      await verifyChainId();
-      chainVerified = true;
-    }
+    chainVerified = true;
   }
 
   function addGasBuffer(estimatedGas: bigint): bigint {
     return (estimatedGas * BigInt(100 + GAS_BUFFER_PERCENT)) / 100n;
   }
 
-  const MIN_ORACLE_BNB = ethers.parseEther("0.001");
-
   async function ensureOracleHasGas(): Promise<void> {
     const balance = await provider.getBalance(wallet.address);
-    if (balance < MIN_ORACLE_BNB) {
+    if (balance < cfg.minNativeForGas) {
       const balStr = ethers.formatEther(balance);
-      console.error(`[EvmOracle] Oracle BNB balance critically low: ${balStr} BNB. Please send BNB to ${wallet.address}`);
+      console.error(`[EvmOracle:${chain}] Oracle ${cfg.nativeSymbol} balance critically low: ${balStr}. Please send ${cfg.nativeSymbol} to ${wallet.address}`);
       throw new EvmOracleError(
-        `Oracle wallet has insufficient BNB for gas (${balStr} BNB). Please top up ${wallet.address} with at least 0.01 BNB.`,
+        `Oracle wallet has insufficient ${cfg.nativeSymbol} for gas (${balStr}). Please top up ${wallet.address}.`,
         "ORACLE_NO_GAS"
       );
     }
   }
 
-  async function waitForReceipt(
-    tx: ContractTransactionResponse
-  ): Promise<TransactionReceipt> {
+  async function waitForReceipt(tx: ContractTransactionResponse): Promise<TransactionReceipt> {
     const receipt = await tx.wait(TX_CONFIRMATION_BLOCKS);
     if (!receipt) {
-      throw new EvmOracleError(
-        "Transaction receipt is null — tx may have been dropped",
-        "RECEIPT_NULL",
-        tx.hash
-      );
+      throw new EvmOracleError("Transaction receipt is null — tx may have been dropped", "RECEIPT_NULL", tx.hash);
     }
     if (receipt.status === 0) {
-      throw new EvmOracleError(
-        "Transaction reverted on-chain",
-        "TX_REVERTED",
-        tx.hash
-      );
+      throw new EvmOracleError("Transaction reverted on-chain", "TX_REVERTED", tx.hash);
     }
     return receipt;
   }
@@ -200,89 +230,74 @@ export function createEvmOracle() {
     return ethers.keccak256(ethers.toUtf8Bytes(matchId));
   }
 
-  async function submitDepositNative(
-    matchId: string,
-    stake: bigint,
-    player1: string,
-    player2: string,
-    sig1: string,
-    sig2: string,
-    totalValue: bigint
-  ): Promise<DepositResult> {
+  /**
+   * Produce an EIP-712 MatchAuth signature for the given match parameters.
+   * Both players will submit this exact signature (+ params) on-chain with
+   * their own stake+gasReserve.
+   */
+  async function signMatchAuth(params: {
+    matchId: string;
+    player1: string;
+    player2: string;
+    stake: bigint;
+    gasReserve: bigint;
+    deadline: number;
+  }): Promise<MatchAuth> {
     await ensureChainVerified();
 
-    if (!matchId || matchId.length === 0) {
-      throw new EvmOracleError("matchId cannot be empty", "INVALID_INPUT");
+    if (!isValidAddress(params.player1) || !isValidAddress(params.player2)) {
+      throw new EvmOracleError("player1/player2 must be valid EVM addresses", "INVALID_INPUT");
     }
-    if (stake <= 0n) {
-      throw new EvmOracleError("stake must be positive", "INVALID_INPUT");
-    }
-    if (!isValidAddress(player1) || !isValidAddress(player2)) {
-      throw new EvmOracleError("player1 and player2 must be valid EVM addresses", "INVALID_INPUT");
-    }
-    if (player1.toLowerCase() === player2.toLowerCase()) {
+    if (params.player1.toLowerCase() === params.player2.toLowerCase()) {
       throw new EvmOracleError("player1 and player2 cannot be the same address", "INVALID_INPUT");
     }
-    if (!isValidBytes(sig1) || !isValidBytes(sig2)) {
-      throw new EvmOracleError("sig1 and sig2 must be valid hex signatures", "INVALID_INPUT");
+    if (params.stake <= 0n) throw new EvmOracleError("stake must be positive", "INVALID_INPUT");
+    if (params.gasReserve < 0n) throw new EvmOracleError("gasReserve must be non-negative", "INVALID_INPUT");
+    if (!Number.isFinite(params.deadline) || params.deadline <= Math.floor(Date.now() / 1000)) {
+      throw new EvmOracleError("deadline must be a future unix timestamp", "INVALID_INPUT");
     }
-    if (totalValue <= 0n) {
-      throw new EvmOracleError("totalValue must be positive", "INVALID_INPUT");
-    }
 
-    const matchIdBytes32 = toMatchIdBytes32(matchId);
+    const matchIdBytes32 = toMatchIdBytes32(params.matchId);
 
-    console.log(`[EvmOracle] submitDepositNative — match: ${matchId}, value: ${totalValue.toString()}`);
+    const domain = {
+      name: "Skills2CryptoEscrow",
+      version: "1",
+      chainId: cfg.chainId,
+      verifyingContract: cfg.escrowAddress,
+    };
+    const types = {
+      MatchAuth: [
+        { name: "matchId", type: "bytes32" },
+        { name: "player1", type: "address" },
+        { name: "player2", type: "address" },
+        { name: "stake", type: "uint256" },
+        { name: "gasReserve", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+    const value = {
+      matchId: matchIdBytes32,
+      player1: params.player1,
+      player2: params.player2,
+      stake: params.stake,
+      gasReserve: params.gasReserve,
+      deadline: params.deadline,
+    };
 
-    await ensureOracleHasGas();
+    const oracleSig = await wallet.signTypedData(domain, types, value);
 
-    try {
-      const estimatedGas = await escrow.depositNative.estimateGas(
-        matchIdBytes32,
-        stake,
-        player1,
-        player2,
-        sig1,
-        sig2,
-        { value: totalValue }
-      );
-      const gasLimit = addGasBuffer(estimatedGas);
-
-      const tx: ContractTransactionResponse = await escrow.depositNative(
-        matchIdBytes32,
-        stake,
-        player1,
-        player2,
-        sig1,
-        sig2,
-        { gasLimit, value: totalValue }
-      );
-
-      console.log(`[EvmOracle] DepositNative tx sent: ${tx.hash}`);
-
-      const receipt = await waitForReceipt(tx);
-
-      console.log(
-        `[EvmOracle] DepositNative confirmed in block ${receipt.blockNumber}, gas used: ${receipt.gasUsed.toString()}`
-      );
-
-      return {
-        txHash: tx.hash,
-        matchId,
-        gasUsed: receipt.gasUsed.toString(),
-        blockNumber: receipt.blockNumber,
-      };
-    } catch (err: any) {
-      if (err instanceof EvmOracleError) throw err;
-
-      const reason = err?.reason || err?.shortMessage || err?.message || "Unknown error";
-      console.error(`[EvmOracle] submitDepositNative failed: ${reason}`);
-      throw new EvmOracleError(
-        `DepositNative failed: ${reason}`,
-        "DEPOSIT_NATIVE_FAILED",
-        err?.hash
-      );
-    }
+    return {
+      matchId: params.matchId,
+      matchIdBytes32,
+      player1: params.player1,
+      player2: params.player2,
+      stake: params.stake.toString(),
+      gasReserve: params.gasReserve.toString(),
+      deadline: params.deadline,
+      oracleSig,
+      chainId: cfg.chainId,
+      escrowAddress: cfg.escrowAddress,
+    };
   }
 
   async function submitSettlement(
@@ -292,60 +307,26 @@ export function createEvmOracle() {
   ): Promise<SettleResult> {
     await ensureChainVerified();
 
-    if (!matchId || matchId.length === 0) {
-      throw new EvmOracleError("matchId cannot be empty", "INVALID_INPUT");
-    }
+    if (!matchId) throw new EvmOracleError("matchId cannot be empty", "INVALID_INPUT");
     if (reason < 0 || reason > 2) {
-      throw new EvmOracleError(
-        `Invalid settle reason: ${reason}. Must be 0 (Normal), 1 (Draw), or 2 (Disconnect).`,
-        "INVALID_REASON"
-      );
+      throw new EvmOracleError(`Invalid settle reason: ${reason}`, "INVALID_REASON");
     }
     if (!isValidAddress(winner) && winner !== ethers.ZeroAddress) {
       throw new EvmOracleError("winner must be a valid EVM address or zero address", "INVALID_INPUT");
     }
 
     const matchIdBytes32 = toMatchIdBytes32(matchId);
-
-    const reasonLabels: Record<number, string> = {
-      0: "Normal",
-      1: "Draw",
-      2: "Disconnect",
-    };
-
-    console.log(`[EvmOracle] submitSettlement — match: ${matchId}`);
-    console.log(`[EvmOracle]   winner: ${winner}`);
-    console.log(`[EvmOracle]   reason: ${reason} (${reasonLabels[reason] ?? "Unknown"})`);
+    console.log(`[EvmOracle:${chain}] submitSettlement — match: ${matchId}, winner: ${winner}, reason: ${reason}`);
 
     await ensureOracleHasGas();
 
     try {
-      const estimatedGas = await escrow.settleMatch.estimateGas(
-        matchIdBytes32,
-        winner,
-        reason
-      );
+      const estimatedGas = await escrow.settleMatch.estimateGas(matchIdBytes32, winner, reason);
       const gasLimit = addGasBuffer(estimatedGas);
-
-      console.log(
-        `[EvmOracle] Gas estimate: ${estimatedGas.toString()}, limit: ${gasLimit.toString()}`
-      );
-
-      const tx: ContractTransactionResponse = await escrow.settleMatch(
-        matchIdBytes32,
-        winner,
-        reason,
-        { gasLimit }
-      );
-
-      console.log(`[EvmOracle] Settle tx sent: ${tx.hash}`);
-
+      const tx: ContractTransactionResponse = await escrow.settleMatch(matchIdBytes32, winner, reason, { gasLimit });
+      console.log(`[EvmOracle:${chain}] Settle tx sent: ${tx.hash}`);
       const receipt = await waitForReceipt(tx);
-
-      console.log(
-        `[EvmOracle] Settlement confirmed in block ${receipt.blockNumber}, gas used: ${receipt.gasUsed.toString()}`
-      );
-
+      console.log(`[EvmOracle:${chain}] Settlement confirmed in block ${receipt.blockNumber}`);
       return {
         txHash: tx.hash,
         matchId,
@@ -354,38 +335,23 @@ export function createEvmOracle() {
       };
     } catch (err: any) {
       if (err instanceof EvmOracleError) throw err;
-
       const reason_msg = err?.reason || err?.shortMessage || err?.message || "Unknown error";
-      console.error(`[EvmOracle] submitSettlement failed: ${reason_msg}`);
-      throw new EvmOracleError(
-        `Settlement failed: ${reason_msg}`,
-        "SETTLE_FAILED",
-        err?.hash
-      );
+      console.error(`[EvmOracle:${chain}] submitSettlement failed: ${reason_msg}`);
+      throw new EvmOracleError(`Settlement failed: ${reason_msg}`, "SETTLE_FAILED", err?.hash);
     }
   }
 
   async function updateGasPrice(gasPricePerUnit: bigint): Promise<string> {
     await ensureChainVerified();
-    console.log(`[EvmOracle] updateGasPrice: ${gasPricePerUnit.toString()}`);
-
     await ensureOracleHasGas();
-
     try {
       const estimatedGas = await escrow.updateGasPrice.estimateGas(gasPricePerUnit);
       const gasLimit = addGasBuffer(estimatedGas);
-
-      const tx: ContractTransactionResponse = await escrow.updateGasPrice(
-        gasPricePerUnit,
-        { gasLimit }
-      );
-
-      const receipt = await waitForReceipt(tx);
-      console.log(`[EvmOracle] Gas price updated, tx: ${tx.hash}`);
+      const tx: ContractTransactionResponse = await escrow.updateGasPrice(gasPricePerUnit, { gasLimit });
+      await waitForReceipt(tx);
       return tx.hash;
     } catch (err: any) {
       const reason = err?.reason || err?.shortMessage || err?.message || "Unknown error";
-      console.error(`[EvmOracle] updateGasPrice failed: ${reason}`);
       throw new EvmOracleError(`Gas price update failed: ${reason}`, "GAS_UPDATE_FAILED");
     }
   }
@@ -399,105 +365,51 @@ export function createEvmOracle() {
   ): Promise<{ txHash: string; blockNumber: number }> {
     await ensureChainVerified();
 
-    if (!isValidAddress(player)) {
-      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
-    }
-    if (!isValidAddress(sessionAddr)) {
-      throw new EvmOracleError("sessionAddr must be a valid EVM address", "INVALID_INPUT");
-    }
-    if (maxStakePerMatch <= 0n) {
-      throw new EvmOracleError("maxStakePerMatch must be positive", "INVALID_INPUT");
-    }
-    if (!isValidBytes(signature)) {
-      throw new EvmOracleError("signature must be valid hex", "INVALID_INPUT");
-    }
+    if (!isValidAddress(player)) throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
+    if (!isValidAddress(sessionAddr)) throw new EvmOracleError("sessionAddr must be a valid EVM address", "INVALID_INPUT");
+    if (maxStakePerMatch <= 0n) throw new EvmOracleError("maxStakePerMatch must be positive", "INVALID_INPUT");
+    if (!isValidBytes(signature)) throw new EvmOracleError("signature must be valid hex", "INVALID_INPUT");
 
-    console.log(`[EvmOracle] registerSessionKey — player: ${player}, session: ${sessionAddr}`);
-
+    console.log(`[EvmOracle:${chain}] registerSessionKey — player: ${player}, session: ${sessionAddr}`);
     await ensureOracleHasGas();
 
     try {
-      const estimatedGas = await escrow.registerSessionKey.estimateGas(
-        player,
-        sessionAddr,
-        maxStakePerMatch,
-        expiry,
-        signature
-      );
+      const estimatedGas = await escrow.registerSessionKey.estimateGas(player, sessionAddr, maxStakePerMatch, expiry, signature);
       const gasLimit = addGasBuffer(estimatedGas);
-
-      const tx: ContractTransactionResponse = await escrow.registerSessionKey(
-        player,
-        sessionAddr,
-        maxStakePerMatch,
-        expiry,
-        signature,
-        { gasLimit }
-      );
-
-      console.log(`[EvmOracle] RegisterSession tx sent: ${tx.hash}`);
+      const tx: ContractTransactionResponse = await escrow.registerSessionKey(player, sessionAddr, maxStakePerMatch, expiry, signature, { gasLimit });
       const receipt = await waitForReceipt(tx);
-      console.log(`[EvmOracle] Session registered in block ${receipt.blockNumber}`);
-
       return { txHash: tx.hash, blockNumber: receipt.blockNumber };
     } catch (err: any) {
       if (err instanceof EvmOracleError) throw err;
       const reason = err?.reason || err?.shortMessage || err?.message || "Unknown error";
-      console.error(`[EvmOracle] registerSessionKey failed: ${reason}`);
       throw new EvmOracleError(`Session registration failed: ${reason}`, "SESSION_REGISTER_FAILED", err?.hash);
     }
   }
 
-  async function signDepositAuthorization(
-    matchId: string,
-    stake: bigint,
-    assetType: number,
-    player: string
-  ): Promise<string> {
-    const nonce = await escrow.getDepositNonce(player);
-    const matchIdBytes32 = toMatchIdBytes32(matchId);
-
-    const DEPOSIT_TYPEHASH = ethers.keccak256(
-      ethers.toUtf8Bytes("Deposit(bytes32 matchId,uint256 stake,uint8 assetType,uint256 nonce)")
-    );
-
-    const domainSeparator = await escrow.getDomainSeparator();
-
-    const structHash = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes32", "bytes32", "uint256", "uint8", "uint256"],
-        [DEPOSIT_TYPEHASH, matchIdBytes32, stake, assetType, nonce]
-      )
-    );
-
-    const digest = ethers.keccak256(
-      ethers.solidityPacked(
-        ["string", "bytes32", "bytes32"],
-        ["\x19\x01", domainSeparator, structHash]
-      )
-    );
-
-    const sig = wallet.signingKey.sign(digest);
-    return ethers.Signature.from(sig).serialized;
-  }
-
   async function getSessionNonce(player: string): Promise<bigint> {
-    if (!isValidAddress(player)) {
-      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
-    }
+    if (!isValidAddress(player)) throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
     return escrow.sessionNonces(player);
   }
 
   async function getSessionKeyOnChain(player: string) {
-    if (!isValidAddress(player)) {
-      throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
-    }
+    if (!isValidAddress(player)) throw new EvmOracleError("player must be a valid EVM address", "INVALID_INPUT");
     return escrow.getSessionKey(player);
   }
 
   async function getMatchOnChain(matchId: string) {
     const matchIdBytes32 = toMatchIdBytes32(matchId);
-    return escrow.getMatch(matchIdBytes32);
+    const m = await escrow.getMatch(matchIdBytes32);
+    return {
+      matchId: m.matchId,
+      player1: m.player1,
+      player2: m.player2,
+      stake: m.stake as bigint,
+      assetType: Number(m.assetType),
+      gasReservePerPlayer: m.gasReservePerPlayer as bigint,
+      status: Number(m.status),
+      deadline: Number(m.deadline),
+      firstDepositor: m.firstDepositor as string,
+    };
   }
 
   async function getOracleBalance(): Promise<string> {
@@ -505,68 +417,67 @@ export function createEvmOracle() {
     return ethers.formatEther(balance);
   }
 
-  async function getGasReserveEstimate(): Promise<string> {
+  async function getGasReserveEstimate(): Promise<bigint> {
     const estimate = await escrow.getGasReserveEstimate();
-    return estimate.toString();
+    return estimate as bigint;
   }
 
-  async function preflightDeposit(
-    player1: string,
-    player2: string,
-    stake: bigint
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const checks: string[] = [];
-
-    const [sk1, sk2] = await Promise.all([
-      escrow.getSessionKey(player1),
-      escrow.getSessionKey(player2),
-    ]);
-
-    if (sk1.player === ethers.ZeroAddress || sk1.player.toLowerCase() !== player1.toLowerCase()) {
-      checks.push(`Player1 (${player1}) has no session key registered`);
-    } else {
-      if (sk1.revoked) checks.push(`Player1 session key is revoked`);
-      const now = BigInt(Math.floor(Date.now() / 1000));
-      if (BigInt(sk1.expiry) <= now) checks.push(`Player1 session key expired`);
-      if (stake > BigInt(sk1.maxStakePerMatch)) {
-        checks.push(`Player1 stake ${stake} exceeds session limit ${sk1.maxStakePerMatch}`);
-      }
-    }
-
-    if (sk2.player === ethers.ZeroAddress || sk2.player.toLowerCase() !== player2.toLowerCase()) {
-      checks.push(`Player2 (${player2}) has no session key registered`);
-    } else {
-      if (sk2.revoked) checks.push(`Player2 session key is revoked`);
-      const now = BigInt(Math.floor(Date.now() / 1000));
-      if (BigInt(sk2.expiry) <= now) checks.push(`Player2 session key expired`);
-      if (stake > BigInt(sk2.maxStakePerMatch)) {
-        checks.push(`Player2 stake ${stake} exceeds session limit ${sk2.maxStakePerMatch}`);
-      }
-    }
-
-    if (checks.length > 0) {
-      return { ok: false, reason: checks.join("; ") };
-    }
-    return { ok: true };
+  /**
+   * Subscribe to MatchActive events. Handler fires with decoded match info.
+   * Returns an unsubscribe function.
+   */
+  function watchMatchActive(
+    handler: (evt: {
+      matchId: string;
+      player1: string;
+      player2: string;
+      stake: bigint;
+      assetType: number;
+      gasReserve: bigint;
+    }) => void
+  ): () => void {
+    const listener = (
+      matchIdBytes32: string,
+      player1: string,
+      player2: string,
+      stake: bigint,
+      assetType: bigint,
+      gasReservePerPlayer: bigint
+    ) => {
+      handler({
+        matchId: matchIdBytes32,
+        player1,
+        player2,
+        stake,
+        assetType: Number(assetType),
+        gasReserve: gasReservePerPlayer,
+      });
+    };
+    escrow.on("MatchActive", listener);
+    console.log(`[EvmOracle:${chain}] Subscribed to MatchActive events`);
+    return () => {
+      escrow.off("MatchActive", listener);
+    };
   }
 
   return {
+    chain,
+    chainId: cfg.chainId,
     registerSessionKey,
     getSessionNonce,
     getSessionKeyOnChain,
-    submitDepositNative,
+    signMatchAuth,
     submitSettlement,
     updateGasPrice,
-    signDepositAuthorization,
     getMatchOnChain,
     getOracleBalance,
     getGasReserveEstimate,
-    preflightDeposit,
+    watchMatchActive,
     get address() {
       return wallet.address;
     },
     get escrowAddress() {
-      return escrowAddress;
+      return cfg.escrowAddress;
     },
   };
 }

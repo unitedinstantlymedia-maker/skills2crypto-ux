@@ -375,7 +375,7 @@ export async function registerRoutes(
 
   app.get("/api/session/nonce", async (req, res) => {
     const player = req.query.player as string;
-    const chainId = req.query.chainId as string;
+    const chainIdParam = Number(req.query.chainId);
 
     if (!player || !/^0x[0-9a-fA-F]{40}$/.test(player)) {
       return res.status(400).json({ error: "Invalid player address" });
@@ -386,18 +386,24 @@ export async function registerRoutes(
       return res.status(500).json({ error: "Server session wallet not configured" });
     }
 
+    const chain = chainIdParam === 1 ? "ETH" : chainIdParam === 56 ? "BSC" : null;
+    if (!chain) {
+      return res.status(400).json({ error: `Unsupported chain ID ${req.query.chainId}. Expected 1 (Ethereum) or 56 (BSC).` });
+    }
+
+    const { createEvmOracle } = await import("./oracle/evmOracle");
     try {
-      const { createEvmOracle } = await import("./oracle/evmOracle");
-      const oracle = createEvmOracle();
+      const oracle = createEvmOracle(chain);
       const nonce = await oracle.getSessionNonce(player);
 
       return res.json({
         nonce: nonce.toString(),
         sessionAddr,
         escrowAddress: oracle.escrowAddress,
+        chainId: oracle.chainId,
       });
     } catch (err: any) {
-      console.error("[session/nonce] Error:", err.message);
+      console.error(`[session/nonce:${chain}] Error:`, err.message);
       return res.status(500).json({ error: "Failed to fetch session nonce" });
     }
   });
@@ -418,9 +424,10 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Missing maxStakePerMatch or expiry" });
     }
 
-    const expectedChainId = Number(process.env.BSC_CHAIN_ID || 56);
-    if (Number(chainId) !== expectedChainId) {
-      return res.status(400).json({ error: `Invalid chain ID. Expected ${expectedChainId}` });
+    const chainIdNum = Number(chainId);
+    const chain = chainIdNum === 1 ? "ETH" : chainIdNum === 56 ? "BSC" : null;
+    if (!chain) {
+      return res.status(400).json({ error: `Unsupported chain ID ${chainId}. Expected 1 (Ethereum) or 56 (BSC).` });
     }
 
     const expectedSessionAddr = process.env.SERVER_SESSION_WALLET;
@@ -430,7 +437,7 @@ export async function registerRoutes(
 
     try {
       const { createEvmOracle } = await import("./oracle/evmOracle");
-      const oracle = createEvmOracle();
+      const oracle = createEvmOracle(chain);
 
       const result = await oracle.registerSessionKey(
         player,
@@ -440,50 +447,42 @@ export async function registerRoutes(
         signature
       );
 
-      console.log(`[session/register] Session registered for ${player}, tx: ${result.txHash}`);
+      console.log(`[session/register:${chain}] Session registered for ${player}, tx: ${result.txHash}`);
       return res.json({ txHash: result.txHash, blockNumber: result.blockNumber });
     } catch (err: any) {
-      console.error("[session/register] Error:", err.message);
+      console.error(`[session/register:${chain}] Error:`, err.message);
       return res.status(500).json({ error: err.message || "Session registration failed" });
     }
   });
 
-  app.post("/api/oracle/submit-deposit", async (req, res) => {
+  /**
+   * Returns an EIP-712 MatchAuth oracle signature plus the exact parameters
+   * the player must supply to `depositNativeAsPlayer` on-chain. Both players
+   * pull the same auth (cached in Redis) for a given match.
+   */
+  app.post("/api/oracle/match-auth", async (req, res) => {
     const { matchId } = req.body ?? {};
 
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
     }
 
-    const lockKey = `deposit_lock:${matchId}`;
-    const locked = await redis.set(lockKey, "1", { ex: 300, nx: true });
-    if (!locked) {
-      const existingTx = await redis.get(`deposit_tx:${matchId}`);
-      if (existingTx) {
-        return res.json({ txHash: existingTx, matchId, alreadyDeposited: true });
-      }
-      return res.status(409).json({ error: "Deposit already in progress for this match" });
-    }
-
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
       if (!matchData || !matchData.stake || !matchData.asset) {
-        await redis.del(lockKey);
         return res.status(404).json({ error: "Match not found" });
       }
 
       const asset = String(matchData.asset);
-
-      // BSC oracle handles BNB native deposits only.
-      if (asset !== "BNB") {
-        await redis.del(lockKey);
+      const { chainForAsset, createEvmOracle } = await import("./oracle/evmOracle");
+      const chain = chainForAsset(asset);
+      if (!chain) {
         return res.status(400).json({
-          error: `BSC oracle only handles BNB native deposits. Asset '${asset}' must use its dedicated chain (ETH → Ethereum mainnet, USDT → Tron, TON → TON).`,
+          error: `Asset '${asset}' does not use an EVM native deposit (USDT → Tron, TON → TON).`,
         });
       }
 
       if (!matchData.addr1 || !matchData.addr2) {
-        await redis.del(lockKey);
         return res.status(404).json({ error: "Match missing wallet addresses" });
       }
 
@@ -492,50 +491,89 @@ export async function registerRoutes(
       const stakeNum = Number(matchData.stake);
 
       if (!/^0x[0-9a-fA-F]{40}$/.test(player1) || !/^0x[0-9a-fA-F]{40}$/.test(player2)) {
-        await redis.del(lockKey);
         return res.status(400).json({ error: "Invalid player addresses in match data" });
       }
 
-      const decimals = 18;
-      const { ethers: ethersLib } = await import("ethers");
-      const stakeBigInt = ethersLib.parseUnits(String(stakeNum), decimals);
-      const assetTypeNum = 1; // Native
-
-      const { createEvmOracle } = await import("./oracle/evmOracle");
-      const oracle = createEvmOracle();
-
-      console.log(`[oracle/submit-deposit] Generating deposit sigs for match ${matchId}`);
-      console.log(`[oracle/submit-deposit]   player1: ${player1}, player2: ${player2}`);
-      console.log(`[oracle/submit-deposit]   stake: ${stakeNum} ${asset} (${stakeBigInt.toString()} wei)`);
-
-      const preflight = await oracle.preflightDeposit(player1, player2, stakeBigInt);
-      if (!preflight.ok) {
-        await redis.del(lockKey);
-        console.error(`[oracle/submit-deposit] Preflight failed: ${preflight.reason}`);
-        return res.status(400).json({ error: preflight.reason });
+      // Return a cached auth if one is still valid so both players use identical params.
+      const authKey = `match_auth:${matchId}`;
+      const cached = await redis.get(authKey);
+      if (cached) {
+        const parsed = typeof cached === "string" ? JSON.parse(cached) : cached;
+        if (parsed.deadline > Math.floor(Date.now() / 1000) + 30) {
+          return res.json(parsed);
+        }
       }
 
-      const sig1 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player1);
-      const sig2 = await oracle.signDepositAuthorization(matchId, stakeBigInt, assetTypeNum, player2);
+      const { ethers: ethersLib } = await import("ethers");
+      const stakeBigInt = ethersLib.parseUnits(String(stakeNum), 18);
 
+      const oracle = createEvmOracle(chain);
       const gasReserve = await oracle.getGasReserveEstimate();
-      const totalPerPlayer = stakeBigInt + BigInt(gasReserve);
-      const totalValue = totalPerPlayer * 2n;
-      const result = await oracle.submitDepositNative(matchId, stakeBigInt, player1, player2, sig1, sig2, totalValue);
 
-      await redis.set(`deposit_tx:${matchId}`, result.txHash, { ex: 86400 });
+      // 15-minute deposit window.
+      const deadline = Math.floor(Date.now() / 1000) + 15 * 60;
 
-      console.log(`[oracle/submit-deposit] Deposit for match ${matchId}: tx=${result.txHash}`);
+      const auth = await oracle.signMatchAuth({
+        matchId,
+        player1,
+        player2,
+        stake: stakeBigInt,
+        gasReserve,
+        deadline,
+      });
+
+      await redis.set(authKey, JSON.stringify(auth), { ex: 60 * 20 });
+      // Reverse index so the on-chain MatchActive listener (which receives
+      // the keccak256 bytes32) can resolve back to the app matchId and
+      // emit the socket event into the correct `match:${matchId}` room.
+      await redis.set(`match_by_hash:${auth.matchIdBytes32.toLowerCase()}`, matchId, { ex: 60 * 60 * 24 });
+
+      console.log(`[oracle/match-auth:${chain}] issued for match ${matchId}: stake=${stakeBigInt.toString()}, gasReserve=${gasReserve.toString()}, deadline=${deadline}`);
+
+      return res.json(auth);
+    } catch (err: any) {
+      console.error("[oracle/match-auth] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to issue match auth" });
+    }
+  });
+
+  /**
+   * Polling endpoint clients use after submitting their native deposit.
+   * Returns the on-chain match status so the UI can wait for both players.
+   */
+  app.get("/api/oracle/match-status/:matchId", async (req, res) => {
+    const { matchId } = req.params;
+    if (!matchId) return res.status(400).json({ error: "matchId required" });
+
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+
+      const { chainForAsset, createEvmOracle } = await import("./oracle/evmOracle");
+      const chain = chainForAsset(String(matchData.asset));
+      if (!chain) {
+        return res.status(400).json({ error: "Not an EVM native match" });
+      }
+
+      const oracle = createEvmOracle(chain);
+      const m = await oracle.getMatchOnChain(matchId);
+
+      // status: 0=None, 1=Active, 2=Settled, 3=WaitingForP2
+      const statusLabel = ["none", "active", "settled", "waiting_for_p2"][m.status] ?? "unknown";
       return res.json({
-        txHash: result.txHash,
-        matchId: result.matchId,
-        blockNumber: result.blockNumber,
-        gasUsed: result.gasUsed,
+        matchId,
+        chain,
+        chainId: oracle.chainId,
+        status: m.status,
+        statusLabel,
+        firstDepositor: m.firstDepositor,
+        deadline: m.deadline,
       });
     } catch (err: any) {
-      await redis.del(lockKey);
-      console.error("[oracle/submit-deposit] Error:", err.message);
-      return res.status(500).json({ error: err.message || "Deposit submission failed" });
+      console.error("[oracle/match-status] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Status lookup failed" });
     }
   });
 
