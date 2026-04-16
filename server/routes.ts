@@ -477,10 +477,13 @@ export async function registerRoutes(
       // Asset gating MUST come before address validation so that
       // USDT (Tron base58) / TON (non-EVM) matches get a clear
       // "wrong endpoint" error instead of "invalid EVM address".
-      if (asset !== "BNB" && asset !== "ETH") {
+      // BSC oracle is currently bound to BNB native only. ETH on Ethereum
+      // mainnet will be wired up in Task #12 with its own dedicated oracle.
+      // USDT lives on Tron (Task #13); TON lives on TON (Task #14).
+      if (asset !== "BNB") {
         await redis.del(lockKey);
         return res.status(400).json({
-          error: `EVM oracle only supports BNB/ETH native deposits. Asset '${asset}' must use its dedicated chain (USDT → Tron, TON → TON).`,
+          error: `BSC oracle only handles BNB native deposits. Asset '${asset}' must use its dedicated chain (ETH → Ethereum mainnet, USDT → Tron, TON → TON).`,
         });
       }
 

@@ -180,7 +180,14 @@ export default function Lobby() {
         <div className="space-y-3">
           <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">{t('Select Asset', 'Select Asset')}</label>
           <ToggleGroup type="single" value={state.selectedAsset} onValueChange={handleAssetChange} className="justify-start gap-2 flex-wrap">
-            {(['USDT', 'ETH', 'BNB', 'TON'] as Asset[]).map((asset) => (
+            {(['USDT', 'ETH', 'BNB', 'TON'] as Asset[]).map((asset) => {
+              const networkLabel: Record<Asset, string> = {
+                USDT: 'Tron',
+                ETH: 'ETH',
+                BNB: 'BSC',
+                TON: 'TON',
+              };
+              return (
               <ToggleGroupItem 
                 key={asset} 
                 value={asset}
@@ -193,9 +200,11 @@ export default function Lobby() {
                     <path d="M20 11L27 15V21L20 29V11Z" fill="white" fillOpacity="0.7" />
                   </svg>
                 )}
-                {asset}
+                <span>{asset}</span>
+                <span className="text-[10px] font-mono opacity-60 leading-none">{networkLabel[asset]}</span>
               </ToggleGroupItem>
-            ))}
+              );
+            })}
           </ToggleGroup>
           <p className="text-xs font-mono text-muted-foreground ml-1">
             {t('Balance', 'Balance')}: <span className={isBalanceSufficient ? "text-white" : "text-destructive font-bold"}>

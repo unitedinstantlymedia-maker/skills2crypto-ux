@@ -39,7 +39,7 @@ npm run db:push     # Push database schema
 ## Key Features
 
 - Games: Chess, Tetris (Block Stack), Checkers, Battleship
-- Assets: USDT (BSC BEP-20 + Tron TRC-20), ETH (Ethereum), BNB (BSC), TON (The Open Network)
+- Assets: BNB (BSC native), ETH (Ethereum mainnet native), USDT (Tron TRC-20 only), TON (The Open Network). Each asset lives on exactly one chain — no cross-chain matching, no BSC USDT.
 - Stake presets: 5 / 20 / 50 / 100 + Custom
 - Fee: 3% of total pot
 - Real wallet connections via @reown/appkit (EVM — MetaMask, Trust, Coinbase, WalletConnect)
