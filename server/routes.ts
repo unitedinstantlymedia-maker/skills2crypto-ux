@@ -61,9 +61,24 @@ export async function registerRoutes(
       return res.status(400).json({ error: "invalid stake" });
     }
 
-    const cleanWallet = (walletAddress && /^0x[0-9a-fA-F]{40}$/.test(walletAddress))
-      ? walletAddress
-      : "";
+    // Per-asset wallet validation: BNB/ETH require an EVM 0x-address; USDT
+    // requires a Tron base58 address (T…); TON accepts any non-empty address.
+    let cleanWallet = "";
+    if (walletAddress && typeof walletAddress === "string") {
+      if (asset === "BNB" || asset === "ETH") {
+        if (/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) cleanWallet = walletAddress;
+      } else if (asset === "USDT") {
+        if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(walletAddress)) cleanWallet = walletAddress;
+      } else {
+        // TON — keep raw address; deeper validation happens in the TON adapter.
+        cleanWallet = walletAddress;
+      }
+    }
+    if (!cleanWallet) {
+      return res.status(400).json({
+        error: `Wallet address required for asset ${asset} (BNB/ETH need EVM, USDT needs Tron base58, TON needs TON address)`,
+      });
+    }
 
     try {
       const result = await findOrCreateMatch({
@@ -573,6 +588,210 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("[oracle/match-status] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Status lookup failed" });
+    }
+  });
+
+  // ============================================================
+  // Tron USDT TRC-20 endpoints (Task #13)
+  // ============================================================
+
+  /**
+   * Returns EIP-712 typed-data + per-player nonces a TronLink wallet must sign
+   * for the on-chain depositUSDT call. Cached in Redis so both players get
+   * consistent nonces during the deposit window.
+   */
+  app.post("/api/tron/deposit-auth", async (req, res) => {
+    const { matchId } = req.body ?? {};
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.stake || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+      if (String(matchData.asset) !== "USDT") {
+        return res.status(400).json({ error: `Asset '${matchData.asset}' is not USDT (Tron)` });
+      }
+      if (!matchData.addr1 || !matchData.addr2) {
+        return res.status(404).json({ error: "Match missing wallet addresses" });
+      }
+
+      const player1 = String(matchData.addr1);
+      const player2 = String(matchData.addr2);
+      const stakeNum = Number(matchData.stake);
+
+      const authKey = `tron_deposit_auth:${matchId}`;
+      const cached = await redis.get(authKey);
+      if (cached) {
+        const parsed = typeof cached === "string" ? JSON.parse(cached) : cached;
+        return res.json(parsed);
+      }
+
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      const auth = await tron.buildDepositAuth({
+        matchId,
+        player1Base58: player1,
+        player2Base58: player2,
+        stakeUsdt: stakeNum,
+      });
+
+      await redis.set(authKey, JSON.stringify(auth), { ex: 60 * 20 });
+      console.log(`[tron/deposit-auth] issued for match ${matchId}: stake=${auth.stake}`);
+      return res.json(auth);
+    } catch (err: any) {
+      console.error("[tron/deposit-auth] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to build deposit auth" });
+    }
+  });
+
+  /**
+   * Collects each player's signed Deposit message. Once both have submitted,
+   * the oracle bundles the two sigs and broadcasts depositUSDT on Tron
+   * (single on-chain call pulls both stakes via prior allowance).
+   */
+  app.post("/api/tron/deposit-sig", async (req, res) => {
+    const { matchId, signature } = req.body ?? {};
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+    if (!signature || typeof signature !== "string" || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return res.status(400).json({ error: "Invalid signature" });
+    }
+
+    try {
+      const authKey = `tron_deposit_auth:${matchId}`;
+      const cachedAuth = await redis.get(authKey);
+      if (!cachedAuth) {
+        return res.status(404).json({ error: "Deposit auth expired or missing — request a fresh one" });
+      }
+      const auth = typeof cachedAuth === "string" ? JSON.parse(cachedAuth) : cachedAuth;
+
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+
+      // Determine which player this signature belongs to by trying both.
+      let matchedPlayer: "1" | "2" | null = null;
+      if (
+        tron.verifyDepositSig({
+          matchIdBytes32: auth.matchIdBytes32,
+          stakeUnits: auth.stake,
+          nonce: auth.nonce1,
+          expectedPlayerEvmHex: auth.player1EvmHex,
+          signature,
+        })
+      ) {
+        matchedPlayer = "1";
+      } else if (
+        tron.verifyDepositSig({
+          matchIdBytes32: auth.matchIdBytes32,
+          stakeUnits: auth.stake,
+          nonce: auth.nonce2,
+          expectedPlayerEvmHex: auth.player2EvmHex,
+          signature,
+        })
+      ) {
+        matchedPlayer = "2";
+      }
+
+      if (!matchedPlayer) {
+        return res.status(400).json({ error: "Signature does not match either player" });
+      }
+
+      const sigKey = `tron_deposit_sig:${matchId}`;
+      // hsetnx-style — preserve first sig per slot, ignore retries.
+      const existing = await redis.hgetall(sigKey);
+      const slot = matchedPlayer === "1" ? "sig1" : "sig2";
+      if (!existing || !existing[slot]) {
+        await redis.hset(sigKey, { [slot]: signature });
+        await redis.expire(sigKey, 60 * 20);
+      }
+
+      const after = (await redis.hgetall(sigKey)) || {};
+      const sig1 = after.sig1 ? String(after.sig1) : null;
+      const sig2 = after.sig2 ? String(after.sig2) : null;
+
+      if (sig1 && sig2) {
+        // Idempotency guard so duplicate posts can't trigger two deposits.
+        const dispatchKey = `tron_deposit_dispatch:${matchId}`;
+        const claimed = await redis.set(dispatchKey, "1", { ex: 7200, nx: true });
+        if (claimed) {
+          console.log(`[tron/deposit-sig] both sigs received for ${matchId} — broadcasting depositUSDT`);
+          tron
+            .submitDepositUSDT({
+              matchId,
+              stakeUnits: auth.stake,
+              player1EvmHex: auth.player1EvmHex,
+              player2EvmHex: auth.player2EvmHex,
+              sig1,
+              sig2,
+            })
+            .then(async (r) => {
+              console.log(`[tron/deposit-sig] depositUSDT broadcast tx=${r.txid}`);
+              // Funding succeeded — release the gameplay gate the same way
+              // the EVM watchMatchActive listener does for native deposits.
+              try {
+                const { markMatchFunded } = await import("./socket");
+                markMatchFunded(matchId);
+                io.to(`match:${matchId}`).emit("match-funded", {
+                  matchId,
+                  chain: "TRON",
+                  player1: auth.player1,
+                  player2: auth.player2,
+                });
+              } catch (e: any) {
+                console.error(`[tron/deposit-sig] failed to emit match-funded:`, e?.message || e);
+              }
+            })
+            .catch(async (err) => {
+              console.error(`[tron/deposit-sig] depositUSDT failed:`, err?.message || err);
+              // Release the dispatch lock so a retry is possible.
+              await redis.del(dispatchKey);
+            });
+        }
+        return res.json({ status: "dispatched", player: matchedPlayer });
+      }
+      return res.json({ status: "waiting", player: matchedPlayer });
+    } catch (err: any) {
+      console.error("[tron/deposit-sig] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to process signature" });
+    }
+  });
+
+  /**
+   * Polled by the client to know when the on-chain match has flipped to Active.
+   * Returns the same shape as /api/oracle/match-status.
+   */
+  app.get("/api/tron/match-status/:matchId", async (req, res) => {
+    const { matchId } = req.params;
+    if (!matchId) return res.status(400).json({ error: "matchId required" });
+
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+      if (String(matchData.asset) !== "USDT") {
+        return res.status(400).json({ error: "Not a Tron USDT match" });
+      }
+
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      const m = await tron.getMatchOnChain(matchId);
+
+      const statusLabel = ["none", "active", "settled", "waiting_for_p2"][m.status] ?? "unknown";
+      return res.json({
+        matchId,
+        chain: "TRON",
+        chainId: tron.chainId,
+        status: m.status,
+        statusLabel,
+      });
+    } catch (err: any) {
+      console.error("[tron/match-status] Error:", err?.message || err);
       return res.status(500).json({ error: err?.message || "Status lookup failed" });
     }
   });

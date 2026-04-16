@@ -403,15 +403,74 @@ await contract.send(oracle, { value: toNano("0.1") }, {
 
 ---
 
-## Tron Deployment Notes
+## Tron Deployment & Operations (Task #13)
 
-The same Solidity contract works on Tron with these differences:
-- Compile with `tronbox` instead of Hardhat
-- Platform wallet (Ledger): `TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq`
-- USDT TRC-20 address: `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
-- Use `tronWeb` SDK for deployment
-- Session key signatures use the same EIP-712 format (TronLink supports it)
-- Gas is measured in "energy" and "bandwidth" on Tron — adjust `estimatedSettlementGas` accordingly
+The same `Skills2CryptoEscrow` Solidity contract is deployed on Tron via
+TronBox. Tron's TVM is bytecode-compatible with EVM 0.8.24, so the contract
+behaves identically — only the deployment toolchain and address format change.
+
+### One-time setup
+
+```bash
+npm install -g tronbox
+cd contracts/tron
+
+# Required env vars in your project .env:
+#   TRON_DEPLOYER_PRIVATE_KEY  Deployer wallet (must hold TRX for energy/bandwidth)
+#   ORACLE_TRON_ADDRESS        Tron base58 address derived from ORACLE_PRIVATE_KEY
+#   TRON_USDT_CONTRACT         Defaults to TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+#   TRON_PLATFORM_WALLET       Defaults to TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq
+
+# Compile + deploy
+tronbox compile
+tronbox migrate --network shasta   # Shasta testnet
+tronbox migrate --network mainnet  # Tron mainnet (requires funded deployer)
+```
+
+After deploy, copy the printed contract address into your `.env` as
+`TRON_ESCROW_CONTRACT`.
+
+### Required runtime environment variables
+
+| Var                       | Purpose                                              |
+|---------------------------|------------------------------------------------------|
+| `ORACLE_PRIVATE_KEY`      | Same key as EVM (TronWeb derives Tron base58 from it)|
+| `TRON_RPC_URL`            | TronGrid full-host endpoint                          |
+| `TRON_ESCROW_CONTRACT`    | Tron base58 escrow address (output of migrate)       |
+| `TRON_USDT_CONTRACT`      | Optional override (default: official USDT TRC-20)    |
+| `TRON_PLATFORM_WALLET`    | Optional override (default: Ledger address)          |
+| `TRON_CHAIN_ID`           | Optional, defaults to mainnet `728126428`            |
+| `TRON_MIN_GAS_TRX`        | Min TRX in oracle wallet before refusing tx (def: 20)|
+
+### USDT TRC-20 player flow
+
+1. Player connects TronLink (existing `useTronLink` hook).
+2. On first USDT match, frontend calls `usdt.approve(escrow, MAX_UINT)` —
+   this is the **only** transaction the player ever signs that costs them
+   TRX (a one-time energy/bandwidth fee, ~$1).
+3. For each match, the player signs an off-chain EIP-712 `Deposit` message
+   via TronLink (no TRX cost) and POSTs it to `/api/tron/deposit-sig`.
+4. Once both players have submitted sigs, the oracle bundles them and
+   broadcasts `depositUSDT(matchId, stake, p1, p2, sig1, sig2)` — pulling
+   `stake + gasReserve` USDT from each player's allowance. The oracle pays
+   all TRX gas; it is reimbursed in USDT from the gasReserve.
+
+### Backend endpoints
+
+- `POST /api/tron/deposit-auth` — returns EIP-712 typed-data + nonces.
+- `POST /api/tron/deposit-sig`  — collects per-player sigs; auto-dispatches
+  `depositUSDT` once both arrive (idempotent via Redis lock).
+- `GET  /api/tron/match-status/:matchId` — on-chain status poll.
+
+### Operational notes
+
+- Oracle wallet must hold **at least 20 TRX** at all times. Top up
+  the address printed in the `[TronOracle] Oracle wallet:` startup log.
+- Settlement on Tron uses the same `settleMatch(matchId, winner, reason)`
+  call. The dispatcher in `server/socket.ts` routes USDT matches to
+  `tronOracle.submitSettlement` automatically.
+- TronLink TIP-712 signatures are EIP-712 compatible — the contract's
+  `ECDSA.recover` works unchanged.
 
 ---
 

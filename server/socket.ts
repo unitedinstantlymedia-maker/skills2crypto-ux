@@ -161,14 +161,24 @@ async function settleMatchOnChain(
       return;
     }
 
-    const { createEvmOracle, chainForAsset } = await import("./oracle/evmOracle");
-    const chain = chainForAsset(asset || "");
-    if (!chain) {
-      console.warn(`[settlement] asset '${asset}' is not an EVM native match — skipping EVM settlement for ${matchId}`);
-      await redis.del(lockKey);
-      return;
-    }
-    const oracle = createEvmOracle(chain);
+    // Normalize the winner string against the canonical chain-correct
+    // addresses we recorded at match-creation. Game clients are not all
+    // asset-aware, so winnerId may be the wrong-chain address (e.g. an EVM
+    // address for a USDT/Tron match). We resolve by case-insensitive equality
+    // against addr1/addr2 and fall back to a socket-slot lookup so settlement
+    // never broadcasts an address from the wrong chain.
+    const normalizeWinner = (raw: string | null): string | null => {
+      if (!raw) return null;
+      const lc = raw.toLowerCase();
+      if (addr1.toLowerCase() === lc || addr1 === raw) return addr1;
+      if (addr2.toLowerCase() === lc || addr2 === raw) return addr2;
+      // Try resolving via socket id slot (p1/p2 are socket ids).
+      const p1 = matchData?.p1 ? String(matchData.p1) : null;
+      const p2 = matchData?.p2 ? String(matchData.p2) : null;
+      if (p1 && raw === p1) return addr1;
+      if (p2 && raw === p2) return addr2;
+      return null;
+    };
 
     let winner: string;
     let reason: number;
@@ -176,20 +186,51 @@ async function settleMatchOnChain(
     const isDisconnect = gameReason === 'disconnect' || gameReason === 'forfeit' || gameReason === 'abandoned';
 
     if (resultType === 'draw') {
-      winner = ZERO_ADDRESS;
       reason = 1;
+      winner = ZERO_ADDRESS;
     } else if (isDisconnect) {
-      winner = winnerId || ZERO_ADDRESS;
       reason = 2;
+      const resolved = normalizeWinner(winnerId);
+      if (winnerId && !resolved) {
+        console.warn(`[settlement] disconnect winner '${winnerId}' did not match addr1/addr2 for ${matchId} — using ZERO_ADDRESS`);
+      }
+      winner = resolved || ZERO_ADDRESS;
     } else if (resultType === 'win' && winnerId) {
-      winner = winnerId;
+      const resolved = normalizeWinner(winnerId);
+      if (!resolved) {
+        console.error(`[settlement] SKIPPING match ${matchId}: winner '${winnerId}' could not be resolved to addr1 (${addr1}) or addr2 (${addr2})`);
+        await redis.del(lockKey);
+        return;
+      }
       reason = 0;
+      winner = resolved;
     } else {
       console.error(`[settlement] SKIPPING match ${matchId}: decisive result but winner is unresolved (resultType=${resultType}, winnerId=${winnerId})`);
       await redis.del(lockKey);
       return;
     }
 
+    if (asset === "USDT") {
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const tron = createTronOracle();
+      // winner is currently a base58 Tron address (or zero) — convert to evm hex
+      // for the contract's address-typed parameter.
+      const winnerEvmHex =
+        winner === ZERO_ADDRESS ? ZERO_ADDRESS : tron.tronAddressToEvmHex(winner);
+      console.log(`[settlement][TRON] settling match ${matchId}: winner=${winner}, reason=${reason}`);
+      const result = await tron.submitSettlement(matchId, winnerEvmHex, reason);
+      console.log(`[settlement][TRON] match ${matchId} settled: tx=${result.txHash}`);
+      return;
+    }
+
+    const { createEvmOracle, chainForAsset } = await import("./oracle/evmOracle");
+    const chain = chainForAsset(asset || "");
+    if (!chain) {
+      console.warn(`[settlement] asset '${asset}' is not on a supported on-chain network — skipping settlement for ${matchId}`);
+      await redis.del(lockKey);
+      return;
+    }
+    const oracle = createEvmOracle(chain);
     console.log(`[settlement] settling match ${matchId}: winner=${winner}, reason=${reason}`);
     const result = await oracle.submitSettlement(matchId, winner, reason);
     console.log(`[settlement] match ${matchId} settled on-chain: tx=${result.txHash}`);

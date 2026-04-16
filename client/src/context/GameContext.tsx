@@ -5,6 +5,7 @@ import { walletAdapter } from '@/core/wallet/WalletAdapter';
 import { walletStore } from '@/core/wallet/WalletStore';
 import { escrowAdapter } from '@/core/escrow';
 import { historyStore } from '@/core/history/HistoryStore';
+import { useRealWallet } from '@/core/wallet/WalletProvider';
 import type { WalletState, HistoryEntry } from '@/core/types';
 
 import { findMatch } from '@/lib/api';
@@ -50,6 +51,7 @@ interface GameContextValue {
 const Ctx = createContext<GameContextValue | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
+  const realWallet = useRealWallet();
   const [walletState, setWalletState] = useState<WalletState>(walletStore.getState());
   const [selectedGame, setSelectedGame] = useState<Game | null>(() => {
     const s = localStorage.getItem('skills2crypto_selected_game');
@@ -141,7 +143,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         status: 'funding',
       });
 
-      s.emit('join-match', { matchId: payload.matchId, playerId: walletStore.getState().address || '' });
+      // Use the asset-appropriate wallet address as the playerId so the server
+      // and on-chain settlement reference the same chain identity.
+      const pid =
+        asset === 'BNB' || asset === 'ETH'
+          ? realWallet.evmAddress || ''
+          : asset === 'USDT'
+          ? realWallet.tronAddress || ''
+          : asset === 'TON'
+          ? realWallet.tonAddress || ''
+          : walletStore.getState().address || '';
+      s.emit('join-match', { matchId: payload.matchId, playerId: pid });
 
       depositInFlightRef.current.add(payload.matchId);
       void escrowAdapter
@@ -222,12 +234,29 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
 
     try {
+      // Pick the wallet address that matches the asset's chain. The primary
+      // walletState.address may be the EVM one even when USDT/TON wallets are
+      // also connected, so we route per-asset to avoid sending mismatched IDs.
+      const assetWalletAddress = (() => {
+        if (selectedAsset === 'BNB' || selectedAsset === 'ETH') return realWallet.evmAddress || '';
+        if (selectedAsset === 'USDT') return realWallet.tronAddress || '';
+        if (selectedAsset === 'TON') return realWallet.tonAddress || '';
+        return walletState.address || '';
+      })();
+
+      if (!assetWalletAddress) {
+        console.warn(`[GameContext] no ${selectedAsset} wallet connected`);
+        setIsFinding(false);
+        setCurrentMatch(null);
+        return;
+      }
+
       const res = await findMatch({
         game: selectedGame,
         asset: selectedAsset,
         stake: stakeAmount,
         socketId: sock.id,
-        walletAddress: walletState.address || '',
+        walletAddress: assetWalletAddress,
       });
 
       if (res.status === 'matched') {
@@ -248,7 +277,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           players: res.players,
         });
 
-        sock.emit('join-match', { matchId: res.matchId, playerId: walletState.address || '' });
+        sock.emit('join-match', { matchId: res.matchId, playerId: assetWalletAddress });
         try {
           await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
         } catch (e: any) {
