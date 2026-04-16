@@ -8,6 +8,7 @@ import { db } from "./db";
 import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
+import { randomBytes } from "crypto";
 
 const CHALLENGE_TTL = 3600;
 const EXPIRED_CHALLENGE_TTL = 86400;
@@ -885,35 +886,107 @@ export async function registerRoutes(
   });
 
   /**
-   * POST /api/tron/sponsor-trx
-   * Body: { wallet: <base58> }
-   * One-time per-wallet TRX sponsorship so the player can submit their USDT
-   * approve() without ever owning TRX. Idempotent via Redis (24h window).
+   * GET /api/tron/sponsor-challenge?wallet=<base58>
+   * Issues a short-lived challenge string the wallet must sign to prove
+   * ownership before /api/tron/sponsor-trx will release any TRX.
    */
-  app.post("/api/tron/sponsor-trx", async (req, res) => {
-    const wallet = String(req.body?.wallet || "");
+  app.get("/api/tron/sponsor-challenge", async (req, res) => {
+    const wallet = String(req.query.wallet || "");
     if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
       return res.status(400).json({ error: "Invalid Tron wallet" });
     }
-    const sponsorKey = `tron_sponsor:${wallet}`;
-    const claimed = await redis.set(sponsorKey, "1", { ex: 60 * 60 * 24, nx: true });
-    if (!claimed) {
-      return res.status(429).json({ error: "Already sponsored within 24h", wallet });
+    const nonce = randomBytes(16).toString("hex");
+    const challenge = `Skills2Crypto sponsor request for ${wallet} @ ${Date.now()} :: ${nonce}`;
+    await redis.set(`tron_sponsor_chal:${wallet}`, challenge, { ex: 300 });
+    return res.json({ challenge });
+  });
+
+  /**
+   * POST /api/tron/sponsor-trx
+   * Body: { wallet: <base58>, signature: <hex> }
+   *
+   * Sends a one-time TRX top-up so the player can pay their USDT approve()
+   * cost. Hardened against drain attacks:
+   *   - Caller must hold a valid signed challenge (proves wallet ownership).
+   *   - Per-wallet 24h Redis lock.
+   *   - Per-IP daily request cap (default 5/day).
+   *   - Global daily budget cap (default 1000 TRX/day).
+   *   - Skips if player already has ≥ 30 TRX.
+   */
+  app.post("/api/tron/sponsor-trx", async (req, res) => {
+    const wallet = String(req.body?.wallet || "");
+    const signature = String(req.body?.signature || "");
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
+      return res.status(400).json({ error: "Invalid Tron wallet" });
+    }
+    if (!signature) {
+      return res.status(400).json({ error: "Missing signature" });
+    }
+
+    // 1) Verify wallet ownership via signed challenge.
+    const challenge = await redis.get<string>(`tron_sponsor_chal:${wallet}`);
+    if (!challenge) {
+      return res.status(400).json({ error: "No active challenge — request /api/tron/sponsor-challenge first" });
     }
     try {
       const { createTronOracle } = await import("./oracle/tronOracle");
       const tron = createTronOracle();
-      // Skip if player already has more than enough TRX for the approve.
+      // Re-import TronWeb only to verify the signature; reuse the oracle's
+      // tronAddressToEvmHex to compare addresses.
+      const TronWebMod: any = await import("tronweb");
+      const TronWeb = TronWebMod.default || TronWebMod.TronWeb || TronWebMod;
+      const tw = new TronWeb({ fullHost: process.env.TRON_RPC_URL || "https://api.trongrid.io" });
+      const recovered: string = await tw.trx.verifyMessageV2(challenge, signature);
+      if (!recovered || recovered !== wallet) {
+        return res.status(401).json({ error: "Signature does not match wallet" });
+      }
+      // Burn the challenge so it can't be replayed.
+      await redis.del(`tron_sponsor_chal:${wallet}`);
+
+      // 2) Per-IP daily limit.
+      const ip = String(req.headers["x-forwarded-for"] || req.ip || "unknown").split(",")[0].trim();
+      const ipKey = `tron_sponsor_ip:${ip}:${new Date().toISOString().slice(0, 10)}`;
+      const ipCount = await redis.incr(ipKey);
+      if (ipCount === 1) await redis.expire(ipKey, 60 * 60 * 24);
+      const IP_DAILY_LIMIT = Number(process.env.TRON_SPONSOR_IP_DAILY ?? 5);
+      if (ipCount > IP_DAILY_LIMIT) {
+        return res.status(429).json({ error: "Daily sponsor limit reached for this IP" });
+      }
+
+      // 3) Per-wallet 24h lock.
+      const sponsorKey = `tron_sponsor:${wallet}`;
+      const claimed = await redis.set(sponsorKey, "1", { ex: 60 * 60 * 24, nx: true });
+      if (!claimed) {
+        return res.status(429).json({ error: "Already sponsored within 24h", wallet });
+      }
+
+      // 4) Skip if already funded.
       const trx = await tron.getPlayerBalanceTrx(wallet);
       if (trx >= 30) {
         return res.json({ status: "skipped", wallet, trxBalance: trx });
       }
+
+      // 5) Global daily budget cap.
       const SPONSOR_TRX = Number(process.env.TRON_PLAYER_SPONSOR_TRX ?? 35);
-      const result = await tron.sponsorPlayerTrx(wallet, SPONSOR_TRX);
-      return res.json({ status: "sent", wallet, amount: SPONSOR_TRX, txid: result.txid });
+      const GLOBAL_DAILY_TRX_CAP = Number(process.env.TRON_SPONSOR_DAILY_CAP_TRX ?? 1000);
+      const budgetKey = `tron_sponsor_budget:${new Date().toISOString().slice(0, 10)}`;
+      const budgetUsed = Number((await redis.get<string>(budgetKey)) || 0);
+      if (budgetUsed + SPONSOR_TRX > GLOBAL_DAILY_TRX_CAP) {
+        await redis.del(sponsorKey);
+        return res.status(503).json({ error: "Global daily sponsor budget exhausted — try tomorrow" });
+      }
+      await redis.set(budgetKey, String(budgetUsed + SPONSOR_TRX), { ex: 60 * 60 * 30 });
+
+      try {
+        const result = await tron.sponsorPlayerTrx(wallet, SPONSOR_TRX);
+        return res.json({ status: "sent", wallet, amount: SPONSOR_TRX, txid: result.txid });
+      } catch (err: any) {
+        // Release locks/budget on broadcast failure so the user can retry.
+        await redis.del(sponsorKey);
+        await redis.set(budgetKey, String(budgetUsed), { ex: 60 * 60 * 30 });
+        throw err;
+      }
     } catch (err: any) {
-      // Release the lock on failure so the user can retry.
-      await redis.del(sponsorKey);
       console.error("[tron/sponsor-trx] Error:", err?.message || err);
       return res.status(500).json({ error: err?.message || "Sponsor failed" });
     }

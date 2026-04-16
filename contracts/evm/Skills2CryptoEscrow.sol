@@ -151,7 +151,7 @@ contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
     event SessionRequiredSet(bool required);
 
     function setSessionRequired(bool required) external {
-        require(msg.sender == oracle, "Only oracle");
+        require(msg.sender == oracle || msg.sender == owner(), "Only oracle or owner");
         sessionRequired = required;
         emit SessionRequiredSet(required);
     }

@@ -82,10 +82,20 @@ async function ensureUsdtApproval(escrowBase58: string, requiredUnits: bigint): 
   if (balanceTrx < 30) {
     console.log(`[TronEscrow] Player TRX balance ${balanceTrx} insufficient — requesting sponsor`);
     try {
+      // Step 1: fetch challenge from server.
+      const chRes = await fetch(`/api/tron/sponsor-challenge?wallet=${encodeURIComponent(owner)}`);
+      const chData = await chRes.json();
+      if (!chRes.ok) throw new Error(chData?.error || "challenge failed");
+      const challenge: string = chData.challenge;
+
+      // Step 2: sign the challenge with TronLink to prove wallet ownership.
+      const signature: string = await tw.trx.signMessageV2(challenge);
+
+      // Step 3: POST signature + wallet — server only sponsors if it verifies.
       const r = await fetch("/api/tron/sponsor-trx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: owner }),
+        body: JSON.stringify({ wallet: owner, signature }),
       });
       const data = await r.json();
       if (!r.ok && r.status !== 429) {
@@ -96,7 +106,7 @@ async function ensureUsdtApproval(escrowBase58: string, requiredUnits: bigint): 
       // Wait briefly for the sponsor tx to confirm before broadcasting approve.
       await new Promise((res) => setTimeout(res, 4000));
     } catch (e: any) {
-      console.error(`[TronEscrow] sponsor-trx fetch failed:`, e?.message || e);
+      console.error(`[TronEscrow] sponsor-trx flow failed:`, e?.message || e);
     }
   }
 
