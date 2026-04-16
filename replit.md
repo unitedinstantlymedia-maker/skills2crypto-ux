@@ -167,13 +167,13 @@ npm run db:push     # Push database schema
 12. **Expiration** - Challenges expire after 1 hour (3600s TTL), expired challenges kept 24 hours for history
 
 ### Real Wallet Integration (Apr 13, 2026)
-1. **@reown/appkit v1.8.19** - Universal wallet modal (MetaMask, Trust Wallet, Coinbase, WalletConnect QR, Rainbow) for ETH + BNB + USDT
+1. **@reown/appkit v1.8.19** - Universal wallet modal (MetaMask, Trust Wallet, Coinbase, WalletConnect QR, Rainbow) for ETH + BNB (USDT has since been moved off EVM entirely — see "BSC USDT Removed" below)
 2. **wagmi v2 + viem v2** - EVM wallet connections via WagmiAdapter from @reown/appkit-adapter-wagmi
-3. **USDT on BSC** - USDT BEP-20 balance read via `useReadContract` with contract `0x55d398326f99059fF775485246999027B3197955` on BSC
+3. ~~**USDT on BSC**~~ — SUPERSEDED: BSC USDT (BEP-20) balance read was removed in the "BSC USDT Removed" pass. USDT is now Tron TRC-20 only.
 4. **WalletProvider** - `client/src/core/wallet/WalletProvider.tsx` wraps app with WagmiProvider + QueryClientProvider, manages EVM state sync
 5. **appKit config** - `client/src/config/wagmi.ts` with WagmiAdapter, dark theme, green accent, featured wallets
 6. **WalletStore updated** - `syncRealWallet()` method syncs real wallet data, `setNickname()`, escrow protection, separate real/game balances
-7. **Network labels** - Wallet page shows USDT=BNB Smart Chain (BEP-20), ETH=Ethereum, BNB=BNB Smart Chain
+7. **Network labels** - Wallet page shows USDT=Tron (TRC-20), ETH=Ethereum, BNB=BNB Smart Chain (updated in the BSC USDT Removed pass)
 8. **Nickname system** - `NicknameDialog` component, localStorage by wallet address, auto-prompt on first connect
 9. **Vite config** - `resolve.dedupe` for react/react-dom/react-jsx-runtime/valtio/@tanstack/react-query; `optimizeDeps.include` for all @reown + wagmi + viem packages
 10. **Translations** - 11 keys across all 8 languages (Disconnect, Copied, Choose Nickname, Manage, etc.)
@@ -183,13 +183,13 @@ npm run db:push     # Push database schema
 
 ### Network Switching (Apr 13, 2026)
 1. **Chain detection** - `useAppKitNetwork` tracks current wallet chain; exposed as `currentChainId`/`currentChainName` in WalletProvider context
-2. **REQUIRED_CHAIN map** - Exported from WalletProvider: USDT→BSC (56), BNB→BSC (56), ETH→Ethereum (1)
+2. **REQUIRED_CHAIN map** - Exported from WalletProvider: BNB→BSC (56), ETH→Ethereum (1). USDT routes through TronLink (not EVM) and TON through TonConnect (see BSC USDT Removed).
 3. **isCorrectChainForAsset(asset)** - Context helper returns boolean; compares current chain to asset requirement; USDT returns true if Tron is connected
 4. **switchToChain(chainId)** - Calls `switchNetwork()` from @reown/appkit to prompt wallet chain switch
 5. **Lobby network guard** - `handleStartSearch` blocks match start with toast if on wrong chain; amber banner shows "Switch to BSC/Ethereum" button
 6. **Wallet page** - Shows current network name under address; per-asset amber banner with one-click switch button when on wrong chain
 7. **Translations** - Network keys (Network, Switch to, to play with, Currently on, Switching..., Please switch to, Wrong Network) in all 7 locales
-8. **USDT on Ethereum** - Also reads USDT ERC-20 balance from `0xdAC17F958D2ee523a2206206994597C13D831ec7` (6 decimals) on Ethereum mainnet
+8. ~~**USDT on Ethereum**~~ — SUPERSEDED: USDT is Tron TRC-20 only; no ERC-20 or BEP-20 reads remain.
 
 ### TronLink / USDT TRC-20 (Apr 13, 2026)
 1. **TronLink detection** - `useTronLink` hook (`client/src/core/wallet/useTronLink.ts`) auto-detects TronLink browser extension via `window.tronWeb`/`window.tronLink`
@@ -198,10 +198,10 @@ npm run db:push     # Push database schema
 4. **Auto-reconnect** - If user previously connected TronLink (`localStorage tronlink_connected`), auto-reconnects on page load
 5. **Balance polling** - USDT TRC-20 balance refreshes every 30 seconds when connected
 6. **Account change events** - Listens for `window.message` events from TronLink (`setAccount`, `setNode`) for live account/network updates
-7. **Total USDT** - Wallet page shows combined USDT = BSC (BEP-20) + ETH (ERC-20) + Tron (TRC-20) with per-network breakdown
+7. **Total USDT** - Wallet page shows USDT = Tron (TRC-20) only (BSC BEP-20 and ETH ERC-20 paths removed; see BSC USDT Removed)
 8. **Wallet page** - Red-themed TronLink card with address, copy, disconnect; "Connect TronLink" button appears only when extension is detected
-9. **Context values** - WalletProvider exposes: `isTronLinkInstalled`, `isTronConnected`, `tronAddress`, `usdtTrc20Balance`, `isTronConnecting`, `connectTronLink`, `disconnectTronLink`, `usdtBscBalance`, `usdtEthBalance`
-10. **Network guard** - USDT is considered "correct chain" if user is on BSC (EVM) OR has TronLink connected — either satisfies the requirement
+9. **Context values** - WalletProvider exposes: `isTronLinkInstalled`, `isTronConnected`, `tronAddress`, `usdtTrc20Balance`, `isTronConnecting`, `connectTronLink`, `disconnectTronLink` (BSC/ETH USDT balance fields were removed)
+10. **Network guard** - USDT is considered "correct chain" only if TronLink is connected (BSC USDT path removed)
 11. **Translations** - 3 new keys (Connect TronLink, Connecting..., Multi-Network) in all 7 locales
 12. **Dual wallet support** - Users can connect both EVM (via AppKit) and Tron (via TronLink) simultaneously
 
@@ -231,7 +231,7 @@ npm run db:push     # Push database schema
 ### Smart Contracts (Apr 14, 2026)
 1. **EVM Escrow** - `contracts/evm/Skills2CryptoEscrow.sol` (Solidity 0.8.24, OpenZeppelin)
    - Session keys with EIP-712 signatures (365-day validity)
-   - USDT (BEP-20) and native coin (ETH/BNB) support
+   - Native coin (ETH/BNB) support (USDT token functions in the Solidity source are reserved for the Tron deployment only — BSC runs native BNB only)
    - Built-in gas oracle: server updates gas price in USDT, contract deducts gasReserve from stake
    - 3% platform fee on normal/draw, 0% on disconnect
    - Oracle-only settlement, ReentrancyGuard, events for all state changes
@@ -275,15 +275,15 @@ npm run db:push     # Push database schema
 5. **Oracle extension** - `evmOracle.ts` gains `registerSessionKey()`, `getSessionNonce()`, `getSessionKeyOnChain()`
 6. **Env vars** - `SERVER_SESSION_WALLET` (server-side), `VITE_SERVER_SESSION_WALLET` + `VITE_BSC_ESCROW_ADDRESS` (client-side)
 
-### Unified Onboarding & Deposit Pipeline (Apr 15, 2026)
-1. **3-step onboarding** - SessionKeyDialog now shows: Signing → Registering → Signing USDT Permit (via `OnboardingStep` type)
-2. **useUsdtPermit hook** - `client/src/core/wallet/useUsdtPermit.ts` signs EIP-2612 permit off-chain (no gas tx), stores in localStorage + sends to `POST /api/session/permit`
-3. **Gasless USDT deposits** - Users sign one off-chain EIP-2612 permit during onboarding. When oracle submits deposits, it calls `depositUSDTWithPermit` which executes the permit on-chain + transfers USDT in one tx. Oracle pays gas in BNB, reimbursed via `gasReserve` deducted in USDT.
-4. **Contract: depositUSDTWithPermit** - New function in `Skills2CryptoEscrow.sol` accepts permit data (deadline, v, r, s) for both players. Uses `_tryPermit` helper with try/catch to handle already-used or unsupported permits gracefully. Falls back to existing allowance if permit fails.
-5. **Server permit endpoints** - `GET /api/session/permit-nonce` fetches ERC-20 nonce + token name from BSC. `POST /api/session/permit` stores signed permit in Redis (30-day TTL).
-6. **Deposit route updated** - `POST /api/oracle/submit-deposit` checks Redis for stored permits before calling oracle. If permits exist, uses `submitDepositWithPermit`; otherwise falls back to `submitDeposit` (requires prior on-chain approval).
-7. **WalletProvider wiring** - After session key registration succeeds, auto-triggers USDT permit signing; `onboardingStep` state drives SessionKeyDialog UI; dialog auto-closes when both session key + permit complete
-8. **useSessionKey escrowAddress** - Hook now returns `escrowAddress` from server nonce response, used to set the spender for USDT permit
+### Unified Onboarding & Deposit Pipeline (Apr 15, 2026) — SUPERSEDED by "BSC USDT Removed"
+1. ~~3-step onboarding~~ — now 2 steps (Signing → Registering); the USDT Permit step was deleted.
+2. ~~useUsdtPermit hook~~ — the hook file was deleted.
+3. ~~Gasless USDT deposits via EIP-2612 permit~~ — no longer applicable; USDT is Tron-only and the BSC oracle handles BNB natively.
+4. **Contract: depositUSDTWithPermit** — the Solidity function still exists in the source file for future Tron deployment, but it is NOT called from the BSC oracle.
+5. ~~Server permit endpoints~~ — `GET /api/session/permit-nonce` and `POST /api/session/permit` were removed from `server/routes.ts`.
+6. ~~Deposit route reads stored permits~~ — `/api/oracle/submit-deposit` now rejects any non-BNB asset and calls `submitDepositNative` only.
+7. ~~WalletProvider auto-triggers permit signing~~ — removed; session-key registration is the final onboarding step.
+8. **useSessionKey escrowAddress** — Hook still returns `escrowAddress` from the server nonce response; it is used for session-key registration only.
 9. **EvmEscrowAdapter** - `client/src/core/escrow/EvmEscrowAdapter.ts` with `lockFunds`, `submitDeposit` (calls `/api/oracle/submit-deposit`), `settleMatch`, `getEstimatedNetworkFee`
 10. **Escrow factory** - `client/src/core/escrow/index.ts` selects Mock vs Real adapter based on `VITE_USE_MOCK_ESCROW` env var (defaults to mock)
 11. **GameContext + Lobby updated** - Both now import from escrow factory (`@/core/escrow`) instead of direct `MockEscrowAdapter` import
@@ -331,11 +331,11 @@ npm run db:push     # Push database schema
 8. **Contracts untouched** — `contracts/evm/Skills2CryptoEscrow.sol` still defines `depositUSDT` / `depositUSDTWithPermit`; the source is preserved for future Tron USDT contract deployment (Task #13). The deployed BSC contract simply leaves those functions unused.
 9. **Follow-up tasks** — Task #12 (player-submitted native BNB+ETH deposits) and Task #13 (Tron USDT TRC-20 oracle integration) build on this clean baseline.
 
-### Deposit Pipeline Fix — Permit & Session (Apr 16, 2026)
-1. **BSC USDT decimals fixed** — BSC USDT (0x55d398326f99059fF775485246999027B3197955) uses 18 decimals, not 6. Changed `routes.ts` to always use 18 decimals for stake conversion. Uses `ethers.parseUnits()` for precision safety (avoids floating point errors beyond Number.MAX_SAFE_INTEGER).
+### Deposit Pipeline Fix — Permit & Session (Apr 16, 2026) — SUPERSEDED by "BSC USDT Removed"
+1. ~~BSC USDT decimals fixed~~ — no longer applicable; BSC USDT support was removed entirely in the later pass.
 2. **Session key maxStake fixed** — Changed from `parseUnits('10000', 6)` (10 billion) to `parseUnits('1000000', 18)` (10^24). Old limit was too small for 18-decimal native coins (0.0075 BNB = 7.5 * 10^15 > 10^10). Stale cached sessions with old maxStake are auto-invalidated from localStorage.
-3. **EIP-2612 permit replaced with on-chain approve** — BSC USDT doesn't support EIP-2612 `permit()`. WalletProvider now uses `useUsdtApproval` hook (real on-chain `approve(escrow, maxUint256)` tx) instead of `useUsdtPermit` (off-chain EIP-2612 signing). One-time gas cost for the user.
-4. **Deposit endpoint uses depositUSDTWithPermit with null permits** — Still calls `depositUSDTWithPermit` (not `depositUSDT`) because the with-permit variant sends gasReserve to oracle immediately for BNB reimbursement. Null permits → `_tryPermit` skips (deadline=0) → `safeTransferFrom` works via prior on-chain approval.
-5. **Pre-flight deposit checks** — New `oracle.preflightDeposit()` method checks both players' session keys (registered, not revoked, not expired, maxStake sufficient) and USDT allowance before attempting on-chain deposit. Returns specific failure reason for each check.
+3. ~~EIP-2612 permit replaced with on-chain approve~~ — no longer applicable; both `useUsdtPermit` and `useUsdtApproval` hooks were deleted along with BSC USDT support.
+4. ~~Deposit endpoint uses depositUSDTWithPermit with null permits~~ — no longer applicable; `depositUSDT*` is no longer called from the BSC oracle, which is BNB-native only.
+5. **Pre-flight deposit checks** — `oracle.preflightDeposit()` checks both players' session keys (registered, not revoked, not expired, maxStake sufficient) before attempting on-chain deposit. Returns a specific failure reason for each check. USDT allowance branch removed.
 6. **Deploy script updated** — `scripts/deploy-bsc.cjs` USDT_DECIMALS corrected from 6 to 18 for future redeployments.
 7. **SessionKeyDialog updated** — Step 3 text changed from "USDT permit" to "USDT approval" to reflect the actual on-chain approve flow.
