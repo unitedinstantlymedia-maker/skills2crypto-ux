@@ -72,6 +72,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { stakeAmountRef.current = stakeAmount; }, [stakeAmount]);
 
   const socketRef = useRef<Socket | null>(null);
+  // Tracks matchIds for which a deposit attempt is already in flight, so
+  // the HTTP `matched` response and a duplicate `match-found` socket emit
+  // never trigger lockFunds() twice for the same match.
+  const depositInFlightRef = useRef<Set<string>>(new Set());
   const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
 
   useEffect(() => {
@@ -118,12 +122,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         console.warn('[socket] match-found ignored (not searching)', payload);
         return;
       }
+      // Guard against the dual codepath: if startSearch() already handled
+      // an immediate `matched` response for this matchId, the HTTP path has
+      // already invoked lockFunds() and we must not invoke it again here.
+      if (depositInFlightRef.current.has(payload.matchId)) {
+        console.log('[socket] match-found ignored — deposit already in flight', payload);
+        return;
+      }
       console.log('[socket] match-found', payload);
 
       isFindingRef.current = false;
       setIsFinding(false);
-      // Start in `funding` — game cannot begin until both players have
-      // deposited on-chain and the server emits `match-funded`.
       setCurrentMatch({
         id: payload.matchId,
         game,
@@ -134,6 +143,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       s.emit('join-match', { matchId: payload.matchId, playerId: walletStore.getState().address || '' });
 
+      depositInFlightRef.current.add(payload.matchId);
       void escrowAdapter
         .lockFunds(payload.matchId, asset, stake)
         .catch((e: any) => console.error('lockFunds failed', e));
@@ -223,6 +233,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (res.status === 'matched') {
         // Immediate match — go to `funding` state and wait for the
         // `match-funded` socket event before activating gameplay.
+        // Mark the matchId as in-flight BEFORE awaiting lockFunds so any
+        // server-emitted `match-found` for the same matchId is ignored
+        // by the socket handler above (single deposit attempt per match).
+        depositInFlightRef.current.add(res.matchId);
+        isFindingRef.current = false;
         setIsFinding(false);
         setCurrentMatch({
           id: res.matchId,
@@ -234,7 +249,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         });
 
         sock.emit('join-match', { matchId: res.matchId, playerId: walletState.address || '' });
-        await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
+        try {
+          await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
+        } catch (e: any) {
+          console.error('lockFunds failed', e);
+        }
       } else {
         // waiting — ждём событие match-found
         console.log('[GameContext] queued, waiting for match-found');
