@@ -16,8 +16,13 @@ const config = {
   },
   networks: {
     bscMainnet: {
-      url: "https://bsc-dataseed.binance.org",
+      url: process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org",
       chainId: 56,
+      accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
+    },
+    ethMainnet: {
+      url: process.env.ETH_RPC_URL || "",
+      chainId: 1,
       accounts: DEPLOYER_KEY ? [DEPLOYER_KEY] : [],
     },
   },

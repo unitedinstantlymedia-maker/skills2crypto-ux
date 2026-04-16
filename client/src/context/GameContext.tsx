@@ -17,7 +17,7 @@ type MatchState =
       game: Game;
       asset: Asset;
       stake: number;
-      status: 'waiting' | 'active' | 'finished';
+      status: 'waiting' | 'funding' | 'active' | 'finished';
       players?: string[];
       result?: 'win' | 'loss' | 'draw';
       payout?: number;
@@ -122,12 +122,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       isFindingRef.current = false;
       setIsFinding(false);
+      // Start in `funding` — game cannot begin until both players have
+      // deposited on-chain and the server emits `match-funded`.
       setCurrentMatch({
         id: payload.matchId,
         game,
         asset,
         stake,
-        status: 'active',
+        status: 'funding',
       });
 
       s.emit('join-match', { matchId: payload.matchId, playerId: walletStore.getState().address || '' });
@@ -135,6 +137,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       void escrowAdapter
         .lockFunds(payload.matchId, asset, stake)
         .catch((e: any) => console.error('lockFunds failed', e));
+    });
+
+    s.on('match-funded', (payload: { matchId: string }) => {
+      console.log('[socket] match-funded', payload);
+      setCurrentMatch((prev) => {
+        if (!prev || prev.id !== payload.matchId) return prev;
+        if (prev.status !== 'funding') return prev;
+        return { ...prev, status: 'active' };
+      });
     });
 
     s.on('disconnect', (reason) => {
@@ -210,14 +221,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (res.status === 'matched') {
-        // мгновенно нашли — активируем
+        // Immediate match — go to `funding` state and wait for the
+        // `match-funded` socket event before activating gameplay.
         setIsFinding(false);
         setCurrentMatch({
           id: res.matchId,
           game: selectedGame,
           asset: selectedAsset,
           stake: stakeAmount,
-          status: 'active',
+          status: 'funding',
           players: res.players,
         });
 
