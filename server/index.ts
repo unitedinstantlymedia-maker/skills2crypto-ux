@@ -60,6 +60,16 @@ if (NODE_ENV === "production") {
 // =======================
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[skills2crypto] server running on port ${PORT}`);
+
+  if (process.env.ORACLE_PRIVATE_KEY && process.env.BSC_RPC_URL && process.env.BSC_ESCROW_ADDRESS) {
+    import("./oracle/evmOracle").then(({ createEvmOracle }) => {
+      createEvmOracle();
+    }).catch(err => {
+      console.error("[startup] Failed to initialize oracle diagnostics:", err?.message || err);
+    });
+  } else {
+    console.warn("[startup] Oracle env vars not set — skipping contract diagnostics");
+  }
 });
 
 

@@ -177,8 +177,9 @@ async function settleMatchOnChain(
       winner = winnerId;
       reason = 0;
     } else {
-      winner = ZERO_ADDRESS;
-      reason = 2;
+      console.error(`[settlement] SKIPPING match ${matchId}: decisive result but winner is unresolved (resultType=${resultType}, winnerId=${winnerId})`);
+      await redis.del(lockKey);
+      return;
     }
 
     console.log(`[settlement] settling match ${matchId}: winner=${winner}, reason=${reason}`);
@@ -501,14 +502,31 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       console.log("[socket] game-end", data.matchId, data.result, data.winner);
-      
-      storeGameResult(data.matchId, 'chess', data.winnerId || null, data.loserId || null, data.result);
+
+      const room = matchRooms.get(data.matchId);
+      let winnerId: string | null = null;
+      let loserId: string | null = null;
+
+      if (data.result === 'draw' || data.winner === 'draw') {
+        winnerId = null;
+        loserId = null;
+      } else if (room && data.winner) {
+        const winnerColor = data.winner as 'white' | 'black';
+        const loserColor = winnerColor === 'white' ? 'black' : 'white';
+        winnerId = Array.from(room.players.entries()).find(([_, p]) => p.color === winnerColor)?.[0] || null;
+        loserId = Array.from(room.players.entries()).find(([_, p]) => p.color === loserColor)?.[0] || null;
+      } else {
+        winnerId = data.winnerId || null;
+        loserId = data.loserId || null;
+      }
+
+      storeGameResult(data.matchId, 'chess', winnerId, loserId, data.result);
       
       io.to(`match:${data.matchId}`).emit('match-ended', data);
       io.to(`match:${data.matchId}`).emit('game-result', {
         matchId: data.matchId,
-        winnerId: data.winnerId,
-        loserId: data.loserId,
+        winnerId,
+        loserId,
         reason: data.result
       });
       
