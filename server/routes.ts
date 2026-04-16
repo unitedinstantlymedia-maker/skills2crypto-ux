@@ -474,12 +474,7 @@ export async function registerRoutes(
 
       const asset = String(matchData.asset);
 
-      // Asset gating MUST come before address validation so that
-      // USDT (Tron base58) / TON (non-EVM) matches get a clear
-      // "wrong endpoint" error instead of "invalid EVM address".
-      // BSC oracle is currently bound to BNB native only. ETH on Ethereum
-      // mainnet will be wired up in Task #12 with its own dedicated oracle.
-      // USDT lives on Tron (Task #13); TON lives on TON (Task #14).
+      // BSC oracle handles BNB native deposits only.
       if (asset !== "BNB") {
         await redis.del(lockKey);
         return res.status(400).json({
