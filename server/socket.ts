@@ -90,11 +90,11 @@ async function storeGameResult(
 
   try {
     const matchData = await redis.hgetall(`match:${matchId}`);
-    if (matchData && matchData.stake && matchData.asset && matchData.p1 && matchData.p2) {
+    if (matchData && matchData.stake && matchData.asset && (matchData.addr1 || matchData.p1) && (matchData.addr2 || matchData.p2)) {
       const stake = Number(matchData.stake);
       const asset = String(matchData.asset);
-      const player1Id = String(matchData.p1);
-      const player2Id = String(matchData.p2);
+      const player1Id = String(matchData.addr1 || matchData.p1);
+      const player2Id = String(matchData.addr2 || matchData.p2);
       const pot = stake * 2;
       const fee = pot * FEE_RATE;
       
