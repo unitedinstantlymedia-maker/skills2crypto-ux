@@ -446,6 +446,61 @@ function build() {
     return BigInt("0x" + result);
   }
 
+  /**
+   * Live estimate of the TRX cost of `USDT.approve(escrow, MAX)` for a given
+   * player wallet. Uses TronGrid's triggerConstantContract to get
+   * `energy_used`, then converts via the chain's energyFee (sun per energy
+   * unit). Returns whole TRX (rounded up + small safety buffer).
+   */
+  async function estimateApproveTrxCost(playerBase58: string): Promise<{
+    energy: number;
+    trx: number;
+  }> {
+    const MAX_UINT256_HEX =
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const fnSelector = "approve(address,uint256)";
+    const params = [
+      { type: "address", value: escrowEvmHex },
+      { type: "uint256", value: MAX_UINT256_HEX },
+    ];
+    let energyUsed = 0;
+    try {
+      const tx = await tw.transactionBuilder.triggerConstantContract(
+        cfg.usdtBase58,
+        fnSelector,
+        {},
+        params,
+        playerBase58
+      );
+      energyUsed = Number((tx as any)?.energy_used || 0);
+    } catch (e: any) {
+      console.warn(
+        "[TronOracle] estimateApproveTrxCost triggerConstantContract failed:",
+        e?.message || e
+      );
+    }
+    if (!energyUsed || energyUsed <= 0) {
+      // Fallback to a conservative literature value if the node refuses to
+      // estimate (rare; happens on some public RPCs for unfunded callers).
+      energyUsed = 65_000;
+    }
+    let energyFeeSun = 420; // mainnet default if param fetch fails
+    try {
+      const params = await tw.trx.getChainParameters();
+      const ef = (params as any[])?.find?.((p) => p?.key === "getEnergyFee");
+      if (ef && typeof ef.value === "number") energyFeeSun = ef.value;
+    } catch (e: any) {
+      console.warn(
+        "[TronOracle] getChainParameters failed, using default energyFee:",
+        e?.message || e
+      );
+    }
+    const trxRaw = (energyUsed * energyFeeSun) / 1_000_000;
+    // 20% buffer + round up to next whole TRX for UX clarity.
+    const trx = Math.ceil(trxRaw * 1.2);
+    return { energy: energyUsed, trx };
+  }
+
   async function getAccumulatedGasFundUSDT(): Promise<bigint> {
     try {
       const fnSelector = "accumulatedGasFundUSDT()";
@@ -491,6 +546,7 @@ function build() {
     getPlayerBalanceTrx,
     getUsdtAllowance,
     getAccumulatedGasFundUSDT,
+    estimateApproveTrxCost,
   };
 }
 

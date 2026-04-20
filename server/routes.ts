@@ -126,7 +126,11 @@ export async function registerRoutes(
         const tron = createTronOracle();
         const allowance = await tron.getUsdtAllowance(cleanWallet);
         const stakeUnits = BigInt(Math.round(numericStake * 1_000_000));
-        const required = stakeUnits;
+        // Match the readiness gate: require allowance >= MAX_UINT256 / 2,
+        // which guarantees the player did the one-time approve(MAX) and the
+        // allowance can't deplete mid-session.
+        const MAX_HALF = (1n << 255n);
+        const required = stakeUnits > MAX_HALF ? stakeUnits : MAX_HALF;
         if (allowance < required) {
           return res.status(412).json({
             error: "usdt_not_approved",
@@ -835,23 +839,29 @@ export async function registerRoutes(
     try {
       const { createTronOracle } = await import("./oracle/tronOracle");
       const tron = createTronOracle();
-      const trx = await tron.getPlayerBalanceTrx(wallet);
-      const allowance = await tron.getUsdtAllowance(wallet);
+      const [trx, allowance, estimate] = await Promise.all([
+        tron.getPlayerBalanceTrx(wallet),
+        tron.getUsdtAllowance(wallet),
+        tron.estimateApproveTrxCost(wallet),
+      ]);
       const stakeUnits = BigInt(Math.round(stake * 1_000_000));
-      // Need allowance ≥ stake. We don't pad for gasReserve anymore — V2
-      // only ever pulls `stake` per match (no buffer needed).
-      const requiredAllowance = stakeUnits;
-      // Player pays their own TRX for the one-time approve(escrow, MAX).
-      // ~30 TRX is a comfortable upper bound on USDT approve energy cost.
-      const APPROVE_TRX_COST = 30;
-      const needsApprove = allowance < requiredAllowance;
+      // Onboarding gate: a healthy player should have done approve(MAX) once,
+      // so allowance >> any single stake. We require allowance >= MAX_UINT256 / 2,
+      // which is satisfied iff the user did the proper MAX approve and not a
+      // single-stake approve (which would silently deplete and brick the
+      // gasless deposit on the next match).
+      const MAX_HALF = (1n << 255n);
+      const allowanceOk = allowance >= MAX_HALF;
+      const stakeOk = allowance >= stakeUnits;
       return res.json({
         wallet,
         trxBalance: trx,
         usdtAllowance: allowance.toString(),
-        approveReady: !needsApprove,
-        trxReady: !needsApprove || trx >= APPROVE_TRX_COST,
-        approveTrxCostEstimate: APPROVE_TRX_COST,
+        approveReady: allowanceOk,
+        approveStakeOk: stakeOk,
+        trxReady: allowanceOk || trx >= estimate.trx,
+        approveTrxCostEstimate: estimate.trx,
+        approveEnergyEstimate: estimate.energy,
       });
     } catch (err: any) {
       console.error("[tron/readiness] Error:", err?.message || err);

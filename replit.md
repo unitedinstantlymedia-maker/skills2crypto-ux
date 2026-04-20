@@ -1,10 +1,75 @@
 # SKILLS2CRYPTO
 
-Mobile-first web app prototype for 1v1 skill games with crypto-only wagers.
+Mobile-first web app for 1v1 skill games with crypto-only wagers.
 
 ## Overview
 
-This is a React + Express full-stack application that allows users to play 1v1 skill games (Chess, Tetris, Checkers) with crypto wagers. The app uses a 3-layer architecture to separate UI from logic and prepare for Web3 integration.
+React + Express platform for 1v1 skill games (Chess, Tetris, Checkers,
+Battleship) with native-asset wagers on four chains.
+
+## ⚠️ Current Architecture: Escrow V2 (Task #16) — supersedes everything below
+
+The escrow stack was rewritten end-to-end in Task #16. Anything in the
+"Historical notes / legacy designs" sections further down (session keys,
+oracle-submitted EVM settles, USDT permits, sponsored TRX, on-chain `Match`
+preparation on TON, etc.) is **no longer in effect** — they are kept only for
+context on how we got here. The authoritative current model is:
+
+### Per-chain settle model
+- **BNB (BSC) + ETH**: player-pays-gas. Each player calls
+  `depositNative{value: stake}` themselves. After the game ends, the
+  oracle EIP-712 signs a `MatchOutcome(matchId, winner, reason)` and the
+  winner (or either player on Draw / Disconnect) calls `settleMatch` and
+  pays their own gas. The oracle never broadcasts on EVM.
+- **TON**: same model as EVM but with Tact + Ed25519 signatures. Players
+  send a `Deposit` message; on game end the oracle signs a `Settle` BOC
+  and the winner sends it via TonConnect, paying ~0.05 TON in gas.
+- **Tron USDT**: fully gasless for players after a one-time
+  `approve(escrow, MAX)` (player pays the ~30 TRX for that single approve).
+  Oracle submits both `depositUSDTGasless` and `settleMatch` on Tron and
+  recoups its TRX via a 0.5 % USDT gas-fund accumulator inside the escrow,
+  which auto-swaps USDT → TRX on SunSwap V2 once it crosses 50 USDT.
+
+### Files (V2)
+- `contracts/evm/Skills2CryptoEscrow.sol` — V2 EVM escrow (BSC + ETH).
+- `contracts/tron/Skills2CryptoEscrowTron.sol` — V2 Tron USDT escrow.
+- `contracts/ton/skills2crypto_escrow.tact` — V2 TON escrow (canonical
+  filename; old session-key draft has been removed).
+- `server/oracle/evmOracle.ts` — `signMatchAuth` (deposit) +
+  `signMatchOutcome` (settle); no on-chain submit.
+- `server/oracle/tronOracle.ts` — `submitDepositUSDTGasless`,
+  `submitSettlement`, `estimateApproveTrxCost` (live energy estimate via
+  `triggerConstantContract`).
+- `server/oracle/tonOracle.ts` — `signMatchOutcome` (Ed25519); no
+  on-chain submit.
+- `server/socket.ts → settleMatchOnChain` — for EVM/TON: signs and
+  persists `settle_auth:${matchId}` in Redis, emits `settle-ready` to
+  the match room. For Tron: calls `submitSettlement` directly.
+- `server/routes.ts`:
+  - `GET|POST /api/escrow/settle-auth[/:matchId]` — idempotent oracle
+    auth lookup; client adapters poll this with retry.
+  - `GET /api/tron/readiness` — returns live `approveTrxCostEstimate`,
+    `approveEnergyEstimate`, `approveReady` (gated on
+    `allowance ≥ 2^255`, i.e. the player did `approve(MAX)`).
+- `client/src/core/escrow/EvmEscrowAdapter.ts`,
+  `TonEscrowAdapter.ts`, `TronEscrowAdapter.ts` — `claimSettlement`
+  with up to 10 × 3 s retry polling on the settle-auth race.
+
+### Funding required for mainnet deploys
+- ETH oracle: small balance for safety (signer-only)
+- TON deployer: ~3 TON
+- Tron deployer: ~300 TRX
+- Tron escrow bootstrap: 50–100 USDT seeded so first gasless settles
+  have TRX before SunSwap auto-swap kicks in
+
+### Removed in V2 (do not look for these)
+- `POST /api/tron/sponsor-trx`, `POST /api/tron/sponsor-challenge` →
+  HTTP 410 stubs
+- `POST /api/session/nonce`, `POST /api/session/register` → HTTP 410
+- `POST /api/oracle/submit-deposit` (oracle-submitted EVM deposits)
+- TON `PrepareMatch` on-chain step
+- USDT permit / sessionKey flows on EVM
+- `sponsorPlayerTrx` on Tron oracle
 
 ## Project Structure
 
