@@ -1,0 +1,57 @@
+I need a complete rewrite of the escrow contracts for all networks (BSC, Ethereum, TON, Tron USDT) according to the following architecture.
+
+
+
+## For BNB (BSC), ETH (Ethereum), TON (TON network):
+
+
+
+- Deposits: players send their stake directly to the contract (one transaction per player). Gas paid by player in the native coin.
+
+- Settlement: a function `settleMatchByWinner(matchId, winner, reason, signature)` where `signature` is an off-chain message (EIP-712 for EVM, equivalent for TON) signed by the server's private key. The contract verifies the signature, then performs payout (3% platform fee to platformWallet, rest to winner). The caller (winner) pays gas in the native coin.
+
+- The oracle does NOT send any on-chain transactions for these chains. It only signs off-chain messages.
+
+- The old `settleMatch` (oracle-only) must be removed.
+
+
+
+## For Tron USDT (TRC-20):
+
+For Tron USDT only, implement automatic, immediate conversion of the 0.5% gas fee from USDT to TRX using SunSwap DEX. No thresholds, no accumulation. Every time a match is settled (or deposit is made), the contract must swap the exact 0.5% USDT amount to TRX and send the TRX to the gas fund address: TBDdWCw89Z28LG6c9s7vC8bQiACVe57XNy. The oracle will then use this TRX to pay for future deposit and settlement transactions. Use the on-chain DEX approach (contract calls SunSwap router). Players must never see TRX or any conversion steps. This must be fully automated and reliable.
+
+- Goal: players must never need TRX. They only need USDT. No confirmation windows for gas.
+
+- Deposits: oracle submits the deposit transaction using EIP-712 permit (off-chain signature from player). Oracle pays gas in TRX, gets reimbursed in USDT from the stake.
+
+- Settlement: oracle also submits settlement transaction (no player action). Oracle pays gas in TRX, gets reimbursed in USDT from the win.
+
+- To fund the oracle with TRX automatically, add a separate extra fee: 0.5% of the total stake (bank). This extra fee is added on top of the 3% platform fee. The breakdown:
+
+  - Total stake = stake * 2 (bank)
+
+  - Platform fee (3%) goes to platformWallet (cold wallet Ledger address).
+
+  - Oracle gas fee (0.5%) goes to a separate configurable address (oracleGasFund). This fund accumulates USDT.
+
+- The contract must automatically convert the oracle gas fee from USDT to TRX on-chain during the deposit or settlement transaction, using a DEX (e.g., SunSwap) or a trusted oracle. The resulting TRX must be sent directly to the oracle wallet ( TRX cold wallet address , from where the oracle can use it). No separate monitoring scripts or thresholds. Every game contributes to the oracle's TRX balance automatically.
+
+- The oracle sends both deposit and settlement transactions for Tron USDT (gasless for players).
+
+
+
+## Deployment:
+
+
+
+- Deploy the new contracts on BSC, Ethereum, TON, and Tron mainnets.
+
+- Use existing platformWallet addresses from environment (no need to change).
+
+- For Tron USDT, also set the oracleGasFund address : TBDdWCw89Z28LG6c9s7vC8bQiACVe57XNy
+
+- After deployment, provide updated environment variables and instructions.
+
+
+
+This architecture must be implemented exactly as described. No deviations, no placeholder patterns.
