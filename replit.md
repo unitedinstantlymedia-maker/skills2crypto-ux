@@ -439,3 +439,92 @@ different VM (TVM) and curve (Ed25519) than the EVM/Tron stack.
 - BSC redeployment required (struct + new function). Use `scripts/deploy-bsc.cjs`.
 - ETH mainnet deployment is a manual op with funded deployer key. Use `scripts/deploy-eth.cjs`.
 - Set `ETH_RPC_URL` and `ETH_ESCROW_ADDRESS` after the ETH deployment to enable the ETH path.
+
+## Task #16 — Escrow V2 (player-pays-gas + gasless Tron USDT)
+
+Architectural rewrite of all four escrow contracts and the matching server +
+client code. Previous V1 contracts and server submitSettlement() flow are
+replaced.
+
+### Contracts
+- **EVM** (`contracts/evm/Skills2CryptoEscrow.sol`, V2): native-only,
+  player-callable `depositNative(matchId, p1, p2, stake, deadline, oracleSig)`
+  (no `gasReserve`), winner-callable `settleMatch(matchId, winner, reason,
+  oracleSig)`. Two EIP-712 typed structs: `MatchAuth` (deposit) and
+  `MatchOutcome` (settlement). Domain `version = "2"`. Statuses:
+  `0 None`, `1 WaitingForP2`, `2 Active`, `3 Settled`.
+- **Tron USDT** (`contracts/tron/Skills2CryptoEscrowTron.sol`): gasless for
+  players. Oracle submits both `depositUSDT` (verifies two EIP-712 player
+  sigs and pulls `stake` USDT each via `transferFrom`) and `settleMatch`.
+  `0.5%` of every settlement payout accrues to a gas-fund accumulator that
+  auto-swaps USDT → TRX via SunSwap V2 once the threshold (50 USDT) is
+  reached and forwards the TRX to the oracle wallet.
+- **TON** (`contracts/ton/skills2crypto_escrow_v2.tact`): players send
+  `Deposit(matchId, p1, p2, stake)` directly via TonConnect. Settle is sent
+  by the winner (or any player on Draw / Disconnect) with a
+  `Settle(matchId, winner, reason, signature)` BOC carrying the oracle's
+  Ed25519 signature; contract verifies via `checkSignature`. Match struct
+  is auto-created on the first Deposit.
+
+### Server oracle layer (`server/oracle/`)
+- `evmOracle.ts`: `signMatchAuth({ matchId, player1, player2, stake,
+  deadline })` and `signMatchOutcome({ matchId, winner, reason })`. No more
+  on-chain settle path. `watchMatchActive` listens for the new
+  `MatchActive(matchId, p1, p2, stake)` event (no `gasReserve` field).
+- `tronOracle.ts`: `submitDepositUSDTGasless()` (oracle pays TRX, recouped
+  via gas-fund + SunSwap), `submitSettlement()` (oracle still pays TRX),
+  plus `signMatchOutcome()` for any future client-driven path. TRX
+  sponsorship code removed entirely.
+- `tonOracle.ts`: `encodeDepositPayload()` (BOC the player attaches to
+  TonConnect), `signMatchOutcome()` (Ed25519 over `cell.hash()` of
+  `(matchId, winner, reason)`) returning `{ payloadBoc, signatureHex }`,
+  `encodeRefundNoShowPayload()`. `prepareMatch` and on-chain `Settle` send
+  paths are gone.
+
+### Server routes (`server/routes.ts`)
+- `POST /api/oracle/match-auth` no longer returns `gasReserve`.
+- `GET /api/oracle/match-status/:matchId` returns the V2 status numbering
+  in `statusV2` while keeping a backwards-compatible `status` field
+  (1 = Active / fully funded, 2 = Settled, 3 = WaitingForP2).
+- `POST /api/tron/deposit-sig` now triggers `submitDepositUSDTGasless`.
+- `GET /api/tron/readiness` only requires allowance ≥ stake. Player needs
+  ~30 TRX themselves for the one-time `approve(escrow, MAX)`.
+- `POST /api/ton/deposit-info` returns the new V2 Deposit BOC and an
+  `amountTon = stake + 0.05` (gas buffer); no PrepareMatch flow.
+- `GET /api/ton/config` returns `{ escrowAddress, platformWallet,
+  oraclePubkeyHex }` (no oracle address / gas reserve fields).
+- **NEW**: `GET /api/escrow/settle-auth/:matchId` — returns the oracle-
+  signed `MatchOutcome` (EVM) or signed Settle BOC (TON) so the
+  winner / either player can call `settleMatch` themselves. Tron USDT
+  matches return 409 (oracle settles directly).
+- **REMOVED (returns HTTP 410)**: `/api/tron/sponsor-challenge`,
+  `/api/tron/sponsor-trx`, `/api/session/nonce`, `/api/session/register`.
+
+### Server settle flow (`server/socket.ts settleMatchOnChain`)
+- TRON: unchanged — oracle calls `submitSettlement` directly.
+- EVM / TON: oracle only signs the outcome. The signed auth is persisted
+  in Redis under `settle_auth:${matchId}` (7-day TTL) and a `settle-ready`
+  socket event is emitted into the `match:${matchId}` room. Clients fetch
+  via `/api/escrow/settle-auth/:matchId` and broadcast on-chain
+  themselves.
+
+### Client adapters (`client/src/core/escrow/`)
+- `EvmEscrowAdapter`: deposit uses V2 ABI (`depositNative`, `value =
+  stake`); new `claimSettlement(matchId)` fetches the auth and calls
+  `settleMatch` via wagmi. `settleMatch` (UI helper) fires-and-forgets
+  `claimSettlement` for win / draw outcomes.
+- `TonEscrowAdapter`: deposit unchanged in shape, just uses the new
+  Deposit BOC; new `claimSettlement(matchId)` sends the signed Settle BOC
+  via TonConnect (~0.05 TON gas).
+- `TronEscrowAdapter`: TRX sponsorship code removed — players pay their
+  own ~30 TRX once for `approve(escrow, MAX)`. Per-match deposits and
+  settlement remain gasless. Required allowance is now exactly `stake`.
+
+### Funding required before mainnet deploys
+- **BSC / ETH oracle wallet (`0x2ad7345E…CB8`)**: signer-only — needs
+  ~zero, but ~0.01 ETH is recommended for occasional admin txs.
+- **TON deployer**: ~3 TON for the V2 contract deploy + oracle key
+  registration.
+- **Tron deployer**: ~300 TRX for the V2 contract deploy.
+- **Tron oracle bootstrap**: 50–100 USDT to seed the gas-fund accumulator
+  so it can auto-swap once and start self-sustaining.

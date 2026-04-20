@@ -5,7 +5,8 @@ import { parseAbi } from "viem";
 import { wagmiConfig } from "@/config/wagmi";
 
 const ESCROW_ABI = parseAbi([
-  "function depositNativeAsPlayer(bytes32 matchId, address player1, address player2, uint256 stake, uint256 gasReserve, uint256 deadline, bytes oracleSig) payable",
+  "function depositNative(bytes32 matchId, address player1, address player2, uint256 stake, uint256 deadline, bytes oracleSig) payable",
+  "function settleMatch(bytes32 matchId, address winner, uint8 reason, bytes oracleSig)",
   "function refundNoShow(bytes32 matchId)",
 ]);
 
@@ -15,15 +16,25 @@ interface MatchAuth {
   player1: `0x${string}`;
   player2: `0x${string}`;
   stake: string;
-  gasReserve: string;
   deadline: number;
   oracleSig: `0x${string}`;
   chainId: number;
   escrowAddress: `0x${string}`;
 }
 
+interface SettleAuth {
+  matchId: string;
+  chain: "BSC" | "ETH";
+  chainId: number;
+  escrowAddress: `0x${string}`;
+  matchIdBytes32: `0x${string}`;
+  winner: `0x${string}`;
+  reason: number;
+  oracleSig: `0x${string}`;
+}
+
 const POLL_INTERVAL_MS = 3000;
-const POLL_MAX_ATTEMPTS = 60; // 3 min
+const POLL_MAX_ATTEMPTS = 60;
 
 async function fetchMatchAuth(matchId: string): Promise<MatchAuth> {
   const res = await fetch("/api/oracle/match-auth", {
@@ -43,8 +54,27 @@ async function fetchMatchStatus(matchId: string): Promise<{ status: number; stat
   return data;
 }
 
-export class EvmEscrowAdapter {
+async function fetchSettleAuth(matchId: string): Promise<SettleAuth | null> {
+  const res = await fetch(`/api/escrow/settle-auth/${encodeURIComponent(matchId)}`);
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404 && data?.error === "settle_auth_pending") return null;
+  if (!res.ok) throw new Error(data?.error || `settle-auth HTTP ${res.status}`);
+  return data as SettleAuth;
+}
 
+async function ensureChain(targetChainId: number): Promise<boolean> {
+  const current = getChainId(wagmiConfig);
+  if (current === targetChainId) return true;
+  try {
+    await switchChain(wagmiConfig, { chainId: targetChainId });
+    return getChainId(wagmiConfig) === targetChainId;
+  } catch (e: any) {
+    console.error(`[EvmEscrow] chain switch to ${targetChainId} rejected:`, e?.shortMessage || e?.message || e);
+    return false;
+  }
+}
+
+export class EvmEscrowAdapter {
   getEstimatedNetworkFee(asset: Asset): number {
     const price = ASSET_PRICES_USD[asset];
     if (!price) return 0;
@@ -52,19 +82,13 @@ export class EvmEscrowAdapter {
   }
 
   /**
-   * Player-submitted native deposit flow.
-   * 1. Fetch oracle-signed MatchAuth from server.
-   * 2. Switch wagmi account to the right chain (BNB→56, ETH→1).
-   * 3. Send depositNativeAsPlayer with msg.value = stake + gasReserve.
-   * 4. Wait for receipt, then poll match-status until both players have deposited.
+   * Player-submitted native deposit (V2 — no gasReserve, msg.value = stake).
    */
   async lockFunds(matchId: string, asset: Asset, _stake: number): Promise<boolean> {
     if (asset !== "BNB" && asset !== "ETH") {
       console.warn(`[EvmEscrow] lockFunds called for non-EVM asset ${asset} — ignoring`);
       return false;
     }
-
-    console.log(`[EvmEscrow] lockFunds: requesting match auth for ${matchId} (${asset})`);
 
     let auth: MatchAuth;
     try {
@@ -79,88 +103,53 @@ export class EvmEscrowAdapter {
       console.error(`[EvmEscrow] No connected wallet`);
       return false;
     }
-
     const me = account.address.toLowerCase();
     if (me !== auth.player1.toLowerCase() && me !== auth.player2.toLowerCase()) {
       console.error(`[EvmEscrow] connected wallet ${me} is not in this match`);
       return false;
     }
 
-    const stakeWei = BigInt(auth.stake);
-    const gasReserveWei = BigInt(auth.gasReserve);
-    const value = stakeWei + gasReserveWei;
+    if (!(await ensureChain(auth.chainId))) return false;
 
-    // Verify the wallet is on the correct EVM chain. If not, ask wagmi to
-    // switch — most wallets will prompt the user. We hard-fail if the switch
-    // is rejected so writeContract never runs against the wrong chain.
-    const currentChainId = getChainId(wagmiConfig);
-    if (currentChainId !== auth.chainId) {
-      console.log(`[EvmEscrow] wallet on chain ${currentChainId}, switching to ${auth.chainId}`);
-      try {
-        await switchChain(wagmiConfig, { chainId: auth.chainId });
-      } catch (e: any) {
-        console.error(`[EvmEscrow] chain switch to ${auth.chainId} rejected:`, e?.shortMessage || e?.message || e);
-        return false;
-      }
-      const after = getChainId(wagmiConfig);
-      if (after !== auth.chainId) {
-        console.error(`[EvmEscrow] still on chain ${after} after switch attempt — aborting`);
-        return false;
-      }
-    }
-
-    console.log(`[EvmEscrow] sending depositNativeAsPlayer on chain ${auth.chainId}, value=${value.toString()}`);
-
+    const value = BigInt(auth.stake);
     let txHash: `0x${string}`;
     try {
       txHash = await writeContract(wagmiConfig, {
         chainId: auth.chainId,
         address: auth.escrowAddress,
         abi: ESCROW_ABI,
-        functionName: "depositNativeAsPlayer",
+        functionName: "depositNative",
         args: [
           auth.matchIdBytes32,
           auth.player1,
           auth.player2,
-          stakeWei,
-          gasReserveWei,
+          BigInt(auth.stake),
           BigInt(auth.deadline),
           auth.oracleSig,
         ],
         value,
       });
-      console.log(`[EvmEscrow] deposit tx submitted: ${txHash}`);
     } catch (e: any) {
-      // User rejection or revert. Surface a friendly message; don't retry — the
-      // user must explicitly try again.
-      const msg = e?.shortMessage || e?.message || String(e);
-      console.error(`[EvmEscrow] depositNativeAsPlayer failed: ${msg}`);
+      console.error(`[EvmEscrow] depositNative failed: ${e?.shortMessage || e?.message || e}`);
       return false;
     }
 
     try {
-      const receipt = await waitForTransactionReceipt(wagmiConfig, {
-        chainId: auth.chainId,
-        hash: txHash,
-      });
+      const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: auth.chainId, hash: txHash });
       if (receipt.status !== "success") {
         console.error(`[EvmEscrow] tx reverted on-chain: ${txHash}`);
         return false;
       }
-      console.log(`[EvmEscrow] deposit confirmed in block ${receipt.blockNumber}`);
     } catch (e: any) {
       console.error(`[EvmEscrow] receipt wait failed:`, e?.message || e);
       return false;
     }
 
-    // Poll until both players have deposited (status === 1 / Active).
+    // Poll until both players have deposited (compat status === 1 / Active).
     for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
       try {
         const s = await fetchMatchStatus(matchId);
-        if (s.status === 1) {
-          console.log(`[EvmEscrow] match ${matchId} fully funded`);
-          return true;
-        }
+        if (s.status === 1) return true;
         if (s.status === 2) {
           console.warn(`[EvmEscrow] match ${matchId} already settled`);
           return false;
@@ -170,9 +159,61 @@ export class EvmEscrowAdapter {
       }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
-
-    console.warn(`[EvmEscrow] match ${matchId} did not become Active within timeout — opponent may not have deposited`);
+    console.warn(`[EvmEscrow] match ${matchId} did not become Active within timeout`);
     return false;
+  }
+
+  /**
+   * Winner-callable on-chain settlement (V2). Anyone in the match can call
+   * this; the contract enforces who actually receives the funds based on
+   * the oracle-signed reason. We never throw — failures return null and the
+   * UI keeps the existing optimistic payout estimate.
+   */
+  async claimSettlement(matchId: string): Promise<{ txHash: `0x${string}` } | null> {
+    let auth: SettleAuth | null;
+    try {
+      auth = await fetchSettleAuth(matchId);
+    } catch (e: any) {
+      console.error(`[EvmEscrow] settle-auth fetch failed:`, e?.message || e);
+      return null;
+    }
+    if (!auth) {
+      console.log(`[EvmEscrow] settle-auth not ready yet for ${matchId}`);
+      return null;
+    }
+
+    const account = getAccount(wagmiConfig);
+    if (!account.address) {
+      console.warn(`[EvmEscrow] no connected wallet — cannot claim`);
+      return null;
+    }
+    if (!(await ensureChain(auth.chainId))) return null;
+
+    try {
+      const txHash = await writeContract(wagmiConfig, {
+        chainId: auth.chainId,
+        address: auth.escrowAddress,
+        abi: ESCROW_ABI,
+        functionName: "settleMatch",
+        args: [auth.matchIdBytes32, auth.winner, auth.reason, auth.oracleSig],
+      });
+      const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: auth.chainId, hash: txHash });
+      if (receipt.status !== "success") {
+        console.error(`[EvmEscrow] settleMatch reverted: ${txHash}`);
+        return null;
+      }
+      console.log(`[EvmEscrow] settleMatch confirmed: ${txHash}`);
+      return { txHash };
+    } catch (e: any) {
+      // The other player may have already called settleMatch — treat as success.
+      const msg = e?.shortMessage || e?.message || String(e);
+      if (/AlreadySettled|already settled/i.test(msg)) {
+        console.log(`[EvmEscrow] settleMatch already executed by opponent — ${matchId}`);
+        return null;
+      }
+      console.error(`[EvmEscrow] settleMatch failed:`, msg);
+      return null;
+    }
   }
 
   async settleMatch(
@@ -189,21 +230,22 @@ export class EvmEscrowAdapter {
 
     let payout = 0;
     let fee = 0;
-
     if (result === 'win') {
       payout = pot - totalPlatformFee - totalBlockchainFee;
       fee = totalPlatformFee + totalBlockchainFee;
     } else if (result === 'draw') {
-      const feePodPerUser = totalPlatformFee / 2;
-      const blockchainFeePerUser = totalBlockchainFee / 2;
-      payout = safeStake - feePodPerUser - blockchainFeePerUser;
-      fee = feePodPerUser + blockchainFeePerUser;
-    } else {
-      payout = 0;
-      fee = 0;
+      payout = safeStake - totalPlatformFee / 2 - totalBlockchainFee / 2;
+      fee = totalPlatformFee / 2 + totalBlockchainFee / 2;
     }
 
-    console.log(`[EvmEscrow] Match ${matchId} result: ${result} (settlement handled server-side), estimated payout=${payout}, fee=${fee}`);
+    // Fire-and-forget — winner / either player triggers on-chain settle.
+    if (result === 'win' || result === 'draw') {
+      this.claimSettlement(matchId).catch((e) =>
+        console.warn(`[EvmEscrow] claimSettlement (${matchId}) background error:`, e?.message || e)
+      );
+    }
+
+    console.log(`[EvmEscrow] Match ${matchId} result: ${result}, est payout=${payout}, fee=${fee}`);
     return { payout, fee };
   }
 }

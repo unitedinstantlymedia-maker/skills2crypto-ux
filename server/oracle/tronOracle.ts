@@ -1,14 +1,17 @@
 /**
- * TronOracle — mirrors evmOracle for the USDT TRC-20 escrow on Tron.
+ * TronOracle V2 — gasless USDT TRC-20 escrow.
  *
- * The on-chain contract is the same Skills2CryptoEscrow Solidity code, deployed
- * via TronBox. The oracle:
- *   - Pays all TRX gas (settleMatch + depositUSDT calls)
- *   - Reimburses itself in USDT from the gasReserve baked into each deposit
- *   - Players hold only USDT TRC-20 (one-time approve to escrow needed)
- *
- * Players sign EIP-712 Deposit messages via TronLink; the oracle bundles both
- * sigs and calls depositUSDT(matchId, stake, p1, p2, sig1, sig2) on Tron.
+ * Architecture (Task #16 rewrite):
+ *   - Players make a one-time approve(escrow, MAX) themselves (TRX paid by
+ *     the player; oracle does NOT sponsor TRX anymore).
+ *   - For each match:
+ *       1. Server builds Deposit EIP-712 typed-data; both players sign via
+ *          TronLink.
+ *       2. Server calls depositUSDTGasless(matchId, p1, p2, stake, sig1, sig2)
+ *          — oracle pays TRX gas, contract pulls stake from each player.
+ *   - For settlement: server signs MatchOutcome and calls settleMatch on-chain
+ *     (oracle pays TRX gas; players never broadcast TX). The contract takes
+ *     a 0.5% gas-fund fee in USDT and auto-swaps to TRX above threshold.
  */
 import TronWeb from "tronweb";
 import { ethers } from "ethers";
@@ -26,14 +29,14 @@ export interface TronSettleResult {
 export interface TronDepositAuth {
   matchId: string;
   matchIdBytes32: string;
-  player1: string; // Tron base58
-  player2: string; // Tron base58
-  player1EvmHex: string; // 0x… 20-byte form used in the EIP-712 type
+  player1: string;
+  player2: string;
+  player1EvmHex: string;
   player2EvmHex: string;
   stake: string;
   nonce1: string;
   nonce2: string;
-  escrowAddressEvmHex: string; // 0x… (verifyingContract for EIP-712)
+  escrowAddressEvmHex: string;
   escrowAddressBase58: string;
   chainId: number;
   domain: {
@@ -67,7 +70,7 @@ function isTronAddress(addr: string): boolean {
 function tronAddressToEvmHex(tronAddress: string, tw: any): string {
   const hex = tw.address.toHex(tronAddress);
   if (!/^41[0-9a-fA-F]{40}$/.test(hex)) {
-    throw new TronOracleError(`Invalid Tron address (hex form): ${hex}`, "INVALID_ADDRESS");
+    throw new TronOracleError(`Invalid Tron address (hex): ${hex}`, "INVALID_ADDRESS");
   }
   return "0x" + hex.slice(2);
 }
@@ -83,7 +86,7 @@ interface TronConfig {
   usdtBase58: string;
   platformWalletBase58: string;
   chainId: number;
-  minTrxForGas: number; // in TRX
+  minTrxForGas: number;
 }
 
 function resolveConfig(): TronConfig {
@@ -92,9 +95,8 @@ function resolveConfig(): TronConfig {
     escrowBase58: loadEnvOrThrow("TRON_ESCROW_CONTRACT"),
     usdtBase58: process.env.TRON_USDT_CONTRACT || "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
     platformWalletBase58: process.env.TRON_PLATFORM_WALLET || "TEWL8GXDvjizmvtZ2pWSzz39AaFKMP5aqq",
-    // Tron mainnet uses chainId 728126428 (0x2b6653dc) for TIP-712 by convention.
     chainId: Number(process.env.TRON_CHAIN_ID ?? 728126428),
-    minTrxForGas: Number(process.env.TRON_MIN_GAS_TRX ?? 20),
+    minTrxForGas: Number(process.env.TRON_MIN_GAS_TRX ?? 50),
   };
 }
 
@@ -109,12 +111,7 @@ export function createTronOracle() {
 function build() {
   const cfg = resolveConfig();
   const privateKey = loadEnvOrThrow("ORACLE_PRIVATE_KEY").replace(/^0x/, "");
-
-  const tw = new (TronWeb as any)({
-    fullHost: cfg.fullHost,
-    privateKey,
-  });
-
+  const tw = new (TronWeb as any)({ fullHost: cfg.fullHost, privateKey });
   const oracleBase58: string = tw.address.fromPrivateKey(privateKey);
   const escrowEvmHex = tronAddressToEvmHex(cfg.escrowBase58, tw);
 
@@ -131,18 +128,18 @@ function build() {
         const balanceTrx = balanceSun / 1_000_000;
         console.log(`[TronOracle] [startup] Oracle TRX balance: ${balanceTrx}`);
         if (balanceTrx < cfg.minTrxForGas) {
-          console.warn(`[TronOracle] [startup] WARNING: TRX balance below ${cfg.minTrxForGas} — top up ${oracleBase58}`);
+          console.warn(`[TronOracle] [startup] WARNING: TRX balance < ${cfg.minTrxForGas} — top up ${oracleBase58}`);
         }
         const onChainOracle = await callView("oracle", []);
         const onChainOracleBase58 = evmHexToTronAddress(onChainOracle, tw);
         console.log(`[TronOracle] [startup] Contract.oracle() = ${onChainOracleBase58}`);
         if (onChainOracleBase58 !== oracleBase58) {
-          console.error(`[TronOracle] [startup] MISMATCH: contract oracle is ${onChainOracleBase58}, our wallet is ${oracleBase58}`);
+          console.error(`[TronOracle] [startup] MISMATCH: contract oracle is ${onChainOracleBase58}, signer is ${oracleBase58}`);
         } else {
-          console.log(`[TronOracle] [startup] Oracle address matches — contract is ready`);
+          console.log(`[TronOracle] [startup] Oracle matches — ready`);
         }
       } catch (e: any) {
-        console.error(`[TronOracle] [startup] Validation failed: ${e?.message || e}`);
+        console.error(`[TronOracle] [startup] validation failed: ${e?.message || e}`);
       }
     })();
   }
@@ -156,7 +153,7 @@ function build() {
     const trx = sun / 1_000_000;
     if (trx < cfg.minTrxForGas) {
       throw new TronOracleError(
-        `Oracle TRX balance insufficient (${trx} TRX). Please top up ${oracleBase58}.`,
+        `Oracle TRX balance insufficient (${trx} TRX). Top up ${oracleBase58}.`,
         "ORACLE_NO_GAS"
       );
     }
@@ -174,8 +171,7 @@ function build() {
     );
     const result = tx?.constant_result?.[0];
     if (!result) throw new TronOracleError(`View call failed: ${method}`, "VIEW_FAILED");
-    // For address-returning calls, take the last 40 hex chars as evm-style
-    if (method === "oracle" || method === "platformWallet" || method === "owner") {
+    if (method === "oracle" || method === "platformWallet" || method === "owner" || method === "oracleGasFund") {
       return "0x" + result.slice(-40);
     }
     return result;
@@ -225,10 +221,35 @@ function build() {
     throw new TronOracleError(`Tx not confirmed after ${TX_POLL_MAX_ATTEMPTS} polls: ${txid}`, "TX_TIMEOUT");
   }
 
+  function buildDomain() {
+    return {
+      name: "Skills2CryptoEscrow",
+      version: "2",
+      chainId: cfg.chainId,
+      verifyingContract: escrowEvmHex,
+    };
+  }
+
+  const DEPOSIT_TYPES = {
+    Deposit: [
+      { name: "matchId", type: "bytes32" },
+      { name: "stake", type: "uint256" },
+      { name: "nonce", type: "uint256" },
+    ],
+  };
+
+  const OUTCOME_TYPES = {
+    MatchOutcome: [
+      { name: "matchId", type: "bytes32" },
+      { name: "winner", type: "address" },
+      { name: "reason", type: "uint8" },
+    ],
+  };
+
   /**
-   * Build the EIP-712 typed data + per-player nonces required for both
-   * players to sign the Deposit message via TronLink. The server cross-verifies
-   * the signatures before broadcasting depositUSDT.
+   * Build the EIP-712 typed-data + per-player nonces for both players to
+   * sign via TronLink. Each player's signature authorizes a single
+   * `transferFrom(player, escrow, stake)`.
    */
   async function buildDepositAuth(params: {
     matchId: string;
@@ -236,11 +257,8 @@ function build() {
     player2Base58: string;
     stakeUsdt: number;
   }): Promise<TronDepositAuth> {
-    if (!isTronAddress(params.player1Base58)) {
-      throw new TronOracleError("player1 must be a Tron base58 address", "INVALID_INPUT");
-    }
-    if (!isTronAddress(params.player2Base58)) {
-      throw new TronOracleError("player2 must be a Tron base58 address", "INVALID_INPUT");
+    if (!isTronAddress(params.player1Base58) || !isTronAddress(params.player2Base58)) {
+      throw new TronOracleError("Player addresses must be Tron base58", "INVALID_INPUT");
     }
     if (params.player1Base58 === params.player2Base58) {
       throw new TronOracleError("Players cannot share an address", "INVALID_INPUT");
@@ -251,29 +269,13 @@ function build() {
 
     const stakeUnits = BigInt(Math.round(params.stakeUsdt * 10 ** USDT_TRC20_DECIMALS));
     const matchIdBytes32 = toMatchIdBytes32(params.matchId);
-
     const player1Hex = tronAddressToEvmHex(params.player1Base58, tw);
     const player2Hex = tronAddressToEvmHex(params.player2Base58, tw);
 
-    const nonce1 = await callView("getDepositNonce", [{ type: "address", value: player1Hex }]);
-    const nonce2 = await callView("getDepositNonce", [{ type: "address", value: player2Hex }]);
-    const nonce1Big = BigInt("0x" + (nonce1 as string).slice(-64));
-    const nonce2Big = BigInt("0x" + (nonce2 as string).slice(-64));
-
-    const domain = {
-      name: "Skills2CryptoEscrow",
-      version: "1",
-      chainId: cfg.chainId,
-      verifyingContract: escrowEvmHex,
-    };
-    const types = {
-      Deposit: [
-        { name: "matchId", type: "bytes32" },
-        { name: "stake", type: "uint256" },
-        { name: "assetType", type: "uint8" },
-        { name: "nonce", type: "uint256" },
-      ],
-    };
+    const nonce1Hex = await callView("getDepositNonce", [{ type: "address", value: player1Hex }]);
+    const nonce2Hex = await callView("getDepositNonce", [{ type: "address", value: player2Hex }]);
+    const nonce1 = BigInt("0x" + (nonce1Hex as string).slice(-64));
+    const nonce2 = BigInt("0x" + (nonce2Hex as string).slice(-64));
 
     return {
       matchId: params.matchId,
@@ -283,20 +285,16 @@ function build() {
       player1EvmHex: player1Hex,
       player2EvmHex: player2Hex,
       stake: stakeUnits.toString(),
-      nonce1: nonce1Big.toString(),
-      nonce2: nonce2Big.toString(),
+      nonce1: nonce1.toString(),
+      nonce2: nonce2.toString(),
       escrowAddressEvmHex: escrowEvmHex,
       escrowAddressBase58: cfg.escrowBase58,
       chainId: cfg.chainId,
-      domain,
-      types,
+      domain: buildDomain(),
+      types: DEPOSIT_TYPES,
     };
   }
 
-  /**
-   * Verify a player's EIP-712 Deposit signature recovers to the expected EVM
-   * address derived from their Tron base58 address.
-   */
   function verifyDepositSig(params: {
     matchIdBytes32: string;
     stakeUnits: string;
@@ -304,29 +302,13 @@ function build() {
     expectedPlayerEvmHex: string;
     signature: string;
   }): boolean {
-    const domain = {
-      name: "Skills2CryptoEscrow",
-      version: "1",
-      chainId: cfg.chainId,
-      verifyingContract: escrowEvmHex,
-    };
-    const types = {
-      Deposit: [
-        { name: "matchId", type: "bytes32" },
-        { name: "stake", type: "uint256" },
-        { name: "assetType", type: "uint8" },
-        { name: "nonce", type: "uint256" },
-      ],
-    };
     const value = {
       matchId: params.matchIdBytes32,
       stake: BigInt(params.stakeUnits),
-      assetType: 0, // USDT
       nonce: BigInt(params.nonce),
     };
-
     try {
-      const recovered = ethers.verifyTypedData(domain, types, value, params.signature);
+      const recovered = ethers.verifyTypedData(buildDomain(), DEPOSIT_TYPES, value, params.signature);
       return recovered.toLowerCase() === params.expectedPlayerEvmHex.toLowerCase();
     } catch {
       return false;
@@ -334,47 +316,58 @@ function build() {
   }
 
   /**
-   * Submit depositUSDT on-chain after both players have signed. Pulls
-   * `stake + gasReserve` USDT from each player via the allowance they
-   * previously approved to the escrow.
+   * Submit gasless deposit. Pulls `stake` USDT from each player using their
+   * pre-existing approval. Both players' EIP-712 sigs are verified by the
+   * contract. Oracle pays TRX gas.
    */
-  async function submitDepositUSDT(params: {
+  async function submitDepositUSDTGasless(params: {
     matchId: string;
-    stakeUnits: string;
     player1EvmHex: string;
     player2EvmHex: string;
+    stakeUnits: string;
     sig1: string;
     sig2: string;
   }): Promise<{ txid: string }> {
     const matchIdBytes32 = toMatchIdBytes32(params.matchId);
-    // Use depositUSDTWithPermit so the contract transfers the gas reserve
-    // (USDT) directly to the oracle wallet, reimbursing it for the TRX it
-    // burned on this deposit + the upcoming settle. We pass empty PermitData
-    // (deadline=0) because Tron USDT does not support EIP-2612; players have
-    // already granted allowance via TronLink approve.
-    const emptyPermit = {
-      deadline: "0",
-      v: 0,
-      r: "0x" + "00".repeat(32),
-      s: "0x" + "00".repeat(32),
-    };
-    const permitTuple = [emptyPermit.deadline, emptyPermit.v, emptyPermit.r, emptyPermit.s];
-    const args = [
-      { type: "bytes32", value: matchIdBytes32 },
-      { type: "uint256", value: params.stakeUnits },
-      { type: "address", value: params.player1EvmHex },
-      { type: "address", value: params.player2EvmHex },
-      { type: "bytes", value: params.sig1.replace(/^0x/, "") },
-      { type: "bytes", value: params.sig2.replace(/^0x/, "") },
-      { type: "tuple(uint256,uint8,bytes32,bytes32)", value: permitTuple },
-      { type: "tuple(uint256,uint8,bytes32,bytes32)", value: permitTuple },
-    ];
-    console.log(`[TronOracle] depositUSDTWithPermit — match: ${params.matchId}`);
-    const { txid } = await triggerWrite("depositUSDTWithPermit", args, 400);
-    console.log(`[TronOracle] deposit tx broadcast: ${txid}`);
+    console.log(`[TronOracle] depositUSDTGasless — match=${params.matchId}`);
+    const { txid } = await triggerWrite(
+      "depositUSDTGasless",
+      [
+        { type: "bytes32", value: matchIdBytes32 },
+        { type: "address", value: params.player1EvmHex },
+        { type: "address", value: params.player2EvmHex },
+        { type: "uint256", value: params.stakeUnits },
+        { type: "bytes", value: params.sig1.replace(/^0x/, "") },
+        { type: "bytes", value: params.sig2.replace(/^0x/, "") },
+      ],
+      300
+    );
+    console.log(`[TronOracle] deposit broadcast: ${txid}`);
     await waitForTx(txid);
     console.log(`[TronOracle] deposit confirmed: ${txid}`);
     return { txid };
+  }
+
+  /**
+   * Sign a MatchOutcome off-chain (used internally by submitSettlement) and
+   * also exposed for admin tooling.
+   */
+  async function signMatchOutcome(params: {
+    matchId: string;
+    winnerEvmHex: string;
+    reason: number;
+  }): Promise<string> {
+    if (params.reason < 0 || params.reason > 2) {
+      throw new TronOracleError(`Invalid reason ${params.reason}`, "INVALID_REASON");
+    }
+    const matchIdBytes32 = toMatchIdBytes32(params.matchId);
+    const value = {
+      matchId: matchIdBytes32,
+      winner: params.winnerEvmHex,
+      reason: params.reason,
+    };
+    const signer = new ethers.Wallet(privateKey);
+    return signer.signTypedData(buildDomain(), OUTCOME_TYPES, value);
   }
 
   async function submitSettlement(
@@ -382,29 +375,29 @@ function build() {
     winnerEvmHex: string,
     reason: number
   ): Promise<TronSettleResult> {
-    if (reason < 0 || reason > 2) {
-      throw new TronOracleError(`Invalid settle reason: ${reason}`, "INVALID_REASON");
-    }
     const matchIdBytes32 = toMatchIdBytes32(matchId);
-    console.log(`[TronOracle] submitSettlement — match: ${matchId}, winner: ${winnerEvmHex}, reason: ${reason}`);
+    const oracleSig = await signMatchOutcome({ matchId, winnerEvmHex, reason });
+    console.log(`[TronOracle] settleMatch — match=${matchId} winner=${winnerEvmHex} reason=${reason}`);
     const { txid } = await triggerWrite(
       "settleMatch",
       [
         { type: "bytes32", value: matchIdBytes32 },
         { type: "address", value: winnerEvmHex },
         { type: "uint8", value: reason },
+        { type: "bytes", value: oracleSig.replace(/^0x/, "") },
       ],
       300
     );
     const info = await waitForTx(txid);
-    return {
-      txHash: txid,
-      matchId,
-      blockNumber: info?.blockNumber,
-    };
+    return { txHash: txid, matchId, blockNumber: info?.blockNumber };
   }
 
-  async function getMatchOnChain(matchId: string): Promise<{ status: number; firstDepositorEvmHex: string }> {
+  async function getMatchOnChain(matchId: string): Promise<{
+    status: number; // 0 None, 1 Active, 2 Settled
+    player1EvmHex: string;
+    player2EvmHex: string;
+    stake: string;
+  }> {
     const matchIdBytes32 = toMatchIdBytes32(matchId);
     const fnSelector = "getMatch(bytes32)";
     const tx = await tw.transactionBuilder.triggerConstantContract(
@@ -416,14 +409,13 @@ function build() {
     );
     const raw = tx?.constant_result?.[0];
     if (!raw) throw new TronOracleError("getMatch view returned empty", "VIEW_FAILED");
-    // Match struct decoded layout: bytes32 matchId | address p1 | address p2 |
-    //   uint256 stake | uint8 assetType | uint256 gasReserve | uint8 status |
-    //   uint256 deadline | address firstDepositor
-    // Each slot is 64 hex chars.
+    // V2 Match struct: address p1 | address p2 | uint256 stake | uint8 status
     const slots = raw.match(/.{1,64}/g) || [];
-    const status = parseInt(slots[6] || "0", 16);
-    const firstDepositorEvmHex = "0x" + (slots[8] || "").slice(-40);
-    return { status, firstDepositorEvmHex };
+    const player1EvmHex = "0x" + (slots[0] || "").slice(-40);
+    const player2EvmHex = "0x" + (slots[1] || "").slice(-40);
+    const stake = BigInt("0x" + (slots[2] || "0")).toString();
+    const status = parseInt(slots[3] || "0", 16);
+    return { status, player1EvmHex, player2EvmHex, stake };
   }
 
   async function getOracleBalanceTrx(): Promise<number> {
@@ -436,27 +428,6 @@ function build() {
     return sun / 1_000_000;
   }
 
-  /**
-   * Send TRX from the oracle wallet to a player so they can pay the
-   * one-time USDT approve() cost. Players never need to own TRX themselves
-   * — the oracle covers it. Caller is responsible for idempotency.
-   */
-  async function sponsorPlayerTrx(playerBase58: string, amountTrx: number): Promise<{ txid: string }> {
-    await ensureOracleHasGas();
-    const amountSun = Math.round(amountTrx * 1_000_000);
-    const tx = await tw.trx.sendTransaction(playerBase58, amountSun);
-    if (!tx?.result || !tx?.txid) {
-      throw new TronOracleError(`sponsorPlayerTrx broadcast failed: ${JSON.stringify(tx)}`, "BROADCAST_FAILED");
-    }
-    console.log(`[TronOracle] sponsored ${amountTrx} TRX → ${playerBase58} (tx=${tx.txid})`);
-    return { txid: tx.txid };
-  }
-
-  /**
-   * Read the player's USDT allowance to the escrow contract (in 6-decimal
-   * smallest units). Used by the matchmaking pre-flight to prevent matches
-   * from being created if the player has not yet approved.
-   */
   async function getUsdtAllowance(playerBase58: string): Promise<bigint> {
     const fnSelector = "allowance(address,address)";
     const params = [
@@ -473,6 +444,24 @@ function build() {
     const result = tx?.constant_result?.[0];
     if (!result) return 0n;
     return BigInt("0x" + result);
+  }
+
+  async function getAccumulatedGasFundUSDT(): Promise<bigint> {
+    try {
+      const fnSelector = "accumulatedGasFundUSDT()";
+      const tx = await tw.transactionBuilder.triggerConstantContract(
+        cfg.escrowBase58,
+        fnSelector,
+        {},
+        [],
+        oracleBase58
+      );
+      const result = tx?.constant_result?.[0];
+      if (!result) return 0n;
+      return BigInt("0x" + result);
+    } catch {
+      return 0n;
+    }
   }
 
   return {
@@ -494,13 +483,14 @@ function build() {
     evmHexToTronAddress: (h: string) => evmHexToTronAddress(h, tw),
     buildDepositAuth,
     verifyDepositSig,
-    submitDepositUSDT,
+    submitDepositUSDTGasless,
+    signMatchOutcome,
     submitSettlement,
     getMatchOnChain,
     getOracleBalanceTrx,
     getPlayerBalanceTrx,
-    sponsorPlayerTrx,
     getUsdtAllowance,
+    getAccumulatedGasFundUSDT,
   };
 }
 

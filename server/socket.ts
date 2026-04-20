@@ -158,6 +158,9 @@ async function settleMatchOnChain(
 
     if (!addr1 || !addr2) {
       console.warn("[settlement] skipping — no wallet addresses for match:", matchId);
+      // Release the lock so a future retry (e.g. once addresses are filled
+      // in by a slow-arriving deposit handler) can proceed.
+      await redis.del(lockKey);
       return;
     }
 
@@ -190,11 +193,11 @@ async function settleMatchOnChain(
       winner = ZERO_ADDRESS;
     } else if (isDisconnect) {
       reason = 2;
-      const resolved = normalizeWinner(winnerId);
-      if (winnerId && !resolved) {
-        console.warn(`[settlement] disconnect winner '${winnerId}' did not match addr1/addr2 for ${matchId} — using ZERO_ADDRESS`);
-      }
-      winner = resolved || ZERO_ADDRESS;
+      // V2 contracts require winner == address(0) whenever reason != Normal
+      // (the contract pot is split / refunded based purely on `reason`).
+      // Including a non-zero winner would either revert the on-chain settle
+      // or produce a payout that doesn't match the contract's branching.
+      winner = ZERO_ADDRESS;
     } else if (resultType === 'win' && winnerId) {
       const resolved = normalizeWinner(winnerId);
       if (!resolved) {
@@ -210,11 +213,12 @@ async function settleMatchOnChain(
       return;
     }
 
+    // Tron USDT remains oracle-submitted (gasless for players). The contract's
+    // 0.5% gas-fund accumulator + on-chain SunSwap auto-swap keeps the oracle
+    // wallet topped up so this stays self-sustaining.
     if (asset === "USDT") {
       const { createTronOracle } = await import("./oracle/tronOracle");
       const tron = createTronOracle();
-      // winner is currently a base58 Tron address (or zero) — convert to evm hex
-      // for the contract's address-typed parameter.
       const winnerEvmHex =
         winner === ZERO_ADDRESS ? ZERO_ADDRESS : tron.tronAddressToEvmHex(winner);
       console.log(`[settlement][TRON] settling match ${matchId}: winner=${winner}, reason=${reason}`);
@@ -223,16 +227,37 @@ async function settleMatchOnChain(
       return;
     }
 
+    // EVM (BNB / ETH) and TON: oracle only signs the MatchOutcome. The winner
+    // (Normal) or either player (Draw / Disconnect) calls settleMatch on-chain
+    // and pays their own gas. We persist the signed auth in Redis so the
+    // /api/escrow/settle-auth endpoint serves it idempotently and emit a
+    // `settle-ready` socket event so connected adapters can claim immediately.
     if (asset === "TON") {
       const { createTonOracle } = await import("./oracle/tonOracle");
       const ton = createTonOracle();
-      // For non-NORMAL reasons (draw / disconnect) the contract ignores the
-      // winner field — pass the resolved winner string regardless; tonOracle
-      // will substitute a safe placeholder when reason !== 0.
-      const winnerFriendly = winner === ZERO_ADDRESS ? "" : winner;
-      console.log(`[settlement][TON] settling match ${matchId}: winner=${winnerFriendly}, reason=${reason}`);
-      const result = await ton.submitSettlement(matchId, winnerFriendly, reason);
-      console.log(`[settlement][TON] match ${matchId} settled: tx=${result.txHash}`);
+      // Hard guard: any non-Normal reason MUST drop the winner to "" so the
+      // signed Settle BOC carries the placeholder address the contract
+      // expects (it ignores winner when reason != Normal).
+      const winnerFriendly = reason !== 0 || winner === ZERO_ADDRESS ? "" : winner;
+      console.log(`[settlement][TON] signing outcome match ${matchId}: winner=${winnerFriendly}, reason=${reason}`);
+      const signed = await ton.signMatchOutcome({
+        matchId,
+        winnerFriendly,
+        reason,
+      });
+      const auth = {
+        matchId,
+        chain: "TON",
+        winner: winnerFriendly,
+        reason,
+        payloadBoc: signed.payloadBoc,
+        signatureHex: signed.signatureHex,
+        escrowAddress: ton.escrowAddressFriendly,
+      };
+      await redis.set(`settle_auth:${matchId}`, JSON.stringify(auth), { ex: 60 * 60 * 24 * 7 });
+      const io = ioRef;
+      if (io) io.to(`match:${matchId}`).emit("settle-ready", auth);
+      console.log(`[settlement][TON] settle-auth ready for ${matchId}`);
       return;
     }
 
@@ -244,9 +269,29 @@ async function settleMatchOnChain(
       return;
     }
     const oracle = createEvmOracle(chain);
-    console.log(`[settlement] settling match ${matchId}: winner=${winner}, reason=${reason}`);
-    const result = await oracle.submitSettlement(matchId, winner, reason);
-    console.log(`[settlement] match ${matchId} settled on-chain: tx=${result.txHash}`);
+    // Same hard guard for EVM: contract requires winner == address(0) for
+    // non-Normal reasons.
+    const evmWinner = reason === 0 ? winner : ZERO_ADDRESS;
+    console.log(`[settlement][${chain}] signing outcome match ${matchId}: winner=${evmWinner}, reason=${reason}`);
+    const signed = await oracle.signMatchOutcome({
+      matchId,
+      winner: evmWinner,
+      reason,
+    });
+    const auth = {
+      matchId,
+      chain,
+      chainId: signed.chainId,
+      escrowAddress: signed.escrowAddress,
+      matchIdBytes32: signed.matchIdBytes32,
+      winner: signed.winner,
+      reason: signed.reason,
+      oracleSig: signed.oracleSig,
+    };
+    await redis.set(`settle_auth:${matchId}`, JSON.stringify(auth), { ex: 60 * 60 * 24 * 7 });
+    const io = ioRef;
+    if (io) io.to(`match:${matchId}`).emit("settle-ready", auth);
+    console.log(`[settlement][${chain}] settle-auth ready for ${matchId}`);
   } catch (err: any) {
     console.error(`[settlement] match ${matchId} failed:`, err?.message || err);
     await redis.del(lockKey);

@@ -83,7 +83,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
         const bsc = createEvmOracle("BSC");
         bsc.watchMatchActive(async (evt) => {
           const appMatchId = await resolveAppMatchId(evt.matchId);
-          console.log(`[MatchActive:BSC] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
+          console.log(`[MatchActive:BSC] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake}`);
           if (!appMatchId) return;
           markMatchFunded(appMatchId);
           io.to(`match:${appMatchId}`).emit("match-funded", {
@@ -106,7 +106,7 @@ httpServer.listen(PORT, "0.0.0.0", () => {
         const eth = createEvmOracle("ETH");
         eth.watchMatchActive(async (evt) => {
           const appMatchId = await resolveAppMatchId(evt.matchId);
-          console.log(`[MatchActive:ETH] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake} gas=${evt.gasReserve}`);
+          console.log(`[MatchActive:ETH] hash=${evt.matchId} appMatchId=${appMatchId ?? "?"} stake=${evt.stake}`);
           if (!appMatchId) return;
           markMatchFunded(appMatchId);
           io.to(`match:${appMatchId}`).emit("match-funded", {

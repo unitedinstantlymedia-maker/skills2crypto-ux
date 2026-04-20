@@ -87,8 +87,6 @@ export async function registerRoutes(
     // queueing so a player without funds doesn't lock the opponent.
     if (asset === "TON") {
       try {
-        const { createTonOracle } = await import("./oracle/tonOracle");
-        const ton = createTonOracle();
         const { TonClient } = await import("@ton/ton");
         const { Address, fromNano } = await import("@ton/core");
         const client = new TonClient({
@@ -97,8 +95,8 @@ export async function registerRoutes(
         });
         const balanceNano = await client.getBalance(Address.parse(cleanWallet));
         const balanceTon = Number(fromNano(balanceNano));
-        const gasReserve = await ton.getGasReservePerPlayerTon();
-        const required = numericStake + gasReserve + 0.05; // +0.05 TON buffer
+        // V2: stake + ~0.1 TON gas headroom (deposit send + future settle send).
+        const required = numericStake + 0.1;
         if (balanceTon < required) {
           return res.status(412).json({
             error: "ton_insufficient_balance",
@@ -117,7 +115,8 @@ export async function registerRoutes(
     }
 
     // USDT pre-flight: a Tron player must have already approved at least
-    // (stake + gasReserve buffer) USDT to the escrow before we queue them.
+    // `stake` USDT to the escrow before we queue them. V2 contract pulls
+    // exactly stake (no gasReserve padding).
     // Otherwise depositUSDT will revert at funding time and the opponent's
     // stake gets locked unproductively. The frontend should call
     // /api/tron/sponsor-trx + approve before reaching this endpoint.
@@ -127,7 +126,7 @@ export async function registerRoutes(
         const tron = createTronOracle();
         const allowance = await tron.getUsdtAllowance(cleanWallet);
         const stakeUnits = BigInt(Math.round(numericStake * 1_000_000));
-        const required = (stakeUnits * 110n) / 100n;
+        const required = stakeUnits;
         if (allowance < required) {
           return res.status(412).json({
             error: "usdt_not_approved",
@@ -454,87 +453,18 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/session/nonce", async (req, res) => {
-    const player = req.query.player as string;
-    const chainIdParam = Number(req.query.chainId);
-
-    if (!player || !/^0x[0-9a-fA-F]{40}$/.test(player)) {
-      return res.status(400).json({ error: "Invalid player address" });
-    }
-
-    const sessionAddr = process.env.SERVER_SESSION_WALLET;
-    if (!sessionAddr) {
-      return res.status(500).json({ error: "Server session wallet not configured" });
-    }
-
-    const chain = chainIdParam === 1 ? "ETH" : chainIdParam === 56 ? "BSC" : null;
-    if (!chain) {
-      return res.status(400).json({ error: `Unsupported chain ID ${req.query.chainId}. Expected 1 (Ethereum) or 56 (BSC).` });
-    }
-
-    const { createEvmOracle } = await import("./oracle/evmOracle");
-    try {
-      const oracle = createEvmOracle(chain);
-      const nonce = await oracle.getSessionNonce(player);
-
-      return res.json({
-        nonce: nonce.toString(),
-        sessionAddr,
-        escrowAddress: oracle.escrowAddress,
-        chainId: oracle.chainId,
-      });
-    } catch (err: any) {
-      console.error(`[session/nonce:${chain}] Error:`, err.message);
-      return res.status(500).json({ error: "Failed to fetch session nonce" });
-    }
+  /**
+   * Removed in V2 (Task #16): server-side session keys. The V2 escrow
+   * contracts have no registerSessionKey / sessionNonces — every match is
+   * authorised by a fresh EIP-712 MatchAuth signed by the oracle. We keep
+   * the routes as 410 stubs so old clients see a clear error.
+   */
+  app.all(["/api/session/nonce", "/api/session/register"], (_req, res) => {
+    return res.status(410).json({
+      error: "Session keys were removed in escrow V2. Use /api/oracle/match-auth for per-match authorisation.",
+    });
   });
 
-  app.post("/api/session/register", async (req, res) => {
-    const { player, sessionAddr, maxStakePerMatch, expiry, signature, chainId } = req.body ?? {};
-
-    if (!player || !/^0x[0-9a-fA-F]{40}$/.test(player)) {
-      return res.status(400).json({ error: "Invalid player address" });
-    }
-    if (!sessionAddr || !/^0x[0-9a-fA-F]{40}$/.test(sessionAddr)) {
-      return res.status(400).json({ error: "Invalid session address" });
-    }
-    if (!signature || !/^0x[0-9a-fA-F]+$/.test(signature)) {
-      return res.status(400).json({ error: "Invalid signature" });
-    }
-    if (!maxStakePerMatch || !expiry) {
-      return res.status(400).json({ error: "Missing maxStakePerMatch or expiry" });
-    }
-
-    const chainIdNum = Number(chainId);
-    const chain = chainIdNum === 1 ? "ETH" : chainIdNum === 56 ? "BSC" : null;
-    if (!chain) {
-      return res.status(400).json({ error: `Unsupported chain ID ${chainId}. Expected 1 (Ethereum) or 56 (BSC).` });
-    }
-
-    const expectedSessionAddr = process.env.SERVER_SESSION_WALLET;
-    if (sessionAddr.toLowerCase() !== expectedSessionAddr?.toLowerCase()) {
-      return res.status(400).json({ error: "Session address does not match server wallet" });
-    }
-
-    try {
-      const { createEvmOracle } = await import("./oracle/evmOracle");
-      const oracle = createEvmOracle(chain);
-
-      const result = await oracle.registerSessionKey(
-        player,
-        sessionAddr,
-        BigInt(maxStakePerMatch),
-        BigInt(expiry),
-        signature
-      );
-
-      console.log(`[session/register:${chain}] Session registered for ${player}, tx: ${result.txHash}`);
-      return res.json({ txHash: result.txHash, blockNumber: result.blockNumber });
-    } catch (err: any) {
-      console.error(`[session/register:${chain}] Error:`, err.message);
-      return res.status(500).json({ error: err.message || "Session registration failed" });
-    }
-  });
 
   /**
    * Returns an EIP-712 MatchAuth oracle signature plus the exact parameters
@@ -589,7 +519,6 @@ export async function registerRoutes(
       const stakeBigInt = ethersLib.parseUnits(String(stakeNum), 18);
 
       const oracle = createEvmOracle(chain);
-      const gasReserve = await oracle.getGasReserveEstimate();
 
       // 15-minute deposit window.
       const deadline = Math.floor(Date.now() / 1000) + 15 * 60;
@@ -599,7 +528,6 @@ export async function registerRoutes(
         player1,
         player2,
         stake: stakeBigInt,
-        gasReserve,
         deadline,
       });
 
@@ -609,7 +537,7 @@ export async function registerRoutes(
       // emit the socket event into the correct `match:${matchId}` room.
       await redis.set(`match_by_hash:${auth.matchIdBytes32.toLowerCase()}`, matchId, { ex: 60 * 60 * 24 });
 
-      console.log(`[oracle/match-auth:${chain}] issued for match ${matchId}: stake=${stakeBigInt.toString()}, gasReserve=${gasReserve.toString()}, deadline=${deadline}`);
+      console.log(`[oracle/match-auth:${chain}] issued for match ${matchId}: stake=${stakeBigInt.toString()}, deadline=${deadline}`);
 
       return res.json(auth);
     } catch (err: any) {
@@ -641,13 +569,18 @@ export async function registerRoutes(
       const oracle = createEvmOracle(chain);
       const m = await oracle.getMatchOnChain(matchId);
 
-      // status: 0=None, 1=Active, 2=Settled, 3=WaitingForP2
-      const statusLabel = ["none", "active", "settled", "waiting_for_p2"][m.status] ?? "unknown";
+      // V2 status: 0=None, 1=WaitingForP2, 2=Active, 3=Settled
+      const statusLabel = ["none", "waiting_for_p2", "active", "settled"][m.status] ?? "unknown";
+      // For backwards compat with the existing client adapter (which checks
+      // status === 1 to mean "fully funded"), remap to the v1 numbering it
+      // expects. Will tighten once the adapter switches to the labelled enum.
+      const compatStatus = m.status === 2 ? 1 : m.status === 3 ? 2 : m.status === 1 ? 3 : 0;
       return res.json({
         matchId,
         chain,
         chainId: oracle.chainId,
-        status: m.status,
+        status: compatStatus,
+        statusV2: m.status,
         statusLabel,
         firstDepositor: m.firstDepositor,
         deadline: m.deadline,
@@ -787,7 +720,7 @@ export async function registerRoutes(
         if (claimed) {
           console.log(`[tron/deposit-sig] both sigs received for ${matchId} — broadcasting depositUSDT`);
           tron
-            .submitDepositUSDT({
+            .submitDepositUSDTGasless({
               matchId,
               stakeUnits: auth.stake,
               player1EvmHex: auth.player1EvmHex,
@@ -848,7 +781,8 @@ export async function registerRoutes(
       const tron = createTronOracle();
       const m = await tron.getMatchOnChain(matchId);
 
-      const statusLabel = ["none", "active", "settled", "waiting_for_p2"][m.status] ?? "unknown";
+      // V2 Tron status: 0=None, 1=Active, 2=Settled.
+      const statusLabel = ["none", "active", "settled"][m.status] ?? "unknown";
       return res.json({
         matchId,
         chain: "TRON",
@@ -904,15 +838,20 @@ export async function registerRoutes(
       const trx = await tron.getPlayerBalanceTrx(wallet);
       const allowance = await tron.getUsdtAllowance(wallet);
       const stakeUnits = BigInt(Math.round(stake * 1_000_000));
-      // Need a small buffer over stakeUnits for gasReserve. ~10% is safe.
-      const requiredAllowance = (stakeUnits * 110n) / 100n;
-      const APPROVE_TRX_COST = 30; // approx USDT TRC-20 approve cost
+      // Need allowance ≥ stake. We don't pad for gasReserve anymore — V2
+      // only ever pulls `stake` per match (no buffer needed).
+      const requiredAllowance = stakeUnits;
+      // Player pays their own TRX for the one-time approve(escrow, MAX).
+      // ~30 TRX is a comfortable upper bound on USDT approve energy cost.
+      const APPROVE_TRX_COST = 30;
+      const needsApprove = allowance < requiredAllowance;
       return res.json({
         wallet,
         trxBalance: trx,
         usdtAllowance: allowance.toString(),
-        approveReady: allowance >= requiredAllowance,
-        trxReady: allowance >= requiredAllowance || trx >= APPROVE_TRX_COST,
+        approveReady: !needsApprove,
+        trxReady: !needsApprove || trx >= APPROVE_TRX_COST,
+        approveTrxCostEstimate: APPROVE_TRX_COST,
       });
     } catch (err: any) {
       console.error("[tron/readiness] Error:", err?.message || err);
@@ -921,109 +860,57 @@ export async function registerRoutes(
   });
 
   /**
-   * GET /api/tron/sponsor-challenge?wallet=<base58>
-   * Issues a short-lived challenge string the wallet must sign to prove
-   * ownership before /api/tron/sponsor-trx will release any TRX.
+   * Removed in V2 (Task #16): /api/tron/sponsor-challenge and
+   * /api/tron/sponsor-trx. Players now pay their own TRX for the one-time
+   * approve(escrow, MAX). The escrow contract auto-funds the oracle from
+   * a 0.5% USDT settlement fee via on-chain SunSwap, eliminating the need
+   * for a sponsor flow.
    */
-  app.get("/api/tron/sponsor-challenge", async (req, res) => {
-    const wallet = String(req.query.wallet || "");
-    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
-      return res.status(400).json({ error: "Invalid Tron wallet" });
-    }
-    const nonce = randomBytes(16).toString("hex");
-    const challenge = `Skills2Crypto sponsor request for ${wallet} @ ${Date.now()} :: ${nonce}`;
-    await redis.set(`tron_sponsor_chal:${wallet}`, challenge, { ex: 300 });
-    return res.json({ challenge });
+  app.all(["/api/tron/sponsor-challenge", "/api/tron/sponsor-trx"], (_req, res) => {
+    return res.status(410).json({
+      error: "TRX sponsorship was removed in escrow V2. Players pay their own TRX for the one-time USDT approve.",
+    });
   });
 
+
   /**
-   * POST /api/tron/sponsor-trx
-   * Body: { wallet: <base58>, signature: <hex> }
+   * GET /api/escrow/settle-auth/:matchId
+   * Returns the oracle-signed MatchOutcome auth for a finished EVM or TON
+   * match. The winner (or any player on Draw / Disconnect) uses this to call
+   * settleMatch on-chain themselves and pay their own gas.
    *
-   * Sends a one-time TRX top-up so the player can pay their USDT approve()
-   * cost. Hardened against drain attacks:
-   *   - Caller must hold a valid signed challenge (proves wallet ownership).
-   *   - Per-wallet 24h Redis lock.
-   *   - Per-IP daily request cap (default 5/day).
-   *   - Global daily budget cap (default 1000 TRX/day).
-   *   - Skips if player already has ≥ 30 TRX.
+   * For TRON USDT matches the oracle settles directly, so this endpoint
+   * returns 409 — clients should poll /api/tron/match-status instead.
+   *
+   * Idempotent: the auth is persisted in Redis under `settle_auth:${matchId}`
+   * for 7 days so repeated polls return the same signature.
    */
-  app.post("/api/tron/sponsor-trx", async (req, res) => {
-    const wallet = String(req.body?.wallet || "");
-    const signature = String(req.body?.signature || "");
-    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
-      return res.status(400).json({ error: "Invalid Tron wallet" });
-    }
-    if (!signature) {
-      return res.status(400).json({ error: "Missing signature" });
-    }
-
-    // 1) Verify wallet ownership via signed challenge.
-    const challenge = await redis.get<string>(`tron_sponsor_chal:${wallet}`);
-    if (!challenge) {
-      return res.status(400).json({ error: "No active challenge — request /api/tron/sponsor-challenge first" });
-    }
+  app.get("/api/escrow/settle-auth/:matchId", async (req, res) => {
+    const matchId = String(req.params.matchId || "");
+    if (!matchId) return res.status(400).json({ error: "matchId required" });
     try {
-      const { createTronOracle } = await import("./oracle/tronOracle");
-      const tron = createTronOracle();
-      // Re-import TronWeb only to verify the signature; reuse the oracle's
-      // tronAddressToEvmHex to compare addresses.
-      const TronWebMod: any = await import("tronweb");
-      const TronWeb = TronWebMod.default || TronWebMod.TronWeb || TronWebMod;
-      const tw = new TronWeb({ fullHost: process.env.TRON_RPC_URL || "https://api.trongrid.io" });
-      const recovered: string = await tw.trx.verifyMessageV2(challenge, signature);
-      if (!recovered || recovered !== wallet) {
-        return res.status(401).json({ error: "Signature does not match wallet" });
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || !matchData.asset) {
+        return res.status(404).json({ error: "Match not found" });
       }
-      // Burn the challenge so it can't be replayed.
-      await redis.del(`tron_sponsor_chal:${wallet}`);
-
-      // 2) Per-IP daily limit.
-      const ip = String(req.headers["x-forwarded-for"] || req.ip || "unknown").split(",")[0].trim();
-      const ipKey = `tron_sponsor_ip:${ip}:${new Date().toISOString().slice(0, 10)}`;
-      const ipCount = await redis.incr(ipKey);
-      if (ipCount === 1) await redis.expire(ipKey, 60 * 60 * 24);
-      const IP_DAILY_LIMIT = Number(process.env.TRON_SPONSOR_IP_DAILY ?? 5);
-      if (ipCount > IP_DAILY_LIMIT) {
-        return res.status(429).json({ error: "Daily sponsor limit reached for this IP" });
+      if (String(matchData.asset) === "USDT") {
+        return res.status(409).json({
+          error: "tron_oracle_settled",
+          message: "Tron USDT matches are settled by the oracle — poll /api/tron/match-status.",
+        });
       }
-
-      // 3) Per-wallet 24h lock.
-      const sponsorKey = `tron_sponsor:${wallet}`;
-      const claimed = await redis.set(sponsorKey, "1", { ex: 60 * 60 * 24, nx: true });
-      if (!claimed) {
-        return res.status(429).json({ error: "Already sponsored within 24h", wallet });
+      const raw = await redis.get<string | object>(`settle_auth:${matchId}`);
+      if (!raw) {
+        return res.status(404).json({
+          error: "settle_auth_pending",
+          message: "Match has not been resolved by the oracle yet.",
+        });
       }
-
-      // 4) Skip if already funded.
-      const trx = await tron.getPlayerBalanceTrx(wallet);
-      if (trx >= 30) {
-        return res.json({ status: "skipped", wallet, trxBalance: trx });
-      }
-
-      // 5) Global daily budget cap.
-      const SPONSOR_TRX = Number(process.env.TRON_PLAYER_SPONSOR_TRX ?? 35);
-      const GLOBAL_DAILY_TRX_CAP = Number(process.env.TRON_SPONSOR_DAILY_CAP_TRX ?? 1000);
-      const budgetKey = `tron_sponsor_budget:${new Date().toISOString().slice(0, 10)}`;
-      const budgetUsed = Number((await redis.get<string>(budgetKey)) || 0);
-      if (budgetUsed + SPONSOR_TRX > GLOBAL_DAILY_TRX_CAP) {
-        await redis.del(sponsorKey);
-        return res.status(503).json({ error: "Global daily sponsor budget exhausted — try tomorrow" });
-      }
-      await redis.set(budgetKey, String(budgetUsed + SPONSOR_TRX), { ex: 60 * 60 * 30 });
-
-      try {
-        const result = await tron.sponsorPlayerTrx(wallet, SPONSOR_TRX);
-        return res.json({ status: "sent", wallet, amount: SPONSOR_TRX, txid: result.txid });
-      } catch (err: any) {
-        // Release locks/budget on broadcast failure so the user can retry.
-        await redis.del(sponsorKey);
-        await redis.set(budgetKey, String(budgetUsed), { ex: 60 * 60 * 30 });
-        throw err;
-      }
+      const auth = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return res.json(auth);
     } catch (err: any) {
-      console.error("[tron/sponsor-trx] Error:", err?.message || err);
-      return res.status(500).json({ error: err?.message || "Sponsor failed" });
+      console.error("[escrow/settle-auth] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Settle-auth lookup failed" });
     }
   });
 
@@ -1043,8 +930,7 @@ export async function registerRoutes(
         chain: "TON",
         escrowAddress: ton.escrowAddressFriendly,
         platformWallet: ton.platformWalletFriendly,
-        oracleAddress: await ton.getOracleAddressFriendly(),
-        gasReservePerPlayerTon: await ton.getGasReservePerPlayerTon(),
+        oraclePubkeyHex: await ton.getOraclePubkeyHex(),
       });
     } catch (err: any) {
       console.error("[ton/config] Error:", err?.message || err);
@@ -1065,8 +951,6 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Invalid stake" });
     }
     try {
-      const { createTonOracle } = await import("./oracle/tonOracle");
-      const ton = createTonOracle();
       const { TonClient } = await import("@ton/ton");
       const { Address, fromNano } = await import("@ton/core");
       const client = new TonClient({
@@ -1075,13 +959,13 @@ export async function registerRoutes(
       });
       const balanceNano = await client.getBalance(Address.parse(wallet));
       const balanceTon = Number(fromNano(balanceNano));
-      const gasReserve = await ton.getGasReservePerPlayerTon();
-      const requiredTon = stake + gasReserve + 0.05;
+      // V2: player needs stake + ~0.05 TON gas (their own send) + ~0.05 TON
+      // headroom for the future Settle TX they may broadcast.
+      const requiredTon = stake + 0.1;
       return res.json({
         wallet,
         balanceTon,
         requiredTon,
-        gasReserveTon: gasReserve,
         ready: balanceTon >= requiredTon,
         message: balanceTon >= requiredTon
           ? null
@@ -1097,13 +981,8 @@ export async function registerRoutes(
    * POST /api/ton/deposit-info
    * Body: { matchId }
    *
-   * Server-side flow:
-   *   1. Validate the match is a TON match with both player addresses set.
-   *   2. Call PrepareMatch on-chain (idempotent — guarded by a Redis flag)
-   *      so the contract knows about the match before deposits arrive.
-   *   3. Return the deposit instructions: contract address, exact amount in
-   *      nanotons, and the base64 PlayerDeposit BOC payload the client must
-   *      attach to its TonConnect transaction.
+   * V2: PrepareMatch is gone — the contract auto-creates the match on the
+   * first Deposit message. We just return the BOC the player must send.
    */
   app.post("/api/ton/deposit-info", async (req, res) => {
     const { matchId } = req.body ?? {};
@@ -1129,63 +1008,26 @@ export async function registerRoutes(
       const { createTonOracle } = await import("./oracle/tonOracle");
       const ton = createTonOracle();
 
-      // Idempotent PrepareMatch — state-based, with a short Redis lock to
-      // avoid two concurrent requests both calling PrepareMatch in flight.
-      // The on-chain getMatch is the source of truth: tonOracle.prepareMatch
-      // itself short-circuits when the match already exists, so even if the
-      // lock expires we can never accidentally double-prepare.
-      // We MUST NOT return deposit instructions until the match is visible
-      // on-chain — otherwise the player will sign a PlayerDeposit tx that
-      // bounces with "Match not prepared" and burns their gas.
-      const prepLockKey = `ton_prepare_lock:${matchId}`;
-      let confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
-      if (!confirmed) {
-        const claimed = await redis.set(prepLockKey, "1", { ex: 120, nx: true });
-        if (claimed) {
-          try {
-            await ton.prepareMatch({
-              matchId,
-              player1,
-              player2,
-              stakeTon: stakeNum,
-            });
-            confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
-          } finally {
-            await redis.del(prepLockKey);
-          }
-        } else {
-          // Another request is in-flight. Wait briefly for them, then
-          // re-check. If still not visible, bail with a 409 so the client
-          // retries — never return a deposit payload for an unprepared match.
-          for (let i = 0; i < 12; i++) {
-            await new Promise((r) => setTimeout(r, 1000));
-            confirmed = await ton.getMatchOnChain(matchId).catch(() => null);
-            if (confirmed) break;
-          }
-        }
-      }
-      if (!confirmed) {
-        return res.status(409).json({
-          error: "ton_prepare_pending",
-          message: "PrepareMatch in flight or unconfirmed — retry shortly.",
-        });
-      }
-
-      const gasReserve = await ton.getGasReservePerPlayerTon();
-      const amountTon = stakeNum + gasReserve;
+      const GAS_BUFFER_TON = 0.05;
+      const amountTon = stakeNum + GAS_BUFFER_TON;
       const amountNano = BigInt(Math.round(amountTon * 1e9)).toString();
-      const payloadBoc = ton.encodePlayerDepositPayload(matchId);
+      const payloadBoc = ton.encodeDepositPayload({
+        matchId,
+        player1Friendly: player1,
+        player2Friendly: player2,
+        stakeTon: stakeNum,
+      });
       const validUntilSec = Math.floor(Date.now() / 1000) + 15 * 60;
 
       console.log(
-        `[ton/deposit-info] match=${matchId} amount=${amountTon} TON (stake=${stakeNum} + gas=${gasReserve})`
+        `[ton/deposit-info] match=${matchId} amount=${amountTon} TON (stake=${stakeNum} + gas=${GAS_BUFFER_TON})`
       );
       return res.json({
         matchId,
         escrowAddress: ton.escrowAddressFriendly,
         amountNano,
         amountTon,
-        gasReserveTon: gasReserve,
+        gasBufferTon: GAS_BUFFER_TON,
         payloadBoc,
         validUntilSec,
       });
