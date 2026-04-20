@@ -885,8 +885,8 @@ export async function registerRoutes(
    * Idempotent: the auth is persisted in Redis under `settle_auth:${matchId}`
    * for 7 days so repeated polls return the same signature.
    */
-  app.get("/api/escrow/settle-auth/:matchId", async (req, res) => {
-    const matchId = String(req.params.matchId || "");
+  const settleAuthHandler = async (req: any, res: any) => {
+    const matchId = String(req.params.matchId || req.body?.matchId || "");
     if (!matchId) return res.status(400).json({ error: "matchId required" });
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
@@ -912,7 +912,10 @@ export async function registerRoutes(
       console.error("[escrow/settle-auth] Error:", err?.message || err);
       return res.status(500).json({ error: err?.message || "Settle-auth lookup failed" });
     }
-  });
+  };
+  app.get("/api/escrow/settle-auth/:matchId", settleAuthHandler);
+  app.post("/api/escrow/settle-auth/:matchId", settleAuthHandler);
+  app.post("/api/escrow/settle-auth", settleAuthHandler);
 
   // ============================================================
   // TON native escrow endpoints (Task #14)

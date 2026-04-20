@@ -170,15 +170,22 @@ export class EvmEscrowAdapter {
    * UI keeps the existing optimistic payout estimate.
    */
   async claimSettlement(matchId: string): Promise<{ txHash: `0x${string}` } | null> {
-    let auth: SettleAuth | null;
-    try {
-      auth = await fetchSettleAuth(matchId);
-    } catch (e: any) {
-      console.error(`[EvmEscrow] settle-auth fetch failed:`, e?.message || e);
-      return null;
+    // The server signs the outcome asynchronously after the game ends, so the
+    // first fetch may legitimately race the signer. Poll for up to ~30s
+    // (10 × 3s) before giving up. The /api/escrow/settle-auth endpoint is
+    // idempotent so polling is safe.
+    let auth: SettleAuth | null = null;
+    for (let i = 0; i < 10; i++) {
+      try {
+        auth = await fetchSettleAuth(matchId);
+        if (auth) break;
+      } catch (e: any) {
+        console.warn(`[EvmEscrow] settle-auth attempt ${i + 1} failed:`, e?.message || e);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
     }
     if (!auth) {
-      console.log(`[EvmEscrow] settle-auth not ready yet for ${matchId}`);
+      console.warn(`[EvmEscrow] settle-auth never became ready for ${matchId} — user can retry from match history`);
       return null;
     }
 

@@ -150,6 +150,16 @@ export class TonEscrowAdapter {
    * Player-side on-chain settle. Sends the oracle-signed Settle BOC to the
    * escrow via TonConnect. ~0.05 TON gas covers compute + winner payout fwd.
    */
+  async claimSettlementWithRetry(matchId: string): Promise<boolean> {
+    for (let i = 0; i < 10; i++) {
+      const ok = await this.claimSettlement(matchId);
+      if (ok) return true;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    console.warn(`[TonEscrow] settle-auth never became ready for ${matchId}`);
+    return false;
+  }
+
   async claimSettlement(matchId: string): Promise<boolean> {
     let auth: TonSettleAuth | null;
     try {
@@ -214,7 +224,7 @@ export class TonEscrowAdapter {
     }
 
     if (result === 'win' || result === 'draw') {
-      this.claimSettlement(matchId).catch((e) =>
+      this.claimSettlementWithRetry(matchId).catch((e) =>
         console.warn(`[TonEscrow] claimSettlement (${matchId}) background error:`, e?.message || e)
       );
     }
