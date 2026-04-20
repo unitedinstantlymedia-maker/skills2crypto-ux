@@ -176,12 +176,16 @@ function build() {
     const signature = nacl.sign.detached(messageHash, key.secretKey);
 
     // Wrap into the Settle message body that the player will send.
+    // The Tact contract declares `signature: Slice` as the LAST field, which
+    // means the 64 raw signature bytes are stored inline in the message body
+    // (Tact reads `Slice` as "consume the rest of the slice"). Wrapping in a
+    // ref cell would mismatch the ABI and fail signature verification.
     const settleBody = beginCell()
       .storeUint(OP.Settle, 32)
       .storeUint(matchIdHash, 256)
       .storeAddress(winnerAddr)
       .storeUint(params.reason, 8)
-      .storeRef(beginCell().storeBuffer(Buffer.from(signature)).endCell())
+      .storeBuffer(Buffer.from(signature))
       .endCell();
 
     return {

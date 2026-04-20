@@ -96,10 +96,31 @@ async function storeGameResult(
       const player1Id = String(matchData.addr1 || matchData.p1);
       const player2Id = String(matchData.addr2 || matchData.p2);
       const pot = stake * 2;
-      const fee = pot * FEE_RATE;
-      
+      // V2 chain-specific fee model: every chain charges the 3% platform fee.
+      // Tron USDT additionally charges a 0.5% gas-fund accumulator that
+      // funds the on-chain SunSwap auto-swap (so players get TRX-free
+      // settles forever). Disconnect refunds both players on-chain
+      // regardless of `winnerId` from the game layer, so the DB row must
+      // reflect a refund (payout = stake each, fee = 0) rather than a
+      // winner-take-all amount.
+      const platformFeeRate = FEE_RATE;
+      const gasFundRate = asset === "USDT" ? 0.005 : 0;
+      const effectiveFeeRate = platformFeeRate + gasFundRate;
+      const fee = pot * effectiveFeeRate;
+
+      const isDisconnect =
+        reason === "disconnect" ||
+        reason === "forfeit" ||
+        reason === "abandoned";
+
       let payout = 0;
-      if (resultType === 'win' && winnerId) {
+      let recordedFee = fee;
+      if (isDisconnect) {
+        // V2: contract refunds both players in full. DB row records the
+        // refund-per-player amount and zero net fee.
+        payout = stake;
+        recordedFee = 0;
+      } else if (resultType === 'win' && winnerId) {
         payout = pot - fee;
       } else if (resultType === 'draw') {
         payout = stake - (fee / 2);
@@ -115,7 +136,7 @@ async function storeGameResult(
         stake,
         asset,
         pot,
-        fee,
+        fee: recordedFee,
         payout,
         reason,
         timestamp,
@@ -256,7 +277,7 @@ async function settleMatchOnChain(
       };
       await redis.set(`settle_auth:${matchId}`, JSON.stringify(auth), { ex: 60 * 60 * 24 * 7 });
       const io = ioRef;
-      if (io) io.to(`match:${matchId}`).emit("settle-ready", auth);
+      if (io) { io.to(`match:${matchId}`).emit("settle-ready", auth); io.to(`match:${matchId}`).emit("match:settle-auth", auth); }
       console.log(`[settlement][TON] settle-auth ready for ${matchId}`);
       return;
     }
@@ -290,7 +311,7 @@ async function settleMatchOnChain(
     };
     await redis.set(`settle_auth:${matchId}`, JSON.stringify(auth), { ex: 60 * 60 * 24 * 7 });
     const io = ioRef;
-    if (io) io.to(`match:${matchId}`).emit("settle-ready", auth);
+    if (io) { io.to(`match:${matchId}`).emit("settle-ready", auth); io.to(`match:${matchId}`).emit("match:settle-auth", auth); }
     console.log(`[settlement][${chain}] settle-auth ready for ${matchId}`);
   } catch (err: any) {
     console.error(`[settlement] match ${matchId} failed:`, err?.message || err);
