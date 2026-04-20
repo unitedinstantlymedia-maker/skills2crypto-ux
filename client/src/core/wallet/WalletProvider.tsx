@@ -8,13 +8,9 @@ import { wagmiConfig, appKit } from '@/config/wagmi';
 import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
-import { SessionKeyDialog } from '@/components/wallet/SessionKeyDialog';
-import { useSessionKey } from './useSessionKey';
 import { useTronLink } from './useTronLink';
 import { useTonConnect } from './useTonConnect';
 import type { Asset } from '@/core/types';
-
-type OnboardingStep = 'ready' | 'signing' | 'registering' | 'done';
 
 export const REQUIRED_CHAIN: Record<'BNB' | 'ETH', { chainId: number; name: string }> = {
   BNB: { chainId: 56, name: 'BNB Smart Chain' },
@@ -46,8 +42,6 @@ interface RealWalletContextValue {
   isTonConnecting: boolean;
   connectTonWallet: () => void;
   disconnectTonWallet: () => void;
-  hasSessionKey: boolean;
-  promptSessionKey: () => Promise<void>;
 }
 
 const RealWalletContext = createContext<RealWalletContextValue | undefined>(undefined);
@@ -64,23 +58,9 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const { disconnect: disconnectEvm } = useAppKitDisconnect();
   const { chainId: currentChainId, switchNetwork } = useAppKitNetwork();
   const [nicknameDialogOpen, setNicknameDialogOpen] = useState(false);
-  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [nickname, setNicknameState] = useState<string | null>(null);
   const [isSwitchingChain, setIsSwitchingChain] = useState(false);
   const hasPromptedNickname = useRef(false);
-  const [nicknameFlowDone, setNicknameFlowDone] = useState(false);
-  const [pendingSessionPrompt, setPendingSessionPrompt] = useState(false);
-  const wasEvmConnected = useRef(isEvmConnected);
-
-  const {
-    hasSession: hasSessionKey,
-    isSigningSession,
-    isRegistering,
-    sessionError,
-    promptSessionKey: doPromptSessionKey,
-  } = useSessionKey();
-
-  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('ready');
 
   const {
     isTronLinkInstalled,
@@ -144,72 +124,18 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
       if (!storedNick) {
         setTimeout(() => setNicknameDialogOpen(true), 600);
       } else {
-        setNicknameFlowDone(true);
+        // nickname already set; no further onboarding needed
       }
     }
   }, [primaryAddress, isAnyConnected]);
-
-  useEffect(() => {
-    if (!nicknameDialogOpen && hasPromptedNickname.current) {
-      setNicknameFlowDone(true);
-    }
-  }, [nicknameDialogOpen]);
-
-  useEffect(() => {
-    const justConnected = isEvmConnected && !wasEvmConnected.current;
-    wasEvmConnected.current = isEvmConnected;
-    if (justConnected && evmAddress && !hasSessionKey) {
-      setPendingSessionPrompt(true);
-    }
-  }, [isEvmConnected, evmAddress, hasSessionKey]);
-
-  useEffect(() => {
-    if (
-      pendingSessionPrompt &&
-      nicknameFlowDone &&
-      isEvmConnected &&
-      evmAddress &&
-      !hasSessionKey &&
-      !sessionDialogOpen
-    ) {
-      const timer = setTimeout(() => {
-        setSessionDialogOpen(true);
-        setPendingSessionPrompt(false);
-      }, 400);
-      return () => clearTimeout(timer);
-    }
-  }, [pendingSessionPrompt, nicknameFlowDone, isEvmConnected, evmAddress, hasSessionKey, sessionDialogOpen]);
-
-  useEffect(() => {
-    if (isSigningSession) setOnboardingStep('signing');
-    else if (isRegistering) setOnboardingStep('registering');
-    else if (hasSessionKey && sessionDialogOpen) {
-      setOnboardingStep('done');
-      setSessionDialogOpen(false);
-    } else if (!isSigningSession && !isRegistering && onboardingStep !== 'done') {
-      setOnboardingStep('ready');
-    }
-  }, [isSigningSession, isRegistering, hasSessionKey, sessionDialogOpen]);
 
   const disconnectAll = useCallback(() => {
     if (isEvmConnected) disconnectEvm();
     if (isTronConnected) disconnectTronLink();
     if (isTonConnected) disconnectTonWallet();
     hasPromptedNickname.current = false;
-    setNicknameFlowDone(false);
-    setPendingSessionPrompt(false);
-    setOnboardingStep('ready');
-    wasEvmConnected.current = false;
     walletStore.disconnect();
   }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
-
-  const promptSessionKey = useCallback(async () => {
-    setSessionDialogOpen(true);
-  }, []);
-
-  const handleSessionSign = useCallback(async () => {
-    await doPromptSessionKey();
-  }, [doPromptSessionKey]);
 
   const setNickname = useCallback((name: string) => {
     if (primaryAddress) {
@@ -278,8 +204,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     isTonConnecting,
     connectTonWallet,
     disconnectTonWallet,
-    hasSessionKey,
-    promptSessionKey,
   };
 
   return (
@@ -289,13 +213,6 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
         open={nicknameDialogOpen}
         onOpenChange={setNicknameDialogOpen}
         onSave={setNickname}
-      />
-      <SessionKeyDialog
-        open={sessionDialogOpen}
-        onOpenChange={setSessionDialogOpen}
-        onSign={handleSessionSign}
-        step={onboardingStep}
-        error={sessionError}
       />
     </RealWalletContext.Provider>
   );

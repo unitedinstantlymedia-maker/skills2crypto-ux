@@ -116,10 +116,20 @@ async function storeGameResult(
       let payout = 0;
       let recordedFee = fee;
       if (isDisconnect) {
-        // V2: contract refunds both players in full. DB row records the
-        // refund-per-player amount and zero net fee.
-        payout = stake;
-        recordedFee = 0;
+        // V2 disconnect refund:
+        //  - EVM/TON: contract refunds full `stake` to each player (no fee).
+        //  - Tron USDT: contract still deducts the half-of-gas-fund slice
+        //    per player (refundPerPlayer = stake - halfGasFund) so the
+        //    on-chain SunSwap accumulator stays funded. Mirror that math
+        //    in the DB row so history matches the wallet receipt.
+        if (asset === "USDT") {
+          const halfGasFund = (pot * gasFundRate) / 2;
+          payout = stake - halfGasFund;
+          recordedFee = halfGasFund * 2;
+        } else {
+          payout = stake;
+          recordedFee = 0;
+        }
       } else if (resultType === 'win' && winnerId) {
         payout = pot - fee;
       } else if (resultType === 'draw') {

