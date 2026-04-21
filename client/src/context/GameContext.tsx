@@ -224,6 +224,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
     s.on('match-cancelled', (payload: { matchId: string; reason?: string }) => {
       console.log('[socket] match-cancelled', payload);
+      const wasSelfFailure = depositInFlightRef.current.has(payload.matchId);
       depositInFlightRef.current.delete(payload.matchId);
       isFindingRef.current = false;
       setIsFinding(false);
@@ -231,14 +232,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         if (!prev || (prev.id !== payload.matchId && prev.id !== 'pending')) return prev;
         return null;
       });
+      // Suppress the duplicate cancellation toast when this client is the
+      // one whose own deposit just failed — they already got the more
+      // specific "Deposit failed" toast moments earlier.
+      if (wasSelfFailure) return;
       toast({
         title: 'Match cancelled',
         description:
-          payload.reason === 'opponent_deposit_failed'
+          payload.reason === 'opponent_deposit_failed' || payload.reason === 'deposit_failed'
             ? 'Your opponent could not complete the on-chain deposit. Returning to lobby.'
-            : payload.reason === 'deposit_failed'
-              ? 'Deposit failed — match cancelled. No funds were moved.'
-              : 'Match cancelled. Returning to lobby.',
+            : 'Match cancelled. Returning to lobby.',
         variant: 'destructive',
       });
     });

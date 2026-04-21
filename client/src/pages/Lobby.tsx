@@ -160,13 +160,26 @@ export default function Lobby() {
       return;
     }
 
-    if (state.selectedAsset === 'USDT' && usdtApproveReady === false) {
+    // V2 onboarding gate. The legacy "session key" flow was removed in
+    // Task #16 (architecture rewrite) — wallets sign per-action via the
+    // standard prompts now, so the only remaining onboarding step is the
+    // one-time USDT approve(escrow, MAX). For USDT we hard-block search
+    // unless we have AFFIRMATIVELY confirmed approval is in place: the
+    // unknown/loading state (`null`) is treated as blocked too, so we
+    // never enter the matchmaking queue with stale readiness data.
+    if (state.selectedAsset === 'USDT' && usdtApproveReady !== true) {
       toast({
-        title: t("Approve USDT first", "Approve USDT first"),
-        description: t(
-          "Complete the one-time USDT approve before searching for a match.",
-          "Complete the one-time USDT approve before searching for a match."
-        ),
+        title: t("Complete wallet setup first", "Complete wallet setup first"),
+        description:
+          usdtApproveReady === null
+            ? t(
+                "Checking USDT approval status... try again in a moment.",
+                "Checking USDT approval status... try again in a moment."
+              )
+            : t(
+                "Complete the one-time USDT approve before searching for a match.",
+                "Complete the one-time USDT approve before searching for a match."
+              ),
         variant: "destructive"
       });
       return;
