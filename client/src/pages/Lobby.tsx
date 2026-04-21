@@ -35,7 +35,8 @@ export default function Lobby() {
   const [isApprovingUsdt, setIsApprovingUsdt] = useState(false);
   const { toast } = useToast();
   const { t } = useLanguage();
-  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTronLinkInstalled, connectTronLink, isTonConnected, connectTonWallet } = useRealWallet();
+  const realWallet = useRealWallet();
+  const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTronLinkInstalled, connectTronLink, isTonConnected, connectTonWallet } = realWallet;
 
   const requiredChain = (state.selectedAsset === 'BNB' || state.selectedAsset === 'ETH')
     ? REQUIRED_CHAIN[state.selectedAsset]
@@ -216,14 +217,37 @@ export default function Lobby() {
     }
 
     if (isChallengeMode) {
-       const params = new URLSearchParams({
-          game: state.selectedGame || 'Chess',
-          asset: state.selectedAsset,
-          stake: state.stakeAmount.toString()
-       });
-       const mockLink = `https://skills2crypto.com/challenge/${playerName.replace(/\s+/g, '-').toLowerCase()}-${Math.random().toString(36).substring(7)}?${params.toString()}`;
-       setChallengeLink(mockLink);
-       setShowChallengeLink(true);
+       try {
+         const challengerId =
+           realWallet.evmAddress ||
+           realWallet.tronAddress ||
+           realWallet.tonAddress ||
+           playerName.trim();
+         const resp = await fetch(apiUrl('/api/create-challenge'), {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({
+             game: state.selectedGame || 'Chess',
+             asset: state.selectedAsset,
+             stake: state.stakeAmount,
+             challengerId,
+             challengerName: playerName.trim() || 'Player',
+           }),
+         });
+         if (!resp.ok) {
+           const err = await resp.json().catch(() => ({}));
+           throw new Error(err?.error || `Server returned ${resp.status}`);
+         }
+         const data = await resp.json();
+         setChallengeLink(data.shareUrl);
+         setShowChallengeLink(true);
+       } catch (e: any) {
+         toast({
+           title: t('Could not create challenge', 'Could not create challenge'),
+           description: e?.message || String(e),
+           variant: 'destructive',
+         });
+       }
        return;
     }
 
