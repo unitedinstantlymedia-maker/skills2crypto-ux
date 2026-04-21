@@ -587,29 +587,35 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const { matchId, reason } = data || ({} as any);
       if (!matchId) return;
 
-      // AuthZ: only an actual participant in this match may cancel it.
-      // We accept the request if either (a) the socket previously joined
-      // the match room via `join-match` (recorded in socketToPlayer), or
-      // (b) the supplied playerId matches one of the addresses we stored
-      // in Redis for the match. Without this, any connected client could
-      // grief any other match by emitting deposit-failed with a guessed id.
-      const sockInfo = socketToPlayer.get(socket.id);
-      let authorized = !!(sockInfo && sockInfo.matchId === matchId);
-      const claimedPlayer = (data?.playerId || "").toLowerCase();
-      if (!authorized) {
-        try {
-          const md = await redis.hgetall(`match:${matchId}`);
-          const a1 = md?.addr1 ? String(md.addr1).toLowerCase() : null;
-          const a2 = md?.addr2 ? String(md.addr2).toLowerCase() : null;
-          if (claimedPlayer && (claimedPlayer === a1 || claimedPlayer === a2)) {
-            authorized = true;
+      // AuthZ: only one of the two real participants in this match may
+      // cancel it. `join-match` is unauthenticated, so socketToPlayer
+      // membership alone is NOT sufficient — anyone with a matchId could
+      // join the room and grief. Instead we tie cancellation to the exact
+      // socket IDs / player IDs the matchmaker stored at match creation:
+      //   - find-match path: matchData.p1/p2 hold the original socket.id
+      //   - challenge path:  matchData.p1/p2 hold the playerId
+      let authorized = false;
+      try {
+        const md = await redis.hgetall(`match:${matchId}`);
+        if (md) {
+          const p1 = md.p1 ? String(md.p1) : null;
+          const p2 = md.p2 ? String(md.p2) : null;
+          // (a) socket.id must literally equal one of the matchmaker-recorded
+          //     ids. For find-match this is the original websocket; for
+          //     challenges the recorded id is a playerId so we also map the
+          //     socket through playerToSocket for an exact identity check.
+          if (p1 === socket.id || p2 === socket.id) authorized = true;
+          if (!authorized) {
+            const sockOfP1 = p1 ? playerToSocket.get(p1) : null;
+            const sockOfP2 = p2 ? playerToSocket.get(p2) : null;
+            if (sockOfP1 === socket.id || sockOfP2 === socket.id) authorized = true;
           }
-        } catch (e: any) {
-          console.warn("[socket] deposit-failed authz lookup failed:", e?.message || e);
         }
+      } catch (e: any) {
+        console.warn("[socket] deposit-failed authz lookup failed:", e?.message || e);
       }
       if (!authorized) {
-        console.warn(`[socket] deposit-failed REJECTED — socket ${socket.id} not in match ${matchId}`);
+        console.warn(`[socket] deposit-failed REJECTED — socket ${socket.id} is not p1/p2 of match ${matchId}`);
         return;
       }
 
