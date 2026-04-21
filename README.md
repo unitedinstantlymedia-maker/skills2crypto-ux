@@ -58,12 +58,36 @@ TonConnect manifest are all configurable via env.
   `tonconnect-manifest.json`, replacing the `__PUBLIC_URL__` token with
   `PUBLIC_URL` so TonKeeper accepts the manifest.
 
-### 3. After both are live
-- Verify `https://<railway>/healthz` returns `{ "status": "ok" }`.
-- Verify Netlify site loads, opens a websocket to Railway, and the lobby can
-  find a match.
-- Hit `https://<railway>/api/health/oracles` to confirm BSC/ETH/Tron/TON
-  oracle wallets are funded.
+### 3. Database migrations (production)
+Drizzle pushes schema changes directly — no SQL migration files. Run from a
+machine with the production `DATABASE_URL` exported (e.g. `railway run`):
+```bash
+DATABASE_URL=postgres://...prod... npm run db:push
+# If Drizzle complains about destructive operations on existing data:
+DATABASE_URL=postgres://...prod... npm run db:push -- --force
+```
+Re-run after every `shared/schema.ts` change before redeploying the server.
+
+### 4. After both are live — 4-asset smoke test
+General checks:
+- `https://<railway>/healthz` returns `{ "status": "ok" }`.
+- `https://<railway>/api/health/oracles` shows BSC / ETH / Tron / TON oracle
+  wallets present (and TRX balance ≥ `TRON_MIN_GAS_TRX`).
+- Netlify site loads, opens a websocket to Railway, and the lobby renders.
+
+Then run a real 5-stake (or smallest-allowed) match on each asset:
+
+| Asset      | Wallet          | Verify                                                            |
+| ---------- | --------------- | ----------------------------------------------------------------- |
+| **BNB**    | MetaMask (BSC)  | `depositNative` tx confirms; winner clicks settle, BNB lands; BscScan shows `MatchActive` + `MatchSettled`. |
+| **ETH**    | MetaMask (ETH)  | Same as BNB but on Etherscan.                                     |
+| **USDT**   | TronLink        | One-time `approve(escrow,MAX)` succeeds (~30 TRX); both deposits go through gaslessly; settle is gasless; Tronscan shows two `Deposit` and one `Settle` event. |
+| **TON**    | TonKeeper       | TonConnect prompts manifest from `VITE_PUBLIC_URL`; both `Deposit` BOCs land; winner sends `Settle` BOC (~0.05 TON gas); TonViewer shows the settle tx. |
+
+Also confirm: cancel-before-funded shows the right toast (self vs opponent),
+match history populates from `/api/history/...`, and `/api/health/oracles`
+TRX balance does **not** drop below `TRON_MIN_GAS_TRX` after the USDT match
+(the 0.5% gas-fund + SunSwap auto-swap should recoup it).
 
 ### Build script reference
 | Script              | What it does                                           |

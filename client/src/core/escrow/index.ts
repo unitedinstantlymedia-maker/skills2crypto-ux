@@ -5,7 +5,12 @@ import { TronEscrowAdapter, tronEscrowAdapter } from './TronEscrowAdapter';
 import { TonEscrowAdapter, tonEscrowAdapter } from './TonEscrowAdapter';
 import type { IEscrowAdapter } from './EscrowAdapter';
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK_ESCROW !== 'false';
+// Production safety: in PROD the mock router is OFF unless explicitly opted-in
+// via VITE_USE_MOCK_ESCROW=true at build time. In dev the mock stays the
+// default so the app works without wallets / on-chain state.
+const USE_MOCK = import.meta.env.PROD
+  ? import.meta.env.VITE_USE_MOCK_ESCROW === 'true'
+  : import.meta.env.VITE_USE_MOCK_ESCROW !== 'false';
 
 /**
  * Routes escrow operations to the per-asset adapter:
