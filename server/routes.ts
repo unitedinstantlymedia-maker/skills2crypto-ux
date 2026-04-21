@@ -216,14 +216,23 @@ export async function registerRoutes(
     
     // CLIENT_PUBLIC_URL is the deployed Netlify (or single-host) origin where
     // the React client lives — challenge invite links must point at the
-    // *client*, not the API. Falls back to Replit dev domain, then localhost.
-    const baseUrl = process.env.CLIENT_PUBLIC_URL
-      ? process.env.CLIENT_PUBLIC_URL.replace(/\/+$/, "")
-      : process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : process.env.REPL_SLUG && process.env.REPL_OWNER
-          ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
-          : "http://localhost:5000";
+    // *client*, not the API. In production this is required; in dev we fall
+    // back to the Replit dev domain (and only then to localhost).
+    let baseUrl: string;
+    if (process.env.CLIENT_PUBLIC_URL) {
+      baseUrl = process.env.CLIENT_PUBLIC_URL.replace(/\/+$/, "");
+    } else if (process.env.NODE_ENV === "production") {
+      console.error("[challenge] CLIENT_PUBLIC_URL is required in production");
+      return res.status(500).json({
+        error: "Server misconfigured: CLIENT_PUBLIC_URL is not set",
+      });
+    } else if (process.env.REPLIT_DEV_DOMAIN) {
+      baseUrl = `https://${process.env.REPLIT_DEV_DOMAIN}`;
+    } else if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
+      baseUrl = `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+    } else {
+      baseUrl = "http://localhost:5000";
+    }
     
     const shareUrl = `${baseUrl}/challenge/${challengeId}`;
     
