@@ -7,7 +7,12 @@ export interface AssetConfig {
   comingSoon?: boolean;
 }
 
-export const FEE_ADDRESS = import.meta.env.VITE_FEE_ADDRESS || "0xPLATFORM_COLD_WALLET_123"; // Placeholder, mock only
+// Platform fee recipient. In production set VITE_FEE_ADDRESS to your real
+// cold wallet via the Netlify build env. Falls back to the zero address so
+// any accidental on-chain use fails loudly instead of silently routing funds
+// somewhere unexpected.
+export const FEE_ADDRESS =
+  import.meta.env.VITE_FEE_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 export const SUPPORTED_ASSETS: Record<string, AssetConfig> = {
   USDT: {

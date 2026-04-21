@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import { useGame } from "@/context/GameContext";
 import { Asset, Game } from "@/core/types";
 import { useToast } from "@/hooks/use-toast";
+import { apiUrl, socketUrl } from "@/lib/api";
 import { io, Socket } from "socket.io-client";
 
 interface ChallengeData {
@@ -41,7 +42,7 @@ export default function Challenge() {
     
     const fetchChallenge = async () => {
       try {
-        const res = await fetch(`/api/challenge/${challengeId}`);
+        const res = await fetch(apiUrl(`/api/challenge/${challengeId}`));
         if (!res.ok) {
           const data = await res.json();
           setError(data.error || "Challenge not found");
@@ -63,10 +64,11 @@ export default function Challenge() {
   }, [match, params?.challengeId]);
 
   useEffect(() => {
-    const socket = io({
+    const socket = io(socketUrl(), {
       path: '/socket.io',
       transports: ['websocket'],
       reconnection: true,
+      withCredentials: true,
     });
     socketRef.current = socket;
 
@@ -115,7 +117,7 @@ export default function Challenge() {
     setIsAccepting(true);
 
     try {
-      const res = await fetch('/api/accept-challenge', {
+      const res = await fetch(apiUrl('/api/accept-challenge'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

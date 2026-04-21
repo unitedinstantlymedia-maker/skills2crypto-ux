@@ -102,8 +102,9 @@ export function useTonConnect(): TonConnectState {
         // for the same manifest, so we cache it on window.
         let tonConnectUI = (window as any).__TON_CONNECT_UI__;
         if (!tonConnectUI) {
+          const publicUrl = (import.meta.env.VITE_PUBLIC_URL as string | undefined)?.replace(/\/+$/, '') || window.location.origin;
           tonConnectUI = new TonConnectUI({
-            manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
+            manifestUrl: `${publicUrl}/tonconnect-manifest.json`,
           });
           (window as any).__TON_CONNECT_UI__ = tonConnectUI;
         }

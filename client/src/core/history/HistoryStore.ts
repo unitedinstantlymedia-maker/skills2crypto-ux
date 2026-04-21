@@ -1,4 +1,5 @@
 import { HistoryEntry } from "@/core/types";
+import { apiUrl } from "@/lib/api";
 
 export class HistoryStore {
   private static instance: HistoryStore;
@@ -22,7 +23,7 @@ export class HistoryStore {
     }
 
     try {
-      const response = await fetch(`/api/history/${encodeURIComponent(playerId)}`);
+      const response = await fetch(apiUrl(`/api/history/${encodeURIComponent(playerId)}`));
       if (!response.ok) {
         throw new Error(`Failed to fetch history: ${response.status}`);
       }

@@ -3,6 +3,7 @@ import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config
 import { writeContract, waitForTransactionReceipt, getAccount, switchChain, getChainId } from "@wagmi/core";
 import { parseAbi } from "viem";
 import { wagmiConfig } from "@/config/wagmi";
+import { apiUrl } from "@/lib/api";
 
 const ESCROW_ABI = parseAbi([
   "function depositNative(bytes32 matchId, address player1, address player2, uint256 stake, uint256 deadline, bytes oracleSig) payable",
@@ -37,7 +38,7 @@ const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 60;
 
 async function fetchMatchAuth(matchId: string): Promise<MatchAuth> {
-  const res = await fetch("/api/oracle/match-auth", {
+  const res = await fetch(apiUrl("/api/oracle/match-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ matchId }),
@@ -48,14 +49,14 @@ async function fetchMatchAuth(matchId: string): Promise<MatchAuth> {
 }
 
 async function fetchMatchStatus(matchId: string): Promise<{ status: number; statusLabel: string }> {
-  const res = await fetch(`/api/oracle/match-status/${encodeURIComponent(matchId)}`);
+  const res = await fetch(apiUrl(`/api/oracle/match-status/${encodeURIComponent(matchId)}`));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `match-status HTTP ${res.status}`);
   return data;
 }
 
 async function fetchSettleAuth(matchId: string): Promise<SettleAuth | null> {
-  const res = await fetch(`/api/escrow/settle-auth/${encodeURIComponent(matchId)}`);
+  const res = await fetch(apiUrl(`/api/escrow/settle-auth/${encodeURIComponent(matchId)}`));
   const data = await res.json().catch(() => ({}));
   if (res.status === 404 && data?.error === "settle_auth_pending") return null;
   if (!res.ok) throw new Error(data?.error || `settle-auth HTTP ${res.status}`);

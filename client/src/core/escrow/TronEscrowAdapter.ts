@@ -1,5 +1,6 @@
 import { Asset } from "@/core/types";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { apiUrl } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 80;
@@ -24,7 +25,7 @@ interface TronDepositAuth {
 }
 
 async function fetchDepositAuth(matchId: string): Promise<TronDepositAuth> {
-  const res = await fetch("/api/tron/deposit-auth", {
+  const res = await fetch(apiUrl("/api/tron/deposit-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ matchId }),
@@ -35,7 +36,7 @@ async function fetchDepositAuth(matchId: string): Promise<TronDepositAuth> {
 }
 
 async function submitDepositSig(matchId: string, signature: string): Promise<{ status: number }> {
-  const res = await fetch("/api/tron/deposit-sig", {
+  const res = await fetch(apiUrl("/api/tron/deposit-sig"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ matchId, signature }),
@@ -46,7 +47,7 @@ async function submitDepositSig(matchId: string, signature: string): Promise<{ s
 }
 
 async function fetchTronMatchStatus(matchId: string): Promise<{ status: number }> {
-  const res = await fetch(`/api/tron/match-status/${encodeURIComponent(matchId)}`);
+  const res = await fetch(apiUrl(`/api/tron/match-status/${encodeURIComponent(matchId)}`));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `tron-match-status HTTP ${res.status}`);
   return data;
@@ -84,7 +85,7 @@ async function ensureUsdtApproval(escrowBase58: string, requiredUnits: bigint): 
 }
 
 async function fetchTronEscrowAddress(): Promise<string> {
-  const r = await fetch("/api/tron/config");
+  const r = await fetch(apiUrl("/api/tron/config"));
   if (!r.ok) throw new Error("Could not load Tron escrow address");
   const data = await r.json();
   (window as any).__TRON_ESCROW_ADDRESS__ = data.escrowBase58;
@@ -102,7 +103,7 @@ export async function ensureTronUsdtReadyForStake(stakeUsdt: number): Promise<vo
   }
   const owner = tw.defaultAddress.base58;
   const r = await fetch(
-    `/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(stakeUsdt))}`
+    apiUrl(`/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(stakeUsdt))}`)
   );
   const data = await r.json();
   if (!r.ok) throw new Error(data?.error || "readiness check failed");

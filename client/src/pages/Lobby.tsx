@@ -8,6 +8,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useLocation } from "wouter";
 import { useState } from "react";
 import { ArrowLeft, Coins, Zap, Info, Loader2, X, Ship, UserPlus, Copy, Check, AlertTriangle, RefreshCw } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import { escrowAdapter } from "@/core/escrow";
@@ -78,7 +79,7 @@ export default function Lobby() {
           return;
         }
         const r = await fetch(
-          `/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(state.stakeAmount || 1))}`
+          apiUrl(`/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(state.stakeAmount || 1))}`)
         );
         const data = await r.json().catch(() => ({}));
         if (cancelled) return;

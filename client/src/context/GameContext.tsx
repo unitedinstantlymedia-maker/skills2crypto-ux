@@ -10,7 +10,7 @@ import { historyStore } from '@/core/history/HistoryStore';
 import { useRealWallet } from '@/core/wallet/WalletProvider';
 import type { WalletState, HistoryEntry } from '@/core/types';
 
-import { findMatch } from '@/lib/api';
+import { findMatch, socketUrl } from '@/lib/api';
 import type { Game, Asset } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -97,7 +97,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const s = io('/', {
+    const s = io(socketUrl(), {
       path: '/socket.io',
       transports: ['websocket'],
       reconnection: true,

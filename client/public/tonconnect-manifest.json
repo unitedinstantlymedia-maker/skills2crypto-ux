@@ -1,5 +1,5 @@
 {
-  "url": "https://skills2crypto.com",
+  "url": "__PUBLIC_URL__",
   "name": "Skills2Crypto",
-  "iconUrl": "https://skills2crypto.com/favicon.ico"
+  "iconUrl": "__PUBLIC_URL__/favicon.png"
 }

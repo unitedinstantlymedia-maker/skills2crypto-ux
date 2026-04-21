@@ -47,28 +47,33 @@ app.use(cors({
 app.use(express.json());
 
 // =======================
-// ROUTES
+// HEALTH CHECK (Railway/Netlify ping)
 // =======================
-await registerRoutes(httpServer, app, io);
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({ status: "ok", uptime: process.uptime() });
+});
 
-// =======================
-// FRONTEND (DEV / PROD)
-// =======================
-if (NODE_ENV === "production") {
-  // Отдаём собранный фронт
-  app.use(express.static("dist/public"));
-  app.get("/", (_req, res) => {
-    res.send("skills2crypto API running");
-  });
-} else {
-  // Vite middleware в деве
-  await setupVite(httpServer, app);
+async function bootstrap() {
+  // ROUTES
+  await registerRoutes(httpServer, app, io);
+
+  // FRONTEND (DEV / PROD)
+  if (NODE_ENV === "production") {
+    // Отдаём собранный фронт (no-op when split-deployed: dist/public absent on Railway)
+    app.use(express.static("dist/public"));
+    app.get("/", (_req, res) => {
+      res.send("skills2crypto API running");
+    });
+  } else {
+    // Vite middleware в деве
+    await setupVite(httpServer, app);
+  }
+
+  startServer();
 }
 
-// =======================
-// START SERVER
-// =======================
-httpServer.listen(PORT, "0.0.0.0", () => {
+function startServer() {
+  httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[skills2crypto] server running on port ${PORT}`);
 
   if (!process.env.ORACLE_PRIVATE_KEY) {
@@ -125,6 +130,11 @@ httpServer.listen(PORT, "0.0.0.0", () => {
   }).catch(err => {
     console.error("[startup] Failed to initialize oracle module:", err?.message || err);
   });
-});
+  });
+}
 
+bootstrap().catch(err => {
+  console.error("[startup] bootstrap failed:", err?.message || err);
+  process.exit(1);
+});
 

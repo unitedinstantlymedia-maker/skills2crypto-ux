@@ -1,27 +1,76 @@
 # SKILLS2CRYPTO
 
-Mobile-first web app prototype for 1v1 skill games with crypto-only wagers.
+Mobile-first 1v1 skill-game platform with crypto wagers on four native assets:
+**BNB** (BSC), **ETH** (Ethereum), **USDT** (Tron TRC-20), **TON**.
 
 ## Current scope
-- Games: Chess, Tetris (Block Stack), Checkers
-- Assets: USDT, ETH, TON
+- Games: Chess, Tetris (Block Stack), Checkers, Battleship
 - Stake presets: 5 / 20 / 50 / 100 + Custom
-- Fee: 3% of total pot (2x stake), winner receives pot - fee
-- Non-custodial concept (prototype simulates wallet state)
+- Fee: 3% of total pot (2× stake), winner receives `pot − platformFee − networkFee`
+- V2 escrow:
+  - **BSC / ETH / TON** — player pays own gas, settles on-chain
+  - **Tron USDT** — fully gasless (oracle pays TRX, auto-recouped via 0.5% gas-fund + on-chain SunSwap V2 swap)
 
 ## Architecture
-Refactored into a 3-layer architecture to separate UI from logic and prepare for Web3 integration:
+A 3-layer architecture decouples UI from chain logic:
 
-1.  **WalletAdapter** (`src/core/wallet`): Manages wallet connection and balance reading. Currently uses a Mock implementation.
-2.  **MatchmakingService** (`src/core/matchmaking`): Handles finding opponents based on game/asset/stake.
-3.  **EscrowAdapter** (`src/core/escrow`): The core logic for locking funds, calculating fees, and settling matches.
-    *   **MockEscrowAdapter**: In-memory simulation for rapid prototyping.
-    *   **EvmEscrowAdapter**: Skeleton for future on-chain integration.
+1. **WalletAdapter** (`client/src/core/wallet`) — wallet connect / balance reads (MetaMask, TronLink, TonConnect).
+2. **MatchmakingService** (`server/matchmaking`) — Redis-backed find-match queue + challenge links.
+3. **EscrowAdapter** (`client/src/core/escrow`) — per-asset adapter (`Evm`, `Tron`, `Ton`, `Mock`) routed by `EscrowRouter`.
 
-Configuration is central in `src/config/escrow.ts`.
+Server signs match-auth (deposit) and match-outcome (settle) messages with
+`ORACLE_PRIVATE_KEY`; on-chain contracts verify those signatures.
 
-## Run locally
+## Run locally (Replit / single host)
 ```bash
 npm install
-npm run dev
+npm run dev          # Express + Vite middleware on port 5000
 ```
+
+## Split deployment — Netlify (client) + Railway (server)
+
+The repo is configured to ship the React/Vite client to Netlify and the
+Express + Socket.IO API to Railway. CORS, the API base URL, and the
+TonConnect manifest are all configurable via env.
+
+### 1. Backend → Railway
+- Connect this repo to a new Railway service.
+- `railway.toml` already declares the build, start, and `/healthz` probe.
+- Set the env vars listed in `server/.env.example` (DB, Redis, oracle key,
+  RPCs, escrow addresses). At minimum:
+  - `NODE_ENV=production`
+  - `ALLOWED_ORIGINS=https://<your-netlify-site>.netlify.app`
+  - `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+  - `ORACLE_PRIVATE_KEY`
+- Deploy. Note the public URL — e.g. `https://skills2crypto.up.railway.app`.
+
+### 2. Frontend → Netlify
+- Connect this repo to a new Netlify site.
+- `netlify.toml` already declares `npm run build:client`, `client/dist`
+  publish dir, and the SPA fallback.
+- Set the env vars listed in `client/.env.example`:
+  - `VITE_API_BASE=https://skills2crypto.up.railway.app`
+  - `PUBLIC_URL=https://<your-netlify-site>.netlify.app`
+  - `VITE_PUBLIC_URL=https://<your-netlify-site>.netlify.app`
+  - `VITE_USE_MOCK_ESCROW=false`
+  - `VITE_FEE_ADDRESS=0xYourPlatformColdWallet`
+- Deploy. The build script post-processes
+  `tonconnect-manifest.json`, replacing the `__PUBLIC_URL__` token with
+  `PUBLIC_URL` so TonKeeper accepts the manifest.
+
+### 3. After both are live
+- Verify `https://<railway>/healthz` returns `{ "status": "ok" }`.
+- Verify Netlify site loads, opens a websocket to Railway, and the lobby can
+  find a match.
+- Hit `https://<railway>/api/health/oracles` to confirm BSC/ETH/Tron/TON
+  oracle wallets are funded.
+
+### Build script reference
+| Script              | What it does                                           |
+| ------------------- | ------------------------------------------------------ |
+| `npm run dev`       | Local Replit dev (Express + Vite middleware)           |
+| `npm run build`     | Combined build (client → `dist/public`, server → `dist/index.cjs`) |
+| `npm run build:client` | Client-only build for Netlify (`client/dist`)       |
+| `npm run build:server` | Server-only esbuild bundle for Railway              |
+| `npm start`         | Run the bundled server (Replit / Railway alike)        |
+| `npm run check`     | `tsc --noEmit`                                         |

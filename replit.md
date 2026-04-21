@@ -71,6 +71,41 @@ context on how we got here. The authoritative current model is:
 - USDT permit / sessionKey flows on EVM
 - `sponsorPlayerTrx` on Tron oracle
 
+## Task #15 — Split deploy readiness (Netlify client + Railway server)
+
+The repo can be deployed in two layouts:
+
+1. **Single-host (Replit / `npm run build` + `npm start`)** — Express serves
+   both API and the built client from `dist/public`. Unchanged behavior.
+2. **Split deploy** — client → Netlify, server → Railway. Configured by:
+   - **`client/src/lib/api.ts`** — exports `apiUrl(path)` + `socketUrl()`
+     helpers. All `fetch("/api/...")` and `io(...)` calls in the client
+     route through these so a single `VITE_API_BASE` env var redirects
+     every request at build time.
+   - **`netlify.toml`** — `npm run build:client` → `client/dist`, with SPA
+     fallback. Required env: `VITE_API_BASE`, `PUBLIC_URL`,
+     `VITE_PUBLIC_URL`, `VITE_USE_MOCK_ESCROW=false`, `VITE_FEE_ADDRESS`.
+   - **`railway.toml`** — `npm run build:server` → `dist/index.cjs`, with
+     `/healthz` probe. Required env: `ALLOWED_ORIGINS`, `DATABASE_URL`,
+     Upstash creds, `ORACLE_PRIVATE_KEY`, plus per-chain RPC + escrow
+     addresses.
+   - **`script/build-client.ts`** / **`script/build-server.ts`** — split
+     equivalents of the combined `script/build.ts`. The client build
+     post-processes `client/public/tonconnect-manifest.json` by
+     substituting the `__PUBLIC_URL__` token with the env-supplied
+     `PUBLIC_URL` so TonKeeper accepts the manifest.
+   - **`server/index.ts`** — `GET /healthz` returns `{status:"ok"}`.
+   - **`client/src/core/wallet/useTonConnect.ts`** — TonConnect
+     `manifestUrl` honors `VITE_PUBLIC_URL`, falling back to
+     `window.location.origin` for local dev.
+   - **`client/src/config/escrow.ts`** — `FEE_ADDRESS` placeholder
+     (`0xPLATFORM_COLD_WALLET_123`) replaced with the zero address so
+     real on-chain use without a configured `VITE_FEE_ADDRESS` fails
+     visibly instead of silently misrouting funds.
+   - Top-level **`.gitignore`**, **`client/.env.example`**, expanded
+     **`server/.env.example`** added.
+   - **`README.md`** has the full Netlify + Railway runbook.
+
 ## Project Structure
 
 - `client/` - React frontend with Vite

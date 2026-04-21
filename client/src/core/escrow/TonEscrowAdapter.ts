@@ -1,5 +1,6 @@
 import { Asset } from "@/core/types";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { apiUrl } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 100;
@@ -29,7 +30,7 @@ interface TonSettleAuth {
 }
 
 async function fetchDepositInfo(matchId: string): Promise<TonDepositInfo> {
-  const r = await fetch("/api/ton/deposit-info", {
+  const r = await fetch(apiUrl("/api/ton/deposit-info"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ matchId }),
@@ -40,14 +41,14 @@ async function fetchDepositInfo(matchId: string): Promise<TonDepositInfo> {
 }
 
 async function fetchMatchStatus(matchId: string): Promise<TonMatchStatus> {
-  const r = await fetch(`/api/ton/match-status/${encodeURIComponent(matchId)}`);
+  const r = await fetch(apiUrl(`/api/ton/match-status/${encodeURIComponent(matchId)}`));
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || `ton-match-status HTTP ${r.status}`);
   return data as TonMatchStatus;
 }
 
 async function fetchSettleAuth(matchId: string): Promise<TonSettleAuth | null> {
-  const r = await fetch(`/api/escrow/settle-auth/${encodeURIComponent(matchId)}`);
+  const r = await fetch(apiUrl(`/api/escrow/settle-auth/${encodeURIComponent(matchId)}`));
   const data = await r.json().catch(() => ({}));
   if (r.status === 404 && data?.error === "settle_auth_pending") return null;
   if (!r.ok) throw new Error(data?.error || `settle-auth HTTP ${r.status}`);
@@ -56,7 +57,7 @@ async function fetchSettleAuth(matchId: string): Promise<TonSettleAuth | null> {
 
 async function notifyDeposit(matchId: string, txInfo: any): Promise<void> {
   try {
-    await fetch("/api/ton/notify-deposit", {
+    await fetch(apiUrl("/api/ton/notify-deposit"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ matchId, txInfo }),
@@ -72,7 +73,7 @@ export async function ensureTonReadyForStake(stakeTon: number): Promise<void> {
     throw new Error("TonConnect wallet is not connected");
   }
   const r = await fetch(
-    `/api/ton/readiness?wallet=${encodeURIComponent(tc.account.address)}&stake=${encodeURIComponent(String(stakeTon))}`
+    apiUrl(`/api/ton/readiness?wallet=${encodeURIComponent(tc.account.address)}&stake=${encodeURIComponent(String(stakeTon))}`)
   );
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data?.error || "TON readiness check failed");
