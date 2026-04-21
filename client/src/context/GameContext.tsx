@@ -12,6 +12,7 @@ import type { WalletState, HistoryEntry } from '@/core/types';
 
 import { findMatch } from '@/lib/api';
 import type { Game, Asset } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 type MatchState =
   | null
@@ -54,6 +55,7 @@ const Ctx = createContext<GameContextValue | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const realWallet = useRealWallet();
+  const { toast } = useToast();
   const [walletState, setWalletState] = useState<WalletState>(walletStore.getState());
   const [selectedGame, setSelectedGame] = useState<Game | null>(() => {
     const s = localStorage.getItem('skills2crypto_selected_game');
@@ -171,9 +173,60 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       s.emit('join-match', { matchId: payload.matchId, playerId: pid });
 
       depositInFlightRef.current.add(payload.matchId);
-      void escrowAdapter
-        .lockFunds(payload.matchId, asset, stake)
-        .catch((e: any) => console.error('lockFunds failed', e));
+      // Blocking deposit: if it fails, tell the server to cancel the match
+      // and notify the opponent. The user is held in `funding` state until
+      // either the on-chain deposit confirms (server emits `match-funded`)
+      // or this path fails and we surface the error.
+      (async () => {
+        let ok = false;
+        let errMsg: string | null = null;
+        try {
+          ok = await escrowAdapter.lockFunds(payload.matchId, asset, stake);
+        } catch (e: any) {
+          errMsg = e?.message || String(e);
+          console.error('[GameContext] lockFunds failed (socket path):', errMsg);
+        }
+        if (!ok) {
+          depositInFlightRef.current.delete(payload.matchId);
+          s.emit('deposit-failed', {
+            matchId: payload.matchId,
+            playerId: realWalletRef.current.evmAddress
+              || realWalletRef.current.tronAddress
+              || realWalletRef.current.tonAddress
+              || '',
+            reason: errMsg || 'deposit_failed',
+          });
+          setCurrentMatch(null);
+          toast({
+            title: 'Deposit failed',
+            description: errMsg
+              ? `On-chain deposit could not complete: ${errMsg}`
+              : 'On-chain deposit could not complete. Match cancelled.',
+            variant: 'destructive',
+          });
+        }
+      })();
+    });
+
+    s.on('match-cancelled', (payload: { matchId: string; reason?: string }) => {
+      console.log('[socket] match-cancelled', payload);
+      depositInFlightRef.current.delete(payload.matchId);
+      isFindingRef.current = false;
+      setIsFinding(false);
+      setCurrentMatch((prev) => {
+        if (!prev || (prev.id !== payload.matchId && prev.id !== 'pending')) return prev;
+        return null;
+      });
+      toast({
+        title: 'Match cancelled',
+        description:
+          payload.reason === 'opponent_deposit_failed'
+            ? 'Your opponent could not complete the on-chain deposit. Returning to lobby.'
+            : payload.reason === 'deposit_failed'
+              ? 'Deposit failed — match cancelled. No funds were moved.'
+              : 'Match cancelled. Returning to lobby.',
+        variant: 'destructive',
+      });
     });
 
     s.on('match-funded', (payload: { matchId: string }) => {
@@ -324,10 +377,29 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         });
 
         sock.emit('join-match', { matchId: res.matchId, playerId: assetWalletAddress });
+        let ok = false;
+        let errMsg: string | null = null;
         try {
-          await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
+          ok = await escrowAdapter.lockFunds(res.matchId, selectedAsset, stakeAmount);
         } catch (e: any) {
-          console.error('lockFunds failed', e);
+          errMsg = e?.message || String(e);
+          console.error('[GameContext] lockFunds failed (HTTP path):', errMsg);
+        }
+        if (!ok) {
+          depositInFlightRef.current.delete(res.matchId);
+          sock.emit('deposit-failed', {
+            matchId: res.matchId,
+            playerId: assetWalletAddress,
+            reason: errMsg || 'deposit_failed',
+          });
+          setCurrentMatch(null);
+          toast({
+            title: 'Deposit failed',
+            description: errMsg
+              ? `On-chain deposit could not complete: ${errMsg}`
+              : 'On-chain deposit could not complete. Match cancelled.',
+            variant: 'destructive',
+          });
         }
       } else {
         // waiting — ждём событие match-found

@@ -11,6 +11,7 @@ import { ArrowLeft, Coins, Zap, Info, Loader2, X, Ship, UserPlus, Copy, Check, A
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
 import { escrowAdapter } from "@/core/escrow";
+import { ensureTronUsdtReadyForStake } from "@/core/escrow/TronEscrowAdapter";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 import { ShareButton } from "@/components/ui/ShareButton";
@@ -26,6 +27,11 @@ export default function Lobby() {
   const [playerName, setPlayerName] = useState("");
   const [showChallengeLink, setShowChallengeLink] = useState(false);
   const [challengeLink, setChallengeLink] = useState("");
+  // USDT one-time approve readiness. `null` = unknown/not-checked yet,
+  // `true` = approve(escrow, MAX) is in place, `false` = onboarding still
+  // required before we let the user enter the matchmaking queue.
+  const [usdtApproveReady, setUsdtApproveReady] = useState<boolean | null>(null);
+  const [isApprovingUsdt, setIsApprovingUsdt] = useState(false);
   const { toast } = useToast();
   const { t } = useLanguage();
   const { isEvmConnected, isCorrectChainForAsset, switchToChain, isSwitchingChain, currentChainName, isTronConnected, isTronLinkInstalled, connectTronLink, isTonConnected, connectTonWallet } = useRealWallet();
@@ -52,6 +58,58 @@ export default function Lobby() {
       setLocation(`/play/${state.selectedGame.toLowerCase()}`);
     }
   }, [state.currentMatch, state.selectedGame, setLocation]);
+
+  // Refresh USDT readiness whenever the user picks USDT or re-connects
+  // TronLink. This drives the "Approve USDT" gate below the asset picker so
+  // the player can fix onboarding before clicking Find Match instead of
+  // discovering the problem inside the matchmaking queue.
+  useEffect(() => {
+    if (state.selectedAsset !== 'USDT' || !isTronConnected) {
+      setUsdtApproveReady(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const tw = (window as any).tronWeb;
+        const owner = tw?.defaultAddress?.base58;
+        if (!owner) {
+          if (!cancelled) setUsdtApproveReady(false);
+          return;
+        }
+        const r = await fetch(
+          `/api/tron/readiness?wallet=${encodeURIComponent(owner)}&stake=${encodeURIComponent(String(state.stakeAmount || 1))}`
+        );
+        const data = await r.json().catch(() => ({}));
+        if (cancelled) return;
+        if (r.ok) setUsdtApproveReady(Boolean(data.approveReady));
+        else setUsdtApproveReady(false);
+      } catch {
+        if (!cancelled) setUsdtApproveReady(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [state.selectedAsset, isTronConnected, state.stakeAmount, isApprovingUsdt]);
+
+  const handleApproveUsdt = async () => {
+    setIsApprovingUsdt(true);
+    try {
+      await ensureTronUsdtReadyForStake(Math.max(state.stakeAmount, 1));
+      setUsdtApproveReady(true);
+      toast({
+        title: t('USDT approved', 'USDT approved'),
+        description: t('Your wallet is ready to play USDT matches.', 'Your wallet is ready to play USDT matches.'),
+      });
+    } catch (e: any) {
+      toast({
+        title: t('USDT approval failed', 'USDT approval failed'),
+        description: e?.message || 'Could not complete the one-time USDT approve.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsApprovingUsdt(false);
+    }
+  };
 
   const handleAssetChange = (value: string) => {
     if (value) actions.selectAsset(value as Asset);
@@ -97,6 +155,18 @@ export default function Lobby() {
       toast({
         title: t("Wrong Network", "Wrong Network"),
         description: desc,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (state.selectedAsset === 'USDT' && usdtApproveReady === false) {
+      toast({
+        title: t("Approve USDT first", "Approve USDT first"),
+        description: t(
+          "Complete the one-time USDT approve before searching for a match.",
+          "Complete the one-time USDT approve before searching for a match."
+        ),
         variant: "destructive"
       });
       return;
@@ -254,6 +324,57 @@ export default function Lobby() {
                     {t('TronLink extension not detected', 'TronLink extension not detected')}
                   </p>
                 )}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {state.selectedAsset === 'USDT' && isTronConnected && usdtApproveReady === false && (
+          <Card className="bg-amber-500/5 border-amber-500/30 p-4" data-testid="card-usdt-approve">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm text-amber-200">
+                  {t(
+                    'Complete one-time USDT setup so the escrow can pull your stake every match.',
+                    'Complete one-time USDT setup so the escrow can pull your stake every match.'
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('Costs ~30 TRX, only required once per wallet.', 'Costs ~30 TRX, only required once per wallet.')}
+                </p>
+                <Button
+                  size="sm"
+                  disabled={isApprovingUsdt}
+                  onClick={handleApproveUsdt}
+                  className="h-9 px-4 text-sm font-display font-bold uppercase tracking-wider bg-amber-500 text-black hover:bg-amber-400"
+                  data-testid="button-approve-usdt"
+                >
+                  {isApprovingUsdt ? (
+                    <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />{t('Approving...', 'Approving...')}</>
+                  ) : (
+                    t('Approve USDT', 'Approve USDT')
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {state.currentMatch && state.currentMatch.status === 'funding' && (
+          <Card className="bg-primary/5 border-primary/30 p-4" data-testid="card-depositing">
+            <div className="flex items-start gap-3">
+              <Loader2 className="h-5 w-5 text-primary flex-shrink-0 mt-0.5 animate-spin" />
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-display font-bold uppercase tracking-wider text-primary">
+                  {t('Depositing on-chain...', 'Depositing on-chain...')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Confirm the transaction in your wallet. The match starts as soon as both deposits land.',
+                    'Confirm the transaction in your wallet. The match starts as soon as both deposits land.'
+                  )}
+                </p>
               </div>
             </div>
           </Card>

@@ -577,6 +577,40 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
     });
 
+    // V2 deposit-failure cleanup. The client awaits its on-chain deposit
+    // and emits this when the wallet rejected, the chain reverted, or the
+    // status poll timed out. We tear the match down so neither player is
+    // stuck in a "funding" state, and we surface a `match-cancelled` to
+    // the room so the opponent's UI returns to the lobby instead of
+    // silently waiting on a deposit that will never arrive.
+    socket.on("deposit-failed", async (data: { matchId: string; playerId?: string; reason?: string }) => {
+      const { matchId, reason } = data || ({} as any);
+      if (!matchId) return;
+      console.warn(`[socket] deposit-failed for match ${matchId}: ${reason || 'unknown'}`);
+      try {
+        // Mark match as cancelled (idempotent) and clean up Redis state
+        // so the matchmaker doesn't leak it. We keep the lock briefly so
+        // a duplicate deposit-failed from the same client doesn't double-emit.
+        const lockKey = `cancelled_lock:${matchId}`;
+        const isFirst = await redis.set(lockKey, "1", { ex: 600, nx: true });
+        if (!isFirst) return;
+        await redis.del(`match:${matchId}`);
+        await redis.del(`match_auth:${matchId}`);
+        await redis.del(`tron_deposit_auth:${matchId}`);
+        await redis.del(`ton_match_auth:${matchId}`);
+      } catch (e: any) {
+        console.error("[socket] deposit-failed cleanup error:", e?.message || e);
+      }
+      // Tell both players (whichever connected) the match is dead.
+      io.to(`match:${matchId}`).emit("match-cancelled", {
+        matchId,
+        reason: "deposit_failed",
+      });
+      // Tear down any half-built game room so a stale player can't enter.
+      matchRooms.delete(matchId);
+      fundedMatches.delete(matchId);
+    });
+
     socket.on("chess-move", (move: ChessMove) => {
       const { matchId, from, to, promotion, fen, san, whiteTime, blackTime } = move;
       
