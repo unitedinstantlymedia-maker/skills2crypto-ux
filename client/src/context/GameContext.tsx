@@ -208,6 +208,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       })();
     });
 
+    // Spec-aligned mirror of `match-cancelled` — both events are broadcast
+    // by the server when a deposit fails so any client listening on either
+    // contract behaves identically.
+    s.on('deposit-failed', (payload: { matchId: string; reason?: string }) => {
+      console.log('[socket] deposit-failed (server)', payload);
+      depositInFlightRef.current.delete(payload.matchId);
+      isFindingRef.current = false;
+      setIsFinding(false);
+      setCurrentMatch((prev) => {
+        if (!prev || (prev.id !== payload.matchId && prev.id !== 'pending')) return prev;
+        return null;
+      });
+    });
+
     s.on('match-cancelled', (payload: { matchId: string; reason?: string }) => {
       console.log('[socket] match-cancelled', payload);
       depositInFlightRef.current.delete(payload.matchId);

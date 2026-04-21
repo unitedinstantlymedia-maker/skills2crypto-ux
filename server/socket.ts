@@ -586,6 +586,33 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     socket.on("deposit-failed", async (data: { matchId: string; playerId?: string; reason?: string }) => {
       const { matchId, reason } = data || ({} as any);
       if (!matchId) return;
+
+      // AuthZ: only an actual participant in this match may cancel it.
+      // We accept the request if either (a) the socket previously joined
+      // the match room via `join-match` (recorded in socketToPlayer), or
+      // (b) the supplied playerId matches one of the addresses we stored
+      // in Redis for the match. Without this, any connected client could
+      // grief any other match by emitting deposit-failed with a guessed id.
+      const sockInfo = socketToPlayer.get(socket.id);
+      let authorized = !!(sockInfo && sockInfo.matchId === matchId);
+      const claimedPlayer = (data?.playerId || "").toLowerCase();
+      if (!authorized) {
+        try {
+          const md = await redis.hgetall(`match:${matchId}`);
+          const a1 = md?.addr1 ? String(md.addr1).toLowerCase() : null;
+          const a2 = md?.addr2 ? String(md.addr2).toLowerCase() : null;
+          if (claimedPlayer && (claimedPlayer === a1 || claimedPlayer === a2)) {
+            authorized = true;
+          }
+        } catch (e: any) {
+          console.warn("[socket] deposit-failed authz lookup failed:", e?.message || e);
+        }
+      }
+      if (!authorized) {
+        console.warn(`[socket] deposit-failed REJECTED — socket ${socket.id} not in match ${matchId}`);
+        return;
+      }
+
       console.warn(`[socket] deposit-failed for match ${matchId}: ${reason || 'unknown'}`);
       try {
         // Mark match as cancelled (idempotent) and clean up Redis state
@@ -601,7 +628,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       } catch (e: any) {
         console.error("[socket] deposit-failed cleanup error:", e?.message || e);
       }
-      // Tell both players (whichever connected) the match is dead.
+      // Spec event (`deposit-failed`) plus the broader `match-cancelled` so
+      // existing room listeners (game pages, etc.) tear down cleanly too.
+      io.to(`match:${matchId}`).emit("deposit-failed", {
+        matchId,
+        reason: "deposit_failed",
+      });
       io.to(`match:${matchId}`).emit("match-cancelled", {
         matchId,
         reason: "deposit_failed",
