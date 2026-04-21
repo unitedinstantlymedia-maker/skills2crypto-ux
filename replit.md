@@ -593,3 +593,39 @@ replaced.
 - **Tron deployer**: ~300 TRX for the V2 contract deploy.
 - **Tron oracle bootstrap**: 50–100 USDT to seed the gas-fund accumulator
   so it can auto-swap once and start self-sustaining.
+
+## Task #10 — Oracle balance monitoring & V2 obsolescence notes
+
+The original Task #10 was scoped against the V1 EVM contract that had
+`updateGasPrice()`, a `gasReserve` field, and required the oracle wallet
+to fund both players' BNB stakes via `msg.value`. **The Task #16 V2
+rewrite eliminated all three of those mechanisms** for BSC and Ethereum:
+
+- `Skills2CryptoEscrow.sol` no longer exposes `updateGasPrice()` — there
+  is no gas oracle to update on EVM chains.
+- The contract has no `gasReserve` field; `depositNative` requires
+  exactly `msg.value == stake` from one of the two named players.
+- The oracle wallet never broadcasts a settle / deposit transaction on
+  BSC or ETH. Players pay their own gas via wagmi `writeContract`. A
+  zero-balance oracle wallet is operationally fine on EVM.
+
+What Task #10 still applies to is **operational visibility**, which is
+implemented as follows:
+
+- `GET /api/health/oracles` returns per-chain status for BSC, ETH, Tron,
+  and TON in one call: oracle address, escrow address, native balance,
+  and an `okForGas` flag. Tron is the only chain that can flip false
+  (when oracle TRX falls below `TRON_MIN_GAS_TRX`, default 50). EVM and
+  TON always report `okForGas: true` with a `note` explaining why.
+- `tronOracle.ts` now logs the oracle's TRX balance every 5 minutes
+  (with a `WARN` tag below `TRON_MIN_GAS_TRX`) so operators see drift
+  before users hit `ORACLE_NO_GAS`. The interval is `unref()`-ed so it
+  doesn't block process exit.
+- `tonOracle.getEscrowBalanceTon()` reads the contract's own TON balance
+  (the meaningful liquidity number — TON oracle is signer-only) and is
+  exposed via the health endpoint.
+
+Tron's gas economics are handled by the on-chain SunSwap V2 auto-swap
+described elsewhere in this file (0.5% gas-fund fee accumulates and
+swaps to TRX at the configured threshold), so it does not need a JS
+gas-price oracle either.

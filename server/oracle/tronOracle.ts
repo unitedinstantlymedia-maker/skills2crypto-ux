@@ -122,6 +122,24 @@ function build() {
 
   if (!_startupRun) {
     _startupRun = true;
+    // Periodic balance logger: Tron is the only chain whose oracle still
+    // broadcasts on-chain transactions (USDT deposits + settlements), so
+    // it's the only one that can run out of "gas". Log every 5 minutes
+    // so operators see balance drift before users hit ORACLE_NO_GAS.
+    const PERIODIC_BALANCE_INTERVAL_MS = 5 * 60_000;
+    const balanceTimer = setInterval(async () => {
+      try {
+        const sun = await tw.trx.getBalance(oracleBase58);
+        const trx = sun / 1_000_000;
+        const tag = trx < cfg.minTrxForGas ? "WARN" : "info";
+        console.log(`[TronOracle] [periodic ${tag}] Oracle TRX balance: ${trx} (min: ${cfg.minTrxForGas})`);
+      } catch (e: any) {
+        console.warn(`[TronOracle] [periodic] balance check failed: ${e?.message || e}`);
+      }
+    }, PERIODIC_BALANCE_INTERVAL_MS);
+    // Allow the process to exit cleanly in tests / shutdown.
+    if (typeof balanceTimer.unref === "function") balanceTimer.unref();
+
     (async () => {
       try {
         const balanceSun = await tw.trx.getBalance(oracleBase58);

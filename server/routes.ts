@@ -928,6 +928,87 @@ export async function registerRoutes(
   app.post("/api/escrow/settle-auth", settleAuthHandler);
 
   // ============================================================
+  // Oracle health check (Task #10)
+  // ============================================================
+  //
+  // Reports the live status of every chain's oracle / escrow contract:
+  //   - BSC / ETH: signer-only in V2 (oracle never broadcasts), so we
+  //     surface the wallet's native balance for visibility but it is not
+  //     a "gas" balance — funds are not required for matches to settle.
+  //   - Tron: oracle still broadcasts USDT deposits + settlements and
+  //     pays TRX. The `okForGas` flag flips false when balance falls
+  //     below `TRON_MIN_GAS_TRX`.
+  //   - TON: signer-only; we surface the contract's own TON balance
+  //     (which is what funds payouts) instead of an oracle wallet.
+  //
+  // Each chain is wrapped in its own try/catch so a single misconfigured
+  // chain does not blank out the others. HTTP status is always 200 — the
+  // response body documents which chains are healthy.
+  app.get("/api/health/oracles", async (_req, res) => {
+    const results: Record<string, any> = {};
+
+    for (const chain of ["BSC", "ETH"] as const) {
+      try {
+        const { createEvmOracle } = await import("./oracle/evmOracle");
+        const o = createEvmOracle(chain);
+        const balance = await o.getOracleBalance();
+        results[chain] = {
+          ok: true,
+          role: "signer-only",
+          oracleAddress: o.address,
+          escrowAddress: o.escrowAddress,
+          chainId: o.chainId,
+          nativeBalance: balance,
+          okForGas: true,
+          note: "V2 oracle does not broadcast — balance is informational",
+        };
+      } catch (err: any) {
+        results[chain] = { ok: false, error: err?.message || String(err) };
+      }
+    }
+
+    try {
+      const { createTronOracle } = await import("./oracle/tronOracle");
+      const t = createTronOracle();
+      const trx = await t.getOracleBalanceTrx();
+      const minTrx = Number(process.env.TRON_MIN_GAS_TRX ?? 50);
+      results.TRON = {
+        ok: true,
+        role: "broadcaster",
+        oracleAddress: t.oracleAddress,
+        escrowAddress: t.escrowAddressBase58,
+        chainId: t.chainId,
+        nativeBalance: trx,
+        minGasBalance: minTrx,
+        okForGas: trx >= minTrx,
+        accumulatedGasFundUSDT: (await t.getAccumulatedGasFundUSDT()).toString(),
+      };
+    } catch (err: any) {
+      results.TRON = { ok: false, error: err?.message || String(err) };
+    }
+
+    try {
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const t = createTonOracle();
+      const escrowBalance = await t.getEscrowBalanceTon();
+      results.TON = {
+        ok: true,
+        role: "signer-only",
+        escrowAddress: t.escrowAddressFriendly,
+        escrowBalance,
+        oraclePubkeyHex: await t.getOraclePubkeyHex(),
+        okForGas: true,
+        note: "V2 oracle does not broadcast — escrow balance is contract liquidity",
+      };
+    } catch (err: any) {
+      results.TON = { ok: false, error: err?.message || String(err) };
+    }
+
+    const overallOk = Object.values(results).every((r) => r.ok && r.okForGas !== false);
+    return res.json({ ok: overallOk, chains: results, timestamp: Date.now() });
+  });
+
+  // ============================================================
   // TON native escrow endpoints (Task #14)
   // ============================================================
 

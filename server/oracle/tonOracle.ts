@@ -245,6 +245,25 @@ function build() {
     return Buffer.from(key.publicKey).toString("hex");
   }
 
+  /**
+   * Read the on-chain TON balance of the escrow contract. The TON oracle
+   * is signer-only (it never broadcasts), so there's no oracle wallet
+   * balance to monitor. The contract's own TON balance is what funds
+   * settlement payouts (each match's deposits accumulate there), so it
+   * is the meaningful number to surface in health checks.
+   */
+  async function getEscrowBalanceTon(): Promise<number> {
+    try {
+      const balanceNano = await client.getBalance(escrowAddress);
+      return Number(fromNano(balanceNano));
+    } catch (e: any) {
+      throw new TonOracleError(
+        `getBalance failed for ${cfg.escrowAddress}: ${e?.message || e}`,
+        "RPC_FAILED"
+      );
+    }
+  }
+
   return {
     chain: "TON" as const,
     get escrowAddressFriendly() {
@@ -258,6 +277,7 @@ function build() {
     signMatchOutcome,
     getMatchOnChain,
     getOraclePubkeyHex,
+    getEscrowBalanceTon,
   };
 }
 
