@@ -40,6 +40,8 @@ TonConnect manifest are all configurable via env.
   RPCs, escrow addresses). At minimum:
   - `NODE_ENV=production`
   - `ALLOWED_ORIGINS=https://<your-netlify-site>.netlify.app`
+  - `CLIENT_PUBLIC_URL=https://<your-netlify-site>.netlify.app` (used to
+    build challenge invite links — must point at the **client**, not the API)
   - `DATABASE_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
   - `ORACLE_PRIVATE_KEY`
 - Deploy. Note the public URL — e.g. `https://skills2crypto.up.railway.app`.
@@ -84,10 +86,14 @@ Then run a real 5-stake (or smallest-allowed) match on each asset:
 | **USDT**   | TronLink        | One-time `approve(escrow,MAX)` succeeds (~30 TRX); both deposits go through gaslessly; settle is gasless; Tronscan shows two `Deposit` and one `Settle` event. |
 | **TON**    | TonKeeper       | TonConnect prompts manifest from `VITE_PUBLIC_URL`; both `Deposit` BOCs land; winner sends `Settle` BOC (~0.05 TON gas); TonViewer shows the settle tx. |
 
-Also confirm: cancel-before-funded shows the right toast (self vs opponent),
-match history populates from `/api/history/...`, and `/api/health/oracles`
-TRX balance does **not** drop below `TRON_MIN_GAS_TRX` after the USDT match
-(the 0.5% gas-fund + SunSwap auto-swap should recoup it).
+Also confirm:
+- Create a challenge link, share to a second browser/device, accept it —
+  the URL printed in `shareUrl` must start with `CLIENT_PUBLIC_URL`
+  (the Netlify origin), not the Railway API origin.
+- Cancel-before-funded shows the right toast (self vs opponent).
+- Match history populates from `/api/history/...`.
+- `/api/health/oracles` TRX balance does **not** drop below `TRON_MIN_GAS_TRX`
+  after the USDT match (the 0.5% gas-fund + SunSwap auto-swap should recoup it).
 
 ### Build script reference
 | Script              | What it does                                           |

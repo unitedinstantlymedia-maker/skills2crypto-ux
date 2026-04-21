@@ -214,11 +214,16 @@ export async function registerRoutes(
     
     await addChallengeHistory(challengeId, "pending", "challenge_created");
     
-    const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : process.env.REPL_SLUG && process.env.REPL_OWNER
-        ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
-        : "http://localhost:5000";
+    // CLIENT_PUBLIC_URL is the deployed Netlify (or single-host) origin where
+    // the React client lives — challenge invite links must point at the
+    // *client*, not the API. Falls back to Replit dev domain, then localhost.
+    const baseUrl = process.env.CLIENT_PUBLIC_URL
+      ? process.env.CLIENT_PUBLIC_URL.replace(/\/+$/, "")
+      : process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : process.env.REPL_SLUG && process.env.REPL_OWNER
+          ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`
+          : "http://localhost:5000";
     
     const shareUrl = `${baseUrl}/challenge/${challengeId}`;
     
