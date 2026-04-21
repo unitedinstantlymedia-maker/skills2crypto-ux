@@ -584,7 +584,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     // the room so the opponent's UI returns to the lobby instead of
     // silently waiting on a deposit that will never arrive.
     socket.on("deposit-failed", async (data: { matchId: string; playerId?: string; reason?: string }) => {
-      const { matchId, reason } = data || ({} as any);
+      const { matchId, reason } = data ?? {};
       if (!matchId) return;
 
       // AuthZ: only one of the two real participants in this match may

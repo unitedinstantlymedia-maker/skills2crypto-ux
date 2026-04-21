@@ -89,6 +89,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // the HTTP `matched` response and a duplicate `match-found` socket emit
   // never trigger lockFunds() twice for the same match.
   const depositInFlightRef = useRef<Set<string>>(new Set());
+  // Tracks matchIds for which THIS client's own deposit failed (so the
+  // subsequent server-broadcast `match-cancelled` does not double-toast
+  // the failing user). Both players have the match in `depositInFlight`,
+  // so that flag alone is not sufficient to distinguish self vs opponent.
+  const selfDepositFailedRef = useRef<Set<string>>(new Set());
   const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
 
   useEffect(() => {
@@ -188,6 +193,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
         if (!ok) {
           depositInFlightRef.current.delete(payload.matchId);
+          selfDepositFailedRef.current.add(payload.matchId);
           s.emit('deposit-failed', {
             matchId: payload.matchId,
             playerId: realWalletRef.current.evmAddress
@@ -224,7 +230,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
     s.on('match-cancelled', (payload: { matchId: string; reason?: string }) => {
       console.log('[socket] match-cancelled', payload);
-      const wasSelfFailure = depositInFlightRef.current.has(payload.matchId);
+      const wasSelfFailure = selfDepositFailedRef.current.has(payload.matchId);
+      selfDepositFailedRef.current.delete(payload.matchId);
       depositInFlightRef.current.delete(payload.matchId);
       isFindingRef.current = false;
       setIsFinding(false);
@@ -232,9 +239,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         if (!prev || (prev.id !== payload.matchId && prev.id !== 'pending')) return prev;
         return null;
       });
-      // Suppress the duplicate cancellation toast when this client is the
-      // one whose own deposit just failed — they already got the more
-      // specific "Deposit failed" toast moments earlier.
+      // Suppress the duplicate cancellation toast ONLY for the client whose
+      // own deposit just failed (they already got the specific "Deposit
+      // failed" toast). The opponent — whose deposit may have succeeded
+      // or never been attempted — must always be told why the match died.
       if (wasSelfFailure) return;
       toast({
         title: 'Match cancelled',
@@ -404,6 +412,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
         if (!ok) {
           depositInFlightRef.current.delete(res.matchId);
+          selfDepositFailedRef.current.add(res.matchId);
           sock.emit('deposit-failed', {
             matchId: res.matchId,
             playerId: assetWalletAddress,
