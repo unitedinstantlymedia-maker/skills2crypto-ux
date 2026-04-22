@@ -396,13 +396,19 @@ npm run db:push     # Push database schema
 4. **Shared socket architecture** - All 4 game components (Chess, Tetris, Checkers, Battleship) now reuse the single socket from `GameContext` instead of each creating their own `io()` connection. GameContext exposes `socket` via context value (`useGame().socket`). Game components use `socket.on()`/`socket.off()` for event registration and cleanup (no more `removeAllListeners` or `socket.close`).
 5. **Play.tsx gate fix** - Changed `hasBothPlayers` check from `players?.filter(Boolean).length === 2` to `status === 'waiting'`. The `match-found` socket event handler didn't set a `players` array, so the queued player was permanently stuck on WaitingRoom despite match being active.
 
-### BSC Mainnet Deployment (Apr 15, 2026)
-1. **Contract deployed** - `Skills2CryptoEscrow` at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` on BSC Mainnet (chain 56)
-2. **Tx hash** - `0x823c59a298520e53bfcb2fc6309efe5c10c3df25af6e2878acb76dc511152599`
-3. **Constructor params** - USDT=`0x55d398326f99059fF775485246999027B3197955` (6 decimals), Platform=`0x7F8Bc18A773f101194071aA559d15d2a59bf6832`, Oracle=`0x2ad7345E4ad7Fff0Ec5cB41B96e69035f96DFCB8`, initialGasPrice=1
-4. **Deployer** - `0x2ad7345E4ad7Fff0Ec5cB41B96e69035f96DFCB8` (same as oracle)
-5. **Hardhat setup** - `hardhat.config.cjs` with Solidity 0.8.24, cancun EVM, optimizer 200 runs; deploy script at `scripts/deploy-bsc.cjs`
-6. **Dependencies** - hardhat@^2.28, @nomicfoundation/hardhat-ethers, @openzeppelin/contracts@5.6.1
+### V2 Mainnet Addresses (Task #20, deploys in progress as of Apr 22, 2026)
+
+| Chain | Contract | Status |
+|-------|----------|--------|
+| BSC | `0x379ADe242CC712EBA77c2149F4cC48dD4d2778e9` | LIVE — `Skills2CryptoEscrow` V2, deploy tx `0xa840a0a1e047bdc83c2c2d56675321aab7ee2a8c9491a88efca243557a59867b` |
+| Ethereum | (pending) | not deployed yet |
+| Tron | (pending) | not deployed yet |
+| TON | (pending) | not deployed yet |
+
+V2 constructor for BSC/ETH: `(platformWallet=0x7F8B…6832, oracle=0x2ad7…FCB8)` with EIP-712 `name="Skills2CryptoEscrow"`, `version="2"`. Deployer is the same wallet as the oracle. Deploy scripts: `scripts/deploy-bsc.cjs`, `scripts/deploy-eth.cjs`, `scripts/deploy-ton.mjs`, `contracts/tron/migrations/2_deploy_escrow.js`. Operator workflow documented in `contracts/DEPLOYMENT_GUIDE.md`.
+
+### Deprecated V1 BSC Deployment (Apr 15, 2026 — superseded Apr 22, 2026)
+- The legacy V1 contract at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` (USDT-based oracle-broadcast model) is deprecated and no longer referenced from the runtime — `BSC_ESCROW_ADDRESS` and `VITE_BSC_ESCROW_ADDRESS` now point at the V2 address above.
 
 ### Real-Money Deposit & Settlement Pipeline (Apr 15, 2026)
 1. **Wallet addresses in matchmaking** - `findMatch` API now sends `walletAddress`; Redis `match:{id}` stores `addr1`/`addr2` alongside `p1`/`p2` (socket IDs)
