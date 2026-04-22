@@ -43,7 +43,7 @@ module.exports = {
       },
     },
   },
-  contracts_directory: "./",
+  contracts_directory: "./contracts",
   contracts_build_directory: "./build",
   migrations_directory: "./migrations",
 };
