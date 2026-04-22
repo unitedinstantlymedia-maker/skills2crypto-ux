@@ -1,0 +1,32 @@
+Perform a comprehensive audit of the current project state after completing the Escrow Rewrite v2 (Task #16). Do not change any code; only analyze and report.
+
+Provide a detailed status report covering the following:
+
+1. **Contract Status (BSC, ETH, TON, Tron):**
+   - Confirm if the new `settleMatchByWinner` (or equivalent) function is present and correctly implemented in each contract.
+   - For Tron USDT, confirm the 0.5% gas fund accumulator, the SunSwap auto-swap logic (threshold 50 USDT), and the oracle's gasless deposit/settlement flow are implemented.
+   - List the currently deployed contract addresses for each network. If any network has NOT been deployed yet, explicitly state it.
+
+2. **Oracle Status:**
+   - Verify that the EVM, TON, and Tron oracles have been refactored to the new "sign-only" model (no on-chain settlement submissions, except for Tron which should submit deposits/settlements).
+   - Confirm that the `sponsorPlayerTrx` mechanism has been fully removed from the Tron oracle.
+
+3. **Client Adapters & Onboarding:**
+   - Verify that `EvmEscrowAdapter`, `TonEscrowAdapter`, and `TronEscrowAdapter` have been updated to use the new settlement flow (winner calls `settleMatch` with oracle signature).
+   - Confirm the one-time TRC-20 approval onboarding step is implemented for Tron USDT (with accurate energy estimation).
+
+4. **Server Endpoints:**
+   - Confirm the `/api/escrow/settle-auth` endpoint exists and correctly returns the signed MatchOutcome payload.
+   - Confirm that old sponsor endpoints (`/api/tron/sponsor-trx`) have been removed.
+
+5. **Deployment & Environment Readiness:**
+   - Check if the Hardhat deploy scripts (`deploy-bsc.cjs`, `deploy-eth.cjs`, `deploy-tron.js`) are updated with the new constructor parameters.
+   - List any missing environment variables (e.g., `ETH_ESCROW_ADDRESS`, `TRON_GAS_FUND_ADDRESS`, SunSwap router addresses) that must be set before final deployment.
+   - State the required native balances needed on the deployer wallets (ETH on `0x2ad7...`, TON deployer, TRX on `TDsjBnqY...`) for mainnet deployment.
+
+6. **Outstanding Tasks:**
+   - Identify any remaining `TODO` or `FIXME` comments related to this rewrite.
+   - List any files that still reference the old `onlyOracle settleMatch` pattern.
+   - Provide a concise, prioritized checklist of the next manual actions I need to take to complete the mainnet deployment and testing.
+
+The report should be clear, structured, and include specific file paths or line numbers where applicable.
