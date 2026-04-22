@@ -401,7 +401,7 @@ npm run db:push     # Push database schema
 | Chain | Contract | Status |
 |-------|----------|--------|
 | BSC | `0x379ADe242CC712EBA77c2149F4cC48dD4d2778e9` | LIVE — `Skills2CryptoEscrow` V2, deploy tx `0xa840a0a1e047bdc83c2c2d56675321aab7ee2a8c9491a88efca243557a59867b` |
-| Ethereum | (pending) | not deployed yet |
+| Ethereum | `0x9F11DB204d7f7E8c805a67a0128898e65CF19b02` | LIVE — `Skills2CryptoEscrow` V2, deploy tx `0x33759151adbca385928d4c1449b915a31039ab7f291ea5330bfa05941cf80402` |
 | Tron | (pending) | not deployed yet |
 | TON | (pending) | not deployed yet |
 
