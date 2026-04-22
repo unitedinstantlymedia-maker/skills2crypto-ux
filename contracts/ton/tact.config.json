@@ -1,0 +1,12 @@
+{
+  "projects": [
+    {
+      "name": "Skills2CryptoEscrowTON",
+      "path": "./skills2crypto_escrow.tact",
+      "output": "./build",
+      "options": {
+        "debug": false
+      }
+    }
+  ]
+}

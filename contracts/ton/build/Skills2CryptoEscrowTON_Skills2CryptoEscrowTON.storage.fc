@@ -1,0 +1,273 @@
+;;
+;; Type: StateInit
+;; TLB: _ code:^cell data:^cell = StateInit
+;;
+
+((cell, cell)) $StateInit$_not_null(tuple v) inline {
+    throw_if(128, null?(v));
+    var (cell vvv'code, cell vvv'data) = __tact_tuple_destroy_2(v);
+    return (vvv'code, vvv'data);
+}
+
+;;
+;; Type: Context
+;; TLB: _ bounced:bool sender:address value:int257 raw:^slice = Context
+;;
+
+_ $Context$_get_value((int, slice, int, slice) v) inline {
+    var (v'bounced, v'sender, v'value, v'raw) = v;
+    return v'value;
+}
+
+;;
+;; Type: SendParameters
+;; TLB: _ bounce:bool to:address value:int257 mode:int257 body:Maybe ^cell code:Maybe ^cell data:Maybe ^cell = SendParameters
+;;
+
+((int, slice, int, int, cell, cell, cell)) $SendParameters$_constructor_bounce_to_value_mode_body_code_data(int $bounce, slice $to, int $value, int $mode, cell $body, cell $code, cell $data) inline {
+    return ($bounce, $to, $value, $mode, $body, $code, $data);
+}
+
+((int, slice, int, int, cell, cell, cell)) $SendParameters$_constructor_to_value_mode_body(slice $to, int $value, int $mode, cell $body) inline {
+    return (true, $to, $value, $mode, $body, null(), null());
+}
+
+;;
+;; Type: Deploy
+;; Header: 0x946a98b6
+;; TLB: deploy#946a98b6 queryId:uint64 = Deploy
+;;
+
+(slice, ((int))) $Deploy$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 2490013878);
+    var v'queryId = sc_0~load_uint(64);
+    return (sc_0, (v'queryId));
+}
+
+;;
+;; Type: DeployOk
+;; Header: 0xaff90f57
+;; TLB: deploy_ok#aff90f57 queryId:uint64 = DeployOk
+;;
+
+builder $DeployOk$_store(builder build_0, (int) v) inline {
+    var (v'queryId) = v;
+    build_0 = store_uint(build_0, 2952335191, 32);
+    build_0 = build_0.store_uint(v'queryId, 64);
+    return build_0;
+}
+
+cell $DeployOk$_store_cell((int) v) inline {
+    return $DeployOk$_store(begin_cell(), v).end_cell();
+}
+
+((int)) $DeployOk$_constructor_queryId(int $queryId) inline {
+    return ($queryId);
+}
+
+;;
+;; Type: Deposit
+;; Header: 0xcd32a0f9
+;; TLB: deposit#cd32a0f9 matchId:uint256 player1:address player2:address stake:coins = Deposit
+;;
+
+(slice, ((int, slice, slice, int))) $Deposit$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 3442647289);
+    var v'matchId = sc_0~load_uint(256);
+    var v'player1 = sc_0~__tact_load_address();
+    var v'player2 = sc_0~__tact_load_address();
+    var v'stake = sc_0~load_coins();
+    return (sc_0, (v'matchId, v'player1, v'player2, v'stake));
+}
+
+;;
+;; Type: Settle
+;; Header: 0xddc91d5f
+;; TLB: settle#ddc91d5f matchId:uint256 winner:address reason:uint8 signature:^slice = Settle
+;;
+
+(slice, ((int, slice, int, slice))) $Settle$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 3720944991);
+    var v'matchId = sc_0~load_uint(256);
+    var v'winner = sc_0~__tact_load_address();
+    var v'reason = sc_0~load_uint(8);
+    var v'signature = sc_0~load_ref().begin_parse();
+    return (sc_0, (v'matchId, v'winner, v'reason, v'signature));
+}
+
+;;
+;; Type: RefundNoShow
+;; Header: 0x58ddc04b
+;; TLB: refund_no_show#58ddc04b matchId:uint256 = RefundNoShow
+;;
+
+(slice, ((int))) $RefundNoShow$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 1490927691);
+    var v'matchId = sc_0~load_uint(256);
+    return (sc_0, (v'matchId));
+}
+
+;;
+;; Type: SetOraclePubkey
+;; Header: 0x5cb48f11
+;; TLB: set_oracle_pubkey#5cb48f11 newPubkey:uint256 = SetOraclePubkey
+;;
+
+(slice, ((int))) $SetOraclePubkey$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 1555336977);
+    var v'newPubkey = sc_0~load_uint(256);
+    return (sc_0, (v'newPubkey));
+}
+
+;;
+;; Type: SetPlatformWallet
+;; Header: 0xbef412a4
+;; TLB: set_platform_wallet#bef412a4 newWallet:address = SetPlatformWallet
+;;
+
+(slice, ((slice))) $SetPlatformWallet$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 3203666596);
+    var v'newWallet = sc_0~__tact_load_address();
+    return (sc_0, (v'newWallet));
+}
+
+;;
+;; Type: SetDepositTimeout
+;; Header: 0xf210d59b
+;; TLB: set_deposit_timeout#f210d59b seconds:uint32 = SetDepositTimeout
+;;
+
+(slice, ((int))) $SetDepositTimeout$_load(slice sc_0) inline {
+    throw_unless(129, sc_0~load_uint(32) == 4061189531);
+    var v'seconds = sc_0~load_uint(32);
+    return (sc_0, (v'seconds));
+}
+
+;;
+;; Type: Match
+;; TLB: _ matchId:uint256 player1:address player2:address stake:coins p1Funded:bool p2Funded:bool firstDepositAt:uint32 status:uint8 = Match
+;;
+
+builder $Match$_store(builder build_0, (int, slice, slice, int, int, int, int, int) v) inline_ref {
+    var (v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status) = v;
+    build_0 = build_0.store_uint(v'matchId, 256);
+    build_0 = __tact_store_address(build_0, v'player1);
+    build_0 = __tact_store_address(build_0, v'player2);
+    build_0 = build_0.store_coins(v'stake);
+    build_0 = build_0.store_int(v'p1Funded, 1);
+    build_0 = build_0.store_int(v'p2Funded, 1);
+    build_0 = build_0.store_uint(v'firstDepositAt, 32);
+    build_0 = build_0.store_uint(v'status, 8);
+    return build_0;
+}
+
+cell $Match$_store_cell((int, slice, slice, int, int, int, int, int) v) inline {
+    return $Match$_store(begin_cell(), v).end_cell();
+}
+
+(slice, ((int, slice, slice, int, int, int, int, int))) $Match$_load(slice sc_0) inline_ref {
+    var v'matchId = sc_0~load_uint(256);
+    var v'player1 = sc_0~__tact_load_address();
+    var v'player2 = sc_0~__tact_load_address();
+    var v'stake = sc_0~load_coins();
+    var v'p1Funded = sc_0~load_int(1);
+    var v'p2Funded = sc_0~load_int(1);
+    var v'firstDepositAt = sc_0~load_uint(32);
+    var v'status = sc_0~load_uint(8);
+    return (sc_0, (v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status));
+}
+
+tuple $Match$_as_optional((int, slice, slice, int, int, int, int, int) v) inline {
+    var (v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status) = v;
+    return __tact_tuple_create_8(v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status);
+}
+
+tuple $Match$_load_opt(cell cl) inline {
+    if (null?(cl)) {
+        return null();
+    }
+    var sc = cl.begin_parse();
+    return $Match$_as_optional(sc~$Match$_load());
+}
+
+((int, slice, slice, int, int, int, int, int)) $Match$_not_null(tuple v) inline {
+    throw_if(128, null?(v));
+    var (int vvv'matchId, slice vvv'player1, slice vvv'player2, int vvv'stake, int vvv'p1Funded, int vvv'p2Funded, int vvv'firstDepositAt, int vvv'status) = __tact_tuple_destroy_8(v);
+    return (vvv'matchId, vvv'player1, vvv'player2, vvv'stake, vvv'p1Funded, vvv'p2Funded, vvv'firstDepositAt, vvv'status);
+}
+
+tuple $Match$_to_tuple(((int, slice, slice, int, int, int, int, int)) v) inline {
+    var (v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status) = v;
+    return __tact_tuple_create_8(v'matchId, v'player1, v'player2, v'stake, v'p1Funded, v'p2Funded, v'firstDepositAt, v'status);
+}
+
+tuple $Match$_to_opt_tuple(tuple v) inline {
+    if (null?(v)) { return null(); } 
+    return $Match$_to_tuple($Match$_not_null(v)); 
+}
+
+tuple $Match$_to_opt_external(tuple v) inline {
+    var loaded = $Match$_to_opt_tuple(v);
+    if (null?(loaded)) {
+        return null();
+    } else {
+        return (loaded);
+    }
+}
+
+((int, slice, slice, int, int, int, int, int)) $Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status(int $matchId, slice $player1, slice $player2, int $stake, int $p1Funded, int $p2Funded, int $firstDepositAt, int $status) inline {
+    return ($matchId, $player1, $player2, $stake, $p1Funded, $p2Funded, $firstDepositAt, $status);
+}
+
+;;
+;; Type: Skills2CryptoEscrowTON
+;;
+
+builder $Skills2CryptoEscrowTON$_store(builder build_0, (slice, int, slice, int, cell) v) inline {
+    var (v'owner, v'oraclePubkey, v'platformWallet, v'depositTimeoutSeconds, v'matches) = v;
+    build_0 = __tact_store_address(build_0, v'owner);
+    build_0 = build_0.store_uint(v'oraclePubkey, 256);
+    build_0 = __tact_store_address(build_0, v'platformWallet);
+    build_0 = build_0.store_uint(v'depositTimeoutSeconds, 32);
+    build_0 = build_0.store_dict(v'matches);
+    return build_0;
+}
+
+(slice, ((slice, int, slice, int, cell))) $Skills2CryptoEscrowTON$_load(slice sc_0) inline {
+    var v'owner = sc_0~__tact_load_address();
+    var v'oraclePubkey = sc_0~load_uint(256);
+    var v'platformWallet = sc_0~__tact_load_address();
+    var v'depositTimeoutSeconds = sc_0~load_uint(32);
+    var v'matches = sc_0~load_dict();
+    return (sc_0, (v'owner, v'oraclePubkey, v'platformWallet, v'depositTimeoutSeconds, v'matches));
+}
+
+(slice, ((int, slice, int))) $Skills2CryptoEscrowTON$init$_load(slice sc_0) inline {
+    var v'oraclePubkey = sc_0~load_int(257);
+    var v'platformWallet = sc_0~__tact_load_address();
+    var v'depositTimeoutSeconds = sc_0~load_int(257);
+    return (sc_0, (v'oraclePubkey, v'platformWallet, v'depositTimeoutSeconds));
+}
+
+(slice, int, slice, int, cell) $Skills2CryptoEscrowTON$_contract_load() impure inline_ref {
+    slice $sc = get_data().begin_parse();
+    __tact_context_sys = $sc~load_ref();
+    int $loaded = $sc~load_int(1);
+    if ($loaded) {
+        return $sc~$Skills2CryptoEscrowTON$_load();
+    } else {
+        ;; Allow only workchain deployments
+        throw_unless(137, my_address().preload_uint(11) == 1024);
+        (int $oraclePubkey, slice $platformWallet, int $depositTimeoutSeconds) = $sc~$Skills2CryptoEscrowTON$init$_load();
+        $sc.end_parse();
+        return $Skills2CryptoEscrowTON$_contract_init($oraclePubkey, $platformWallet, $depositTimeoutSeconds);
+    }
+}
+
+() $Skills2CryptoEscrowTON$_contract_store((slice, int, slice, int, cell) v) impure inline {
+    builder b = begin_cell();
+    b = b.store_ref(__tact_context_sys);
+    b = b.store_int(true, 1);
+    b = $Skills2CryptoEscrowTON$_store(b, v);
+    set_data(b.end_cell());
+}

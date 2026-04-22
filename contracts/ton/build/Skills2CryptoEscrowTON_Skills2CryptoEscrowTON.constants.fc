@@ -1,0 +1,24 @@
+;; Comment "Win payout"
+cell __gen_cell_comment_b232160ffd5341d3be1a36313aa3b1f87b7150ac4b3e83615f759dfcc4fb4b6f() asm """
+    B{b5ee9c7241010101001000001c0000000057696e207061796f7574334d1da2} B>boc PUSHREF
+""";
+
+;; Comment "Platform fee"
+cell __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383() asm """
+    B{b5ee9c7241010101001200002000000000506c6174666f726d2066656575ee76c0} B>boc PUSHREF
+""";
+
+;; Comment "Draw refund"
+cell __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2() asm """
+    B{b5ee9c7241010101001100001e000000004472617720726566756e6455279df0} B>boc PUSHREF
+""";
+
+;; Comment "Disconnect refund"
+cell __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292() asm """
+    B{b5ee9c7241010101001700002a00000000446973636f6e6e65637420726566756e64f3190529} B>boc PUSHREF
+""";
+
+;; Comment "No-show refund"
+cell __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634() asm """
+    B{b5ee9c72410101010014000024000000004e6f2d73686f7720726566756e648e495e14} B>boc PUSHREF
+""";

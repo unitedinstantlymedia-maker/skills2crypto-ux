@@ -1,0 +1,319 @@
+#pragma version =0.4.4;
+#pragma allow-post-modification;
+#pragma compute-asm-ltr;
+
+#include "Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.headers.fc";
+#include "Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.stdlib.fc";
+#include "Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.constants.fc";
+#include "Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.storage.fc";
+
+;;
+;; Contract Skills2CryptoEscrowTON functions
+;;
+
+(slice, int, slice, int, cell) $Skills2CryptoEscrowTON$_contract_init(int $oraclePubkey, slice $platformWallet, int $depositTimeoutSeconds) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = (null(), null(), null(), null(), null());
+    $self'owner = __tact_context_get_sender();
+    $self'oraclePubkey = $oraclePubkey;
+    $self'platformWallet = $platformWallet;
+    $self'depositTimeoutSeconds = $depositTimeoutSeconds;
+    $self'matches = null();
+    return ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches);
+}
+
+((slice, int, slice, int, cell), tuple) $Skills2CryptoEscrowTON$_fun_getMatch((slice, int, slice, int, cell) $self, int $matchId) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    var $fresh$ret_0 = $Match$_load_opt(__tact_dict_get_int_cell($self'matches, 257, $matchId));
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), $fresh$ret_0);
+}
+
+((slice, int, slice, int, cell), int) $Skills2CryptoEscrowTON$_fun_getOraclePubkey((slice, int, slice, int, cell) $self) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    var $fresh$ret_1 = $self'oraclePubkey;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), $fresh$ret_1);
+}
+
+((slice, int, slice, int, cell), slice) $Skills2CryptoEscrowTON$_fun_getPlatformWallet((slice, int, slice, int, cell) $self) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    var $fresh$ret_2 = $self'platformWallet;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), $fresh$ret_2);
+}
+
+((slice, int, slice, int, cell), int) $Skills2CryptoEscrowTON$_fun_getDepositTimeoutSeconds((slice, int, slice, int, cell) $self) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    var $fresh$ret_3 = $self'depositTimeoutSeconds;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), $fresh$ret_3);
+}
+
+((slice, int, slice, int, cell), ()) $Skills2CryptoEscrowTON$_fun_requireOwner((slice, int, slice, int, cell) $self) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    throw_unless(132, ( __tact_slice_eq_bits($self'owner, __tact_context_get_sender()) ));
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+((slice, int, slice, int, cell), slice) $Skills2CryptoEscrowTON$_fun_owner((slice, int, slice, int, cell) $self) impure inline_ref {
+    var (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)) = $self;
+    var $fresh$ret_4 = $self'owner;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), $fresh$ret_4);
+}
+
+;;
+;; Receivers of a Contract Skills2CryptoEscrowTON
+;;
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_Deposit((slice, int, slice, int, cell) $self, (int, slice, slice, int) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'matchId, $msg'player1, $msg'player2, $msg'stake) = $msg;
+    slice $player = __tact_context_get_sender();
+    throw_unless(60944, ( ~ __tact_slice_eq_bits($msg'player2, $msg'player1) ));
+    throw_unless(53900, ($msg'stake > 0));
+    throw_unless(43235, ( (( __tact_slice_eq_bits($msg'player1, $player) )) ? (true) : (( __tact_slice_eq_bits($msg'player2, $player) )) ));
+    throw_unless(35407, ($Context$_get_value(__tact_context_get()) >= ($msg'stake + 50000000)));
+    tuple $existing = $Match$_load_opt(__tact_dict_get_int_cell($self'matches, 257, $msg'matchId));
+    if (null?($existing)) {
+        $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell($Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status($msg'matchId, $msg'player1, $msg'player2, $msg'stake, ( __tact_slice_eq_bits($msg'player1, $player) ), ( __tact_slice_eq_bits($msg'player2, $player) ), $global_now(), 1)));
+    } else {
+        var ($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status) = $Match$_not_null($existing);
+        throw_unless(13594, ($m'status == 1));
+        throw_unless(3096, ( (( __tact_slice_eq_bits($msg'player1, $m'player1) )) ? (( __tact_slice_eq_bits($msg'player2, $m'player2) )) : (false) ));
+        throw_unless(11127, ($m'stake == $msg'stake));
+        if (( __tact_slice_eq_bits($m'player1, $player) )) {
+            throw_unless(41660, (~ $m'p1Funded));
+            $m'p1Funded = true;
+        } else {
+            throw_unless(54132, (~ $m'p2Funded));
+            $m'p2Funded = true;
+        }
+        if (( ($m'p1Funded) ? ($m'p2Funded) : (false) )) {
+            $m'status = 2;
+        }
+        $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
+    }
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_Settle((slice, int, slice, int, cell) $self, (int, slice, int, slice) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'matchId, $msg'winner, $msg'reason, $msg'signature) = $msg;
+    throw_unless(37431, ( (($msg'reason >= 0)) ? (($msg'reason <= 2)) : (false) ));
+    tuple $existing = $Match$_load_opt(__tact_dict_get_int_cell($self'matches, 257, $msg'matchId));
+    throw_unless(60384, (~ null?($existing)));
+    var ($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status) = $Match$_not_null($existing);
+    throw_unless(61530, ($m'status == 2));
+    cell $payload = $Builder$_fun_endCell(store_uint(__tact_store_address(store_uint($global_beginCell(), $msg'matchId, 256), $msg'winner), $msg'reason, 8));
+    throw_unless(46751, $global_checkSignature($Cell$_fun_hash($payload), $msg'signature, $self'oraclePubkey));
+    slice $player = __tact_context_get_sender();
+    if (($msg'reason == 0)) {
+        throw_unless(46500, ( (( __tact_slice_eq_bits($m'player1, $msg'winner) )) ? (true) : (( __tact_slice_eq_bits($m'player2, $msg'winner) )) ));
+        throw_unless(43564, ( __tact_slice_eq_bits($msg'winner, $player) ));
+    } else {
+        throw_unless(36718, ( (( __tact_slice_eq_bits($m'player1, $player) )) ? (true) : (( __tact_slice_eq_bits($m'player2, $player) )) ));
+    }
+    $m'status = 3;
+    $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
+    int $totalStake = ($m'stake * 2);
+    if (($msg'reason == 0)) {
+        int $platformFee = (($totalStake * 300) / 10000);
+        int $payout = ($totalStake - $platformFee);
+        $global_send($SendParameters$_constructor_to_value_mode_body($msg'winner, $payout, 1, __gen_cell_comment_b232160ffd5341d3be1a36313aa3b1f87b7150ac4b3e83615f759dfcc4fb4b6f()));
+        $global_send($SendParameters$_constructor_to_value_mode_body($self'platformWallet, $platformFee, 1, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
+    } elseif (($msg'reason == 1)) {
+        int $platformFee = (($totalStake * 300) / 10000);
+        int $halfFee = ($platformFee / 2);
+        int $refundPerPlayer = ($m'stake - $halfFee);
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $refundPerPlayer, 1, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $refundPerPlayer, 1, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
+        $global_send($SendParameters$_constructor_to_value_mode_body($self'platformWallet, $platformFee, 1, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
+    } else {
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $m'stake, 1, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $m'stake, 1, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
+    }
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_RefundNoShow((slice, int, slice, int, cell) $self, (int) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'matchId) = $msg;
+    tuple $existing = $Match$_load_opt(__tact_dict_get_int_cell($self'matches, 257, $msg'matchId));
+    throw_unless(60384, (~ null?($existing)));
+    var ($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status) = $Match$_not_null($existing);
+    throw_unless(7154, ($m'status == 1));
+    throw_unless(4134, ($global_now() > ($m'firstDepositAt + $self'depositTimeoutSeconds)));
+    slice $player = __tact_context_get_sender();
+    if (( ($m'p1Funded) ? ((~ $m'p2Funded)) : (false) )) {
+        throw_unless(1459, ( __tact_slice_eq_bits($m'player1, $player) ));
+        $m'status = 3;
+        $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $m'stake, 1, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
+    } elseif (( ($m'p2Funded) ? ((~ $m'p1Funded)) : (false) )) {
+        throw_unless(1459, ( __tact_slice_eq_bits($m'player2, $player) ));
+        $m'status = 3;
+        $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
+        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $m'stake, 1, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
+    } else {
+        throw_unless(57981, false);
+    }
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_SetOraclePubkey((slice, int, slice, int, cell) $self, (int) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'newPubkey) = $msg;
+    ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)~$Skills2CryptoEscrowTON$_fun_requireOwner();
+    $self'oraclePubkey = $msg'newPubkey;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_SetPlatformWallet((slice, int, slice, int, cell) $self, (slice) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'newWallet) = $msg;
+    ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)~$Skills2CryptoEscrowTON$_fun_requireOwner();
+    $self'platformWallet = $msg'newWallet;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_SetDepositTimeout((slice, int, slice, int, cell) $self, (int) $msg) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($msg'seconds) = $msg;
+    ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)~$Skills2CryptoEscrowTON$_fun_requireOwner();
+    $self'depositTimeoutSeconds = $msg'seconds;
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+(((slice, int, slice, int, cell)), ()) $Skills2CryptoEscrowTON$_internal_binary_Deploy((slice, int, slice, int, cell) $self, (int) $deploy) impure inline {
+    var ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches) = $self;
+    var ($deploy'queryId) = $deploy;
+    ($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches)~$Skills2CryptoEscrowTON$_fun_notify($DeployOk$_store_cell($DeployOk$_constructor_queryId($deploy'queryId)));
+    return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
+}
+
+;;
+;; Get methods of a Contract Skills2CryptoEscrowTON
+;;
+
+_ %getMatch(int $matchId) method_id(93003) {
+    int $matchId = $matchId;
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    var res = self~$Skills2CryptoEscrowTON$_fun_getMatch($matchId);
+    return $Match$_to_opt_external(res);
+}
+
+_ %getOraclePubkey() method_id(91032) {
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    var res = self~$Skills2CryptoEscrowTON$_fun_getOraclePubkey();
+    return res;
+}
+
+_ %getPlatformWallet() method_id(98077) {
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    var res = self~$Skills2CryptoEscrowTON$_fun_getPlatformWallet();
+    return res;
+}
+
+_ %getDepositTimeoutSeconds() method_id(76339) {
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    var res = self~$Skills2CryptoEscrowTON$_fun_getDepositTimeoutSeconds();
+    return res;
+}
+
+_ %owner() method_id(83229) {
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    var res = self~$Skills2CryptoEscrowTON$_fun_owner();
+    return res;
+}
+
+_ lazy_deployment_completed() method_id {
+    return get_data().begin_parse().load_int(1);
+}
+
+;;
+;; Routing of a Contract Skills2CryptoEscrowTON
+;;
+
+((slice, int, slice, int, cell), int) $Skills2CryptoEscrowTON$_contract_router_internal((slice, int, slice, int, cell) self, int msg_bounced, slice in_msg) impure inline_ref {
+    ;; Handle bounced messages
+    if (msg_bounced) {
+        return (self, true);
+    }
+    
+    ;; Parse incoming message
+    int op = 0;
+    if (slice_bits(in_msg) >= 32) {
+        op = in_msg.preload_uint(32);
+    }
+    
+    
+    ;; Receive Deposit message
+    if (op == 3442647289) {
+        var msg = in_msg~$Deposit$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_Deposit(msg);
+        return (self, true);
+    }
+    
+    ;; Receive Settle message
+    if (op == 3720944991) {
+        var msg = in_msg~$Settle$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_Settle(msg);
+        return (self, true);
+    }
+    
+    ;; Receive RefundNoShow message
+    if (op == 1490927691) {
+        var msg = in_msg~$RefundNoShow$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_RefundNoShow(msg);
+        return (self, true);
+    }
+    
+    ;; Receive SetOraclePubkey message
+    if (op == 1555336977) {
+        var msg = in_msg~$SetOraclePubkey$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_SetOraclePubkey(msg);
+        return (self, true);
+    }
+    
+    ;; Receive SetPlatformWallet message
+    if (op == 3203666596) {
+        var msg = in_msg~$SetPlatformWallet$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_SetPlatformWallet(msg);
+        return (self, true);
+    }
+    
+    ;; Receive SetDepositTimeout message
+    if (op == 4061189531) {
+        var msg = in_msg~$SetDepositTimeout$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_SetDepositTimeout(msg);
+        return (self, true);
+    }
+    
+    ;; Receive Deploy message
+    if (op == 2490013878) {
+        var msg = in_msg~$Deploy$_load();
+        self~$Skills2CryptoEscrowTON$_internal_binary_Deploy(msg);
+        return (self, true);
+    }
+    
+    return (self, false);
+}
+
+() recv_internal(int msg_value, cell in_msg_cell, slice in_msg) impure {
+    
+    ;; Context
+    var cs = in_msg_cell.begin_parse();
+    var msg_flags = cs~load_uint(4);
+    var msg_bounced = -(msg_flags & 1);
+    slice msg_sender_addr = __tact_verify_address(cs~load_msg_addr());
+    __tact_context = (msg_bounced, msg_sender_addr, msg_value, cs);
+    __tact_context_sender = msg_sender_addr;
+    
+    ;; Load contract data
+    var self = $Skills2CryptoEscrowTON$_contract_load();
+    
+    ;; Handle operation
+    int handled = self~$Skills2CryptoEscrowTON$_contract_router_internal(msg_bounced, in_msg);
+    
+    ;; Throw if not handled
+    throw_unless(130, handled);
+    
+    ;; Persist state
+    $Skills2CryptoEscrowTON$_contract_store(self);
+}
