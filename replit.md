@@ -408,7 +408,7 @@ npm run db:push     # Push database schema
 V2 constructor for BSC/ETH: `(platformWallet=0x7F8B…6832, oracle=0x2ad7…FCB8)` with EIP-712 `name="Skills2CryptoEscrow"`, `version="2"`. Deployer is the same wallet as the oracle. Deploy scripts: `scripts/deploy-bsc.cjs`, `scripts/deploy-eth.cjs`, `scripts/deploy-ton.mjs`, `contracts/tron/migrations/2_deploy_escrow.js`. Operator workflow documented in `contracts/DEPLOYMENT_GUIDE.md`.
 
 ### Deprecated V1 BSC Deployment (Apr 15, 2026 — superseded Apr 22, 2026)
-- The legacy V1 contract at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` (USDT-based oracle-broadcast model) is deprecated and no longer referenced from the runtime — `BSC_ESCROW_ADDRESS` and `VITE_BSC_ESCROW_ADDRESS` now point at the V2 address above.
+- The legacy V1 BSC contract (USDT-based oracle-broadcast model) is deprecated and no longer referenced from the runtime — `BSC_ESCROW_ADDRESS` and `VITE_BSC_ESCROW_ADDRESS` now point at the V2 address above.
 
 ### Real-Money Deposit & Settlement Pipeline (Apr 15, 2026)
 1. **Wallet addresses in matchmaking** - `findMatch` API now sends `walletAddress`; Redis `match:{id}` stores `addr1`/`addr2` alongside `p1`/`p2` (socket IDs)
@@ -424,7 +424,7 @@ V2 constructor for BSC/ETH: `(platformWallet=0x7F8B…6832, oracle=0x2ad7…FCB8
 3. **Deduplication guard** - Redis-based idempotency (`gameresult_lock:{matchId}`) prevents duplicate DB inserts and double-settlement when both players emit `game-end` for the same match. Only the first event triggers processing.
 4. **Startup diagnostics** - First `createEvmOracle()` call runs a one-time async diagnostic: verifies chain connection, oracle BNB balance, `getDomainSeparator()` call, and that on-chain oracle address matches the server wallet. Logs clear success/failure messages.
 5. **Client settlement clarified** - `EvmEscrowAdapter.settleMatch` calculates expected payout/fee locally for UI display but notes that actual settlement is handled server-side.
-6. **Contract validation note** - If the deployed contract at `0xa8a1481c0F26eA10410a9145A48935ED24d3D0f7` was deployed from an older Solidity source without `getDomainSeparator()` or `depositUSDTWithPermit()`, redeployment is required. The startup diagnostic will detect this and log a clear error.
+6. **Contract validation note** - If the (now-deprecated) V1 BSC contract was deployed from an older Solidity source without `getDomainSeparator()` or `depositUSDTWithPermit()`, redeployment is required. The startup diagnostic will detect this and log a clear error. (Superseded by V2 deploy on Apr 22, 2026 — see V2 Mainnet Addresses table above.)
 
 ### BSC USDT Removed — USDT Moves to Tron Only (Apr 16, 2026)
 1. **No USDT on BSC** — All BSC USDT (BEP-20) support removed from frontend, backend, and oracle. USDT is now exclusively a TRC-20 asset on the Tron network. EVM oracle on BSC handles only BNB native deposits.

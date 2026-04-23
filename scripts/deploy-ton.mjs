@@ -99,7 +99,7 @@ async function main() {
 
   const balance = await walletContract.getBalance();
   console.log("[deploy-ton] Deployer balance:", Number(balance) / 1e9, "TON");
-  if (balance < toNano("1")) {
+  if (balance < toNano("3")) {
     throw new Error(
       `Deployer balance ${Number(balance) / 1e9} TON is too low; fund ${deployerAddress} with ≥3 TON and re-run`
     );
