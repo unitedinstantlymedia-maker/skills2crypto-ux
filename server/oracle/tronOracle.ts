@@ -13,7 +13,7 @@
  *     (oracle pays TRX gas; players never broadcast TX). The contract takes
  *     a 0.5% gas-fund fee in USDT and auto-swaps to TRX above threshold.
  */
-import TronWeb from "tronweb";
+import { TronWeb } from "tronweb";
 import { ethers } from "ethers";
 
 const USDT_TRC20_DECIMALS = 6;
@@ -111,8 +111,10 @@ export function createTronOracle() {
 function build() {
   const cfg = resolveConfig();
   const privateKey = loadEnvOrThrow("ORACLE_PRIVATE_KEY").replace(/^0x/, "");
-  const tw = new (TronWeb as any)({ fullHost: cfg.fullHost, privateKey });
-  const oracleBase58: string = tw.address.fromPrivateKey(privateKey);
+  const tw = new TronWeb({ fullHost: cfg.fullHost, privateKey });
+  const derived = tw.address.fromPrivateKey(privateKey);
+  if (!derived) throw new Error("Failed to derive Tron address from ORACLE_PRIVATE_KEY");
+  const oracleBase58: string = derived;
   const escrowEvmHex = tronAddressToEvmHex(cfg.escrowBase58, tw);
 
   console.log(`[TronOracle] Oracle wallet: ${oracleBase58}`);

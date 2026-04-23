@@ -403,7 +403,7 @@ npm run db:push     # Push database schema
 | BSC | `0x379ADe242CC712EBA77c2149F4cC48dD4d2778e9` | LIVE — `Skills2CryptoEscrow` V2, deploy tx `0xa840a0a1e047bdc83c2c2d56675321aab7ee2a8c9491a88efca243557a59867b` |
 | Ethereum | `0x9F11DB204d7f7E8c805a67a0128898e65CF19b02` | LIVE — `Skills2CryptoEscrow` V2, deploy tx `0x33759151adbca385928d4c1449b915a31039ab7f291ea5330bfa05941cf80402` |
 | Tron | `TV4vtagjKzRL7AMEiEqgZUZeCmn6iC55Ho` | LIVE — `Skills2CryptoEscrowTron` V2 (hex `41d17f6fb200353dbbe59a35511522e10874f558ae`); oracle `TDsjBnqY84bkhgMCSRhWv8Ey3sCQc2r8Pi`; SunSwap router `TKzxdSv2FZKQrEqkKVgp5DcwEXBEKMg2Ax`; swap threshold 50 USDT |
-| TON | (pending) | not deployed yet |
+| TON | `EQCL2rrhPFu53S9KWWSoDWKcF_STP65YHki8FJdKNcQ6rImQ` | LIVE — `Skills2CryptoEscrowTON` V2; oracle Ed25519 pubkey `c5bdf6948e2eb3394d1b99bc61bd68ba9d3f2196ef6f4c0942cc65e49a11a719`; deposit timeout 3600s |
 
 V2 constructor for BSC/ETH: `(platformWallet=0x7F8B…6832, oracle=0x2ad7…FCB8)` with EIP-712 `name="Skills2CryptoEscrow"`, `version="2"`. Deployer is the same wallet as the oracle. Deploy scripts: `scripts/deploy-bsc.cjs`, `scripts/deploy-eth.cjs`, `scripts/deploy-ton.mjs`, `contracts/tron/migrations/2_deploy_escrow.js`. Operator workflow documented in `contracts/DEPLOYMENT_GUIDE.md`.
 

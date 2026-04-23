@@ -16,7 +16,7 @@
     "deploy:bsc": "hardhat run scripts/deploy-bsc.cjs --network bscMainnet",
     "deploy:eth": "hardhat run scripts/deploy-eth.cjs --network ethMainnet",
     "deploy:tron": "cd contracts/tron && npx --yes tronbox migrate --network mainnet --reset",
-    "deploy:ton": "node scripts/deploy-ton.mjs"
+    "deploy:ton": "tsx scripts/deploy-ton.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
