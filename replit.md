@@ -91,10 +91,12 @@ The repo can be deployed in two layouts:
      addresses.
    - **`script/build-client.ts`** / **`script/build-server.ts`** — split
      equivalents of the combined `script/build.ts`. The client build
-     post-processes `client/public/tonconnect-manifest.json` by
-     substituting the `__PUBLIC_URL__` token with the env-supplied
-     `PUBLIC_URL` so TonKeeper accepts the manifest.
+     writes `client/dist/tonconnect-manifest.json` directly from the
+     `PUBLIC_URL` env var (no static template file is checked in).
    - **`server/index.ts`** — `GET /healthz` returns `{status:"ok"}`.
+     Also serves `GET /tonconnect-manifest.json` dynamically from the
+     request's `X-Forwarded-Proto` / `X-Forwarded-Host` headers, so
+     monolith deploys (Replit / Railway) need no `PUBLIC_URL` env var.
    - **`client/src/core/wallet/useTonConnect.ts`** — TonConnect
      `manifestUrl` honors `VITE_PUBLIC_URL`, falling back to
      `window.location.origin` for local dev.
@@ -311,7 +313,7 @@ npm run db:push     # Push database schema
 3. **Balance via RPC** - Fetches native TON balance from `https://toncenter.com/api/v2/jsonRPC` using `getAddressBalance`
 4. **Address format** - Raw hex address from TonConnect converted to user-friendly format via `@ton/core` `Address.parseRaw()`
 5. **Balance polling** - 30-second interval refresh when connected
-6. **Manifest** - `client/public/tonconnect-manifest.json` for dApp metadata
+6. **Manifest** - Served dynamically by `GET /tonconnect-manifest.json` in `server/index.ts` from request headers (monolith), or generated at build time by `script/build-client.ts` from `PUBLIC_URL` (Netlify split deploy)
 7. **Asset type** - `Asset` type updated to `'USDT' | 'ETH' | 'BNB' | 'TON'` across client and server
 8. **WalletProvider** - TON state integrated: `isTonConnected`, `tonAddress`, `tonBalance`, `connectTonWallet`, `disconnectTonWallet`
 9. **WalletStore** - All balance records include TON (default 0)

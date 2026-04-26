@@ -5,11 +5,15 @@
 
 # Required env vars on Netlify (Site settings → Build & deploy → Environment):
 #   VITE_API_BASE   = https://your-railway-app.up.railway.app
-#   PUBLIC_URL      = https://your-netlify-site.netlify.app   (used at build for tonconnect manifest)
+#   PUBLIC_URL      = https://your-netlify-site.netlify.app
+#                       (build:client writes client/dist/tonconnect-manifest.json
+#                        from this URL; without it Tonkeeper will reject)
 #   VITE_PUBLIC_URL = https://your-netlify-site.netlify.app
 #   VITE_USE_MOCK_ESCROW = false
 #   VITE_FEE_ADDRESS     = 0xYourPlatformColdWallet
 # Plus the public-side WalletConnect / TonConnect / chain IDs your app expects.
+# (Replit / Railway monolith deploys do NOT need PUBLIC_URL — the manifest is
+# served dynamically by the Express route in server/index.ts.)
 
 [build.environment]
   NODE_VERSION = "20"

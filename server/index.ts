@@ -53,6 +53,25 @@ app.get("/healthz", (_req, res) => {
   res.status(200).json({ status: "ok", uptime: process.uptime() });
 });
 
+// =======================
+// TON CONNECT MANIFEST (dynamic — works on any domain, no env var needed)
+// Must be registered BEFORE Vite/static middleware so the static file in
+// client/public never shadows it.
+// =======================
+app.get("/tonconnect-manifest.json", (req, res) => {
+  const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim();
+  const forwardedHost = (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim();
+  const protocol = forwardedProto || req.protocol;
+  const host = forwardedHost || req.get("host") || "";
+  const origin = `${protocol}://${host}`;
+  res.set("Cache-Control", "no-store");
+  res.type("application/json").json({
+    url: origin,
+    name: "Skills2Crypto",
+    iconUrl: `${origin}/favicon.png`,
+  });
+});
+
 async function bootstrap() {
   // ROUTES
   await registerRoutes(httpServer, app, io);

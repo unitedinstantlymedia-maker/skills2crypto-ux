@@ -24,9 +24,9 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  // Build client using vite from client directory
-  const publicUrl = (process.env.PUBLIC_URL || process.env.VITE_PUBLIC_URL || "").replace(/\/+$/, "");
-  if (publicUrl) process.env.VITE_PUBLIC_URL = publicUrl;
+  // Build client using vite from client directory.
+  // Note: tonconnect-manifest.json is now served dynamically by the Express
+  // route in server/index.ts, so no PUBLIC_URL substitution is needed here.
   process.chdir("client");
   try {
     await viteBuild();
@@ -38,21 +38,6 @@ async function buildAll() {
   const { mkdir, rename } = await import("fs/promises");
   await mkdir("dist", { recursive: true });
   await rename("client/dist", "dist/public");
-
-  // Post-process tonconnect-manifest.json (no-op if PUBLIC_URL not set).
-  if (publicUrl) {
-    const { readFile, writeFile } = await import("fs/promises");
-    const manifestPath = "dist/public/tonconnect-manifest.json";
-    try {
-      const raw = await readFile(manifestPath, "utf-8");
-      await writeFile(manifestPath, raw.replace(/__PUBLIC_URL__/g, publicUrl), "utf-8");
-      console.log(`[build] tonconnect-manifest.json → ${publicUrl}`);
-    } catch (err: any) {
-      console.warn(`[build] could not post-process manifest: ${err?.message || err}`);
-    }
-  } else {
-    console.warn("[build] PUBLIC_URL not set — tonconnect-manifest.json keeps the __PUBLIC_URL__ placeholder.");
-  }
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
