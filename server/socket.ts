@@ -59,19 +59,37 @@ async function storeGameResult(
   reason: string
 ): Promise<{ result: GameResult; isFirst: boolean } | null> {
   // Final safety net: never persist a "disconnect forfeit" for a match
-  // that never actually started. The disconnect handler in this file
-  // already gates on `gameStartedMatches`, but if any future caller
-  // reaches storeGameResult with reason=disconnect for an un-started
-  // match (e.g. via a new code path), we want to drop it on the floor
-  // rather than write a misleading +stake/-stake row.
+  // where no real gameplay actually happened. We require BOTH conditions:
+  //
+  //   (a) The match must have been marked started (game-start emitted),
+  //       AND
+  //   (b) At least one authoritative gameplay action (chess-move /
+  //       tetris-state / checkers-move / battleship-attack) must have
+  //       landed on the server.
+  //
+  // (a) catches the never-started case the disconnect handler already
+  // gates on. (b) is the per-game-state evidence check: if the board
+  // rendered for both players but neither side ever moved before someone
+  // closed their tab, we still don't write a misleading +stake/-stake
+  // row — players can recover their stake through the contract's
+  // RefundNoShow / refund-on-no-progress paths instead.
   const isDisconnectReason =
     reason === "disconnect" || reason === "forfeit" || reason === "abandoned";
-  if (isDisconnectReason && !gameStartedMatches.has(matchId)) {
-    console.warn(
-      "[socket] storeGameResult: refusing to record disconnect for never-started match:",
-      matchId
-    );
-    return null;
+  if (isDisconnectReason) {
+    if (!gameStartedMatches.has(matchId)) {
+      console.warn(
+        "[socket] storeGameResult: refusing to record disconnect for never-started match:",
+        matchId
+      );
+      return null;
+    }
+    if (!gameMovesRecorded.has(matchId)) {
+      console.warn(
+        "[socket] storeGameResult: refusing to record disconnect for match with zero recorded gameplay actions:",
+        matchId
+      );
+      return null;
+    }
   }
 
   const dedupKey = `gameresult_lock:${matchId}`;
@@ -415,6 +433,16 @@ const fundedMatches = new Set<string>();
 // bogus +stake/-stake history rows for never-played TON matches whose
 // `getMatch` reader was broken).
 const gameStartedMatches = new Set<string>();
+
+// Tracks matches where at least one authoritative gameplay action has
+// landed on the server (chess-move, tetris-state, checkers-move,
+// battleship-attack). This is the strongest possible "real game in
+// progress" signal — stronger than `gameStartedMatches`, which only means
+// "we sent game-start to the client". Used as the final safety net in
+// `storeGameResult` so we can never persist a +stake/-stake row for a
+// match where no move was ever played.
+const gameMovesRecorded = new Set<string>();
+
 let ioRef: SocketIOServer | null = null;
 
 export function isMatchFunded(matchId: string): boolean {
@@ -423,6 +451,10 @@ export function isMatchFunded(matchId: string): boolean {
 
 function markGameStarted(matchId: string): void {
   gameStartedMatches.add(matchId);
+}
+
+function markGameplayActivity(matchId: string): void {
+  gameMovesRecorded.add(matchId);
 }
 
 /**
@@ -691,7 +723,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     socket.on("chess-move", (move: ChessMove) => {
       const { matchId, from, to, promotion, fen, san, whiteTime, blackTime } = move;
-      
+
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== matchId) {
         console.log("[socket] chess-move rejected - unauthorized socket");
@@ -709,6 +741,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         console.log("[socket] chess-move rejected - player not in room");
         return;
       }
+
+      // Mark gameplay activity ONLY after socket/room/player auth has
+      // passed, so a forged event from an unauthorized socket can't
+      // pollute the disconnect-safety-net set.
+      markGameplayActivity(matchId);
 
       console.log("[socket] chess-move", matchId, from, to, san, "by", player.color);
       
@@ -902,6 +939,17 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) return;
 
+      // Require the sender to actually be in the tetris room for this
+      // match before counting this as authoritative gameplay activity.
+      // Without this check, any socket that joined `tetris:<matchId>`
+      // (or otherwise spoofed `socketToPlayer`) could pollute the
+      // disconnect-safety-net set by sending fake state updates.
+      const room = tetrisRooms.get(data.matchId);
+      if (!room || !room.players.has(socketInfo.playerId)) return;
+
+      // Mark gameplay activity ONLY after socket + room-membership auth has passed.
+      markGameplayActivity(data.matchId);
+
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-state', {
         board: data.board,
         score: data.score,
@@ -1026,6 +1074,9 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         console.log("[socket] checkers-move rejected - player not in room");
         return;
       }
+
+      // Mark gameplay activity ONLY after socket/room/player auth has passed.
+      markGameplayActivity(data.matchId);
 
       console.log("[socket] checkers-move", data.matchId, data.from, data.to, "by", player.color, "turnEnded:", data.turnEnded);
 
@@ -1264,6 +1315,9 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         console.log("[socket] battleship-attack rejected - out of bounds");
         return;
       }
+
+      // Mark gameplay activity ONLY after socket/room/turn/bounds auth has passed.
+      markGameplayActivity(data.matchId);
 
       let attackerHistory = room.attackHistory.get(socketInfo.playerId);
       if (!attackerHistory) {

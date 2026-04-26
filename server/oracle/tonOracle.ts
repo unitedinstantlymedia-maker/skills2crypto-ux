@@ -282,7 +282,12 @@ function build() {
         );
       }
 
-      const items = outer.items as unknown as any[];
+      // `parseStackEntry` returns inner tuple items as raw values
+      // (bigint / Cell / Slice / Array) — they do NOT have the `.type`
+      // discriminator that `TupleItem` carries at the top level. So we
+      // narrow each slot ourselves with explicit `typeof` guards instead
+      // of using `TupleReader`.
+      const items: unknown[] = outer.items;
       if (items.length < 8) {
         throw new TonOracleError(
           `getMatch tuple has ${items.length} items, expected 8`,
@@ -290,12 +295,30 @@ function build() {
         );
       }
 
-      const stake = items[3] as bigint;
-      const p1Funded = (items[4] as bigint) !== 0n;
-      const p2Funded = (items[5] as bigint) !== 0n;
-      const status = Number(items[7] as bigint);
+      const stakeRaw = items[3];
+      const p1FundedRaw = items[4];
+      const p2FundedRaw = items[5];
+      const statusRaw = items[7];
 
-      return { status, p1Funded, p2Funded, stakeNano: stake.toString() };
+      if (
+        typeof stakeRaw !== "bigint" ||
+        typeof p1FundedRaw !== "bigint" ||
+        typeof p2FundedRaw !== "bigint" ||
+        typeof statusRaw !== "bigint"
+      ) {
+        throw new TonOracleError(
+          `getMatch tuple shape mismatch: stake=${typeof stakeRaw}, p1Funded=${typeof p1FundedRaw}, p2Funded=${typeof p2FundedRaw}, status=${typeof statusRaw}`,
+          "BAD_STACK_SHAPE"
+        );
+      }
+
+      // TVM booleans are encoded as -1n (true) / 0n (false).
+      return {
+        status: Number(statusRaw),
+        p1Funded: p1FundedRaw !== 0n,
+        p2Funded: p2FundedRaw !== 0n,
+        stakeNano: stakeRaw.toString(),
+      };
     } catch (e: any) {
       const msg = String(e?.message || e);
       if (msg.includes("exit_code") || msg.includes("not found") || msg.includes("revert")) {

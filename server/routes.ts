@@ -1206,30 +1206,117 @@ export async function registerRoutes(
 
   /**
    * POST /api/ton/notify-deposit
-   * Body: { matchId, txInfo?, playerAddress? }
+   * Body: { matchId, txInfo?, playerAddress }
    *
-   * Log-only breadcrumb fired by the client right after `tc.sendTransaction`
-   * resolves. Useful for forensic correlation between client wallet activity
-   * and the server-side `/api/ton/match-status` poller, but does NOT itself
-   * release the gameplay gate.
+   * Defence-in-depth gameplay-gate fallback fired by the client right
+   * after `tc.sendTransaction` resolves. When BOTH match participants
+   * have independently notified for the same matchId we fire
+   * `markMatchFunded` and emit `match-funded` regardless of whether the
+   * `/api/ton/match-status` on-chain poller has confirmed yet. This way
+   * a future regression in the toncenter `getMatch` reader can't strand
+   * a paid-up game on the "waiting for on-chain confirmation" screen.
    *
-   * Why not act on it?  The notification is unauthenticated — `playerAddress`
-   * is a self-asserted string with no cryptographic proof that the caller
-   * controls that wallet. Acting on it would let any party who knew
-   * `{matchId, addr1, addr2}` force a `match-funded` emission and start
-   * gameplay before funds were actually escrowed. The on-chain
-   * `/api/ton/match-status` poller (which now reads the contract correctly
-   * after the `getMatchOnChain` tuple-decoding fix) is the only authoritative
-   * trigger for `markMatchFunded`.
+   * SECURITY: `playerAddress` is required and must equal `match.addr1`
+   * or `match.addr2` after canonical-form (raw `0:hex`) normalization.
+   * We track the two slots independently in Redis so a single attacker
+   * cannot force `match-funded` by POSTing twice with arbitrary values.
+   * Note that the address itself is still self-asserted — anyone who
+   * knew BOTH `addr1` and `addr2` and the matchId could in principle
+   * forge two notifications. This breadcrumb only releases the off-chain
+   * gameplay gate; actual settlement requires real on-chain funds (the
+   * oracle refuses to sign a settle for a contract Match that isn't
+   * ACTIVE on-chain), so the worst-case impact of a forged emission is
+   * a chess game that can never be paid out. A future task will add a
+   * TonConnect proof-of-ownership signature here so the path can be
+   * promoted to fully trusted.
    */
   app.post("/api/ton/notify-deposit", async (req, res) => {
     const { matchId, txInfo, playerAddress } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
     }
+    if (!playerAddress || typeof playerAddress !== "string") {
+      return res.status(400).json({ error: "playerAddress is required" });
+    }
     console.log(
-      `[ton/notify-deposit] match=${matchId} player=${typeof playerAddress === "string" ? playerAddress : "?"} txInfo=${JSON.stringify(txInfo || {})}`,
+      `[ton/notify-deposit] match=${matchId} player=${playerAddress} txInfo=${JSON.stringify(txInfo || {})}`,
     );
+
+    try {
+      const matchData = await redis.hgetall(`match:${matchId}`);
+      if (!matchData || String(matchData.asset || "") !== "TON") {
+        return res.json({ ok: true });
+      }
+      const addr1 = String(matchData.addr1 || "");
+      const addr2 = String(matchData.addr2 || "");
+      if (!addr1 || !addr2) {
+        return res.json({ ok: true });
+      }
+
+      // Normalize all three addresses to raw form so friendly vs raw vs
+      // bounceable-vs-non-bounceable encodings all compare equal.
+      const { Address } = await import("@ton/core");
+      let notifierRaw: string;
+      let addr1Raw: string;
+      let addr2Raw: string;
+      try {
+        notifierRaw = Address.parse(playerAddress).toRawString();
+        addr1Raw = Address.parse(addr1).toRawString();
+        addr2Raw = Address.parse(addr2).toRawString();
+      } catch {
+        return res.status(400).json({ error: "Malformed TON address" });
+      }
+
+      let slot: "p1" | "p2";
+      if (notifierRaw === addr1Raw) {
+        slot = "p1";
+      } else if (notifierRaw === addr2Raw) {
+        slot = "p2";
+      } else {
+        console.warn(
+          `[ton/notify-deposit] rejected non-participant ${playerAddress} for match ${matchId}`,
+        );
+        return res.status(403).json({ error: "Not a participant in this match" });
+      }
+
+      // Per-slot flags (and a SET of normalized addrs so the "count" is
+      // explicitly two distinct participants, never the same one twice).
+      const slotKey = `ton_notify_slot:${matchId}:${slot}`;
+      await redis.set(slotKey, "1", { ex: 60 * 60 });
+      const setKey = `ton_notify_count:${matchId}`;
+      await redis.sadd(setKey, notifierRaw);
+      await redis.expire(setKey, 60 * 60);
+
+      const otherKey = `ton_notify_slot:${matchId}:${slot === "p1" ? "p2" : "p1"}`;
+      const otherSet = await redis.get(otherKey);
+      if (!otherSet) {
+        return res.json({ ok: true, waitingForOther: true });
+      }
+
+      const fundedKey = `ton_funded_emitted:${matchId}`;
+      const first = await redis.set(fundedKey, "1", { ex: 60 * 60 * 24, nx: true });
+      if (first) {
+        try {
+          const { markMatchFunded } = await import("./socket");
+          markMatchFunded(matchId);
+          io.to(`match:${matchId}`).emit("match-funded", {
+            matchId,
+            chain: "TON",
+            player1: addr1,
+            player2: addr2,
+          });
+          console.log(
+            `[ton/notify-deposit] match-funded emitted via notify fallback for ${matchId}`,
+          );
+        } catch (e: any) {
+          console.error("[ton/notify-deposit] failed to emit match-funded:", e?.message || e);
+        }
+      }
+    } catch (e: any) {
+      // Defensive: never let breadcrumb bookkeeping fail the client request.
+      console.error("[ton/notify-deposit] bookkeeping error:", e?.message || e);
+    }
+
     return res.json({ ok: true });
   });
 
