@@ -233,6 +233,33 @@ function build() {
 
   /**
    * Read the on-chain Match struct via getMatch get-method.
+   *
+   * NOTE: We can't use the auto-generated `Skills2CryptoEscrowTON.getGetMatch`
+   * wrapper here, and we can't use `TupleReader.readTupleOpt()` followed by
+   * `readBigNumber()`/`readAddress()` either. There is an asymmetry in
+   * `@ton/ton`'s `parseStack`:
+   *
+   *   - Top-level stack items are `TupleItem` objects with a `.type`
+   *     discriminator (`{type: "int", value: bigint}`, `{type: "tuple", items: [...]}`)
+   *   - But items INSIDE a `tuple` (parsed via `parseStackEntry`) come back
+   *     as **raw values**: `bigint` for numbers, `Cell` for cells/slices,
+   *     `Array` for nested tuples — no `.type` field at all.
+   *
+   * `TupleReader.readBigNumber()` checks `popped.type !== "int"` and throws
+   * `"Not a number"` against those raw values. The Tact-generated
+   * `loadTupleMatch` does exactly that, so calling `getGetMatch` from the
+   * wrapper hits the same trap. Fix: pop the outer tuple item ourselves and
+   * decode the raw inner array directly.
+   *
+   * Match field order from `loadTupleMatch`:
+   *   0: matchId (bigint, 256-bit)
+   *   1: player1 (Cell — slice cell containing an Address)
+   *   2: player2 (Cell — slice cell containing an Address)
+   *   3: stake   (bigint, nanoton)
+   *   4: p1Funded (bigint — TVM bool: -1n = true, 0n = false)
+   *   5: p2Funded (bigint — TVM bool)
+   *   6: firstDepositAt (bigint, uint32)
+   *   7: status (bigint, uint8: 0 none / 1 pending / 2 active / 3 settled / 4 cancelled)
    */
   async function getMatchOnChain(matchId: string): Promise<{
     status: number;
@@ -245,17 +272,29 @@ function build() {
       const result = await client.runMethod(escrowAddress, "getMatch", [
         { type: "int", value: matchIdHash },
       ]);
-      const tuple = result.stack.readTupleOpt();
-      if (!tuple) return null;
-      // Field order: matchId(uint256), p1, p2, stake, p1Funded, p2Funded, firstDepositAt, status
-      tuple.readBigNumber();
-      tuple.readAddress();
-      tuple.readAddress();
-      const stake = tuple.readBigNumber();
-      const p1Funded = tuple.readBoolean();
-      const p2Funded = tuple.readBoolean();
-      tuple.readBigNumber(); // firstDepositAt
-      const status = Number(tuple.readBigNumber());
+
+      const outer = result.stack.pop();
+      if (!outer || outer.type === "null") return null;
+      if (outer.type !== "tuple") {
+        throw new TonOracleError(
+          `getMatch returned unexpected stack type "${outer.type}"`,
+          "BAD_STACK_SHAPE"
+        );
+      }
+
+      const items = outer.items as unknown as any[];
+      if (items.length < 8) {
+        throw new TonOracleError(
+          `getMatch tuple has ${items.length} items, expected 8`,
+          "BAD_STACK_SHAPE"
+        );
+      }
+
+      const stake = items[3] as bigint;
+      const p1Funded = (items[4] as bigint) !== 0n;
+      const p2Funded = (items[5] as bigint) !== 0n;
+      const status = Number(items[7] as bigint);
+
       return { status, p1Funded, p2Funded, stakeNano: stake.toString() };
     } catch (e: any) {
       const msg = String(e?.message || e);

@@ -1206,16 +1206,30 @@ export async function registerRoutes(
 
   /**
    * POST /api/ton/notify-deposit
-   * Optional client breadcrumb so server logs can correlate the player's
-   * TonConnect tx boc with the matchId. Polling /api/ton/match-status is
-   * the source of truth — this endpoint is purely informational.
+   * Body: { matchId, txInfo?, playerAddress? }
+   *
+   * Log-only breadcrumb fired by the client right after `tc.sendTransaction`
+   * resolves. Useful for forensic correlation between client wallet activity
+   * and the server-side `/api/ton/match-status` poller, but does NOT itself
+   * release the gameplay gate.
+   *
+   * Why not act on it?  The notification is unauthenticated — `playerAddress`
+   * is a self-asserted string with no cryptographic proof that the caller
+   * controls that wallet. Acting on it would let any party who knew
+   * `{matchId, addr1, addr2}` force a `match-funded` emission and start
+   * gameplay before funds were actually escrowed. The on-chain
+   * `/api/ton/match-status` poller (which now reads the contract correctly
+   * after the `getMatchOnChain` tuple-decoding fix) is the only authoritative
+   * trigger for `markMatchFunded`.
    */
   app.post("/api/ton/notify-deposit", async (req, res) => {
-    const { matchId, txInfo } = req.body ?? {};
+    const { matchId, txInfo, playerAddress } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
     }
-    console.log(`[ton/notify-deposit] match=${matchId} txInfo=${JSON.stringify(txInfo || {})}`);
+    console.log(
+      `[ton/notify-deposit] match=${matchId} player=${typeof playerAddress === "string" ? playerAddress : "?"} txInfo=${JSON.stringify(txInfo || {})}`,
+    );
     return res.json({ ok: true });
   });
 

@@ -58,6 +58,22 @@ async function storeGameResult(
   loserId: string | null,
   reason: string
 ): Promise<{ result: GameResult; isFirst: boolean } | null> {
+  // Final safety net: never persist a "disconnect forfeit" for a match
+  // that never actually started. The disconnect handler in this file
+  // already gates on `gameStartedMatches`, but if any future caller
+  // reaches storeGameResult with reason=disconnect for an un-started
+  // match (e.g. via a new code path), we want to drop it on the floor
+  // rather than write a misleading +stake/-stake row.
+  const isDisconnectReason =
+    reason === "disconnect" || reason === "forfeit" || reason === "abandoned";
+  if (isDisconnectReason && !gameStartedMatches.has(matchId)) {
+    console.warn(
+      "[socket] storeGameResult: refusing to record disconnect for never-started match:",
+      matchId
+    );
+    return null;
+  }
+
   const dedupKey = `gameresult_lock:${matchId}`;
   const isFirst = await redis.set(dedupKey, "1", { ex: 7200, nx: true });
   if (!isFirst) {
@@ -152,6 +168,11 @@ async function storeGameResult(
         timestamp,
       });
       console.log("[socket] match saved to database:", matchId);
+
+      // Match has fully resolved — drop it from the per-process tracking
+      // sets so they don't leak across the lifetime of the server.
+      gameStartedMatches.delete(matchId);
+      fundedMatches.delete(matchId);
 
       settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
         console.error("[socket] on-chain settlement failed:", matchId, err?.message || err);
@@ -385,10 +406,23 @@ const battleshipRooms = new Map<string, BattleshipRoom>();
 // (i.e. the contract emitted MatchActive). Game-start events are gated on
 // this set so gameplay never begins before crypto is locked.
 const fundedMatches = new Set<string>();
+
+// Tracks matches where gameplay has actually started — i.e. both players
+// joined the per-game room AND the funding gate released, so we emitted
+// `game-start` / `tetris-game-start` / etc. The disconnect handler is
+// gated on this set so a player who closes their tab BEFORE the board
+// renders can never be flagged as a forfeit (which previously produced
+// bogus +stake/-stake history rows for never-played TON matches whose
+// `getMatch` reader was broken).
+const gameStartedMatches = new Set<string>();
 let ioRef: SocketIOServer | null = null;
 
 export function isMatchFunded(matchId: string): boolean {
   return fundedMatches.has(matchId);
+}
+
+function markGameStarted(matchId: string): void {
+  gameStartedMatches.add(matchId);
 }
 
 /**
@@ -410,6 +444,7 @@ export function markMatchFunded(matchId: string): void {
       whiteTime: chess.whiteTime,
       blackTime: chess.blackTime,
     });
+    markGameStarted(matchId);
     console.log("[socket] game-start (post-funding)", matchId);
   }
 
@@ -417,6 +452,7 @@ export function markMatchFunded(matchId: string): void {
   if (tetris && tetris.players.size === 2 && !tetris.started) {
     tetris.started = true;
     io.to(`tetris:${matchId}`).emit('tetris-game-start');
+    markGameStarted(matchId);
     console.log("[socket] tetris-game-start (post-funding)", matchId);
   }
 
@@ -424,6 +460,7 @@ export function markMatchFunded(matchId: string): void {
   if (checkers && checkers.players.size === 2 && !checkers.started) {
     checkers.started = true;
     io.to(`checkers:${matchId}`).emit('checkers-game-start');
+    markGameStarted(matchId);
     console.log("[socket] checkers-game-start (post-funding)", matchId);
   }
 
@@ -431,6 +468,7 @@ export function markMatchFunded(matchId: string): void {
   if (battleship && battleship.players.size === 2 && !battleship.started) {
     battleship.started = true;
     io.to(`battleship:${matchId}`).emit('battleship-game-start');
+    markGameStarted(matchId);
     console.log("[socket] battleship-game-start (post-funding)", matchId);
   }
 }
@@ -569,6 +607,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
             whiteTime: room.whiteTime,
             blackTime: room.blackTime
           });
+          markGameStarted(matchId);
           console.log("[socket] game-start", matchId);
         } else {
           console.log("[socket] game-start gated on funding", matchId);
@@ -647,6 +686,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       // Tear down any half-built game room so a stale player can't enter.
       matchRooms.delete(matchId);
       fundedMatches.delete(matchId);
+      gameStartedMatches.delete(matchId);
     });
 
     socket.on("chess-move", (move: ChessMove) => {
@@ -843,6 +883,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         if (fundedMatches.has(matchId)) {
           room.started = true;
           io.to(`tetris:${matchId}`).emit('tetris-game-start');
+          markGameStarted(matchId);
           console.log("[socket] tetris-game-start", matchId);
         } else {
           console.log("[socket] tetris-game-start gated on funding", matchId);
@@ -953,6 +994,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         if (fundedMatches.has(matchId)) {
           room.started = true;
           io.to(`checkers:${matchId}`).emit('checkers-game-start');
+          markGameStarted(matchId);
           console.log("[socket] checkers-game-start", matchId);
         } else {
           console.log("[socket] checkers-game-start gated on funding", matchId);
@@ -1132,6 +1174,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         if (fundedMatches.has(matchId)) {
           room.started = true;
           io.to(`battleship:${matchId}`).emit('battleship-game-start');
+          markGameStarted(matchId);
           console.log("[socket] battleship-game-start", matchId);
         } else {
           console.log("[socket] battleship-game-start gated on funding", matchId);
@@ -1326,26 +1369,62 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     socket.on("disconnect", () => {
       console.log("[socket] disconnected", socket.id);
       const socketInfo = socketToPlayer.get(socket.id);
-      
+
       if (socketInfo) {
         const { matchId, playerId } = socketInfo;
-        
+
         const timeout = setTimeout(() => {
           const currentSocketId = playerToSocket.get(playerId);
           if (currentSocketId && currentSocketId !== socket.id) {
             console.log("[socket] player has reconnected, skipping forfeit:", playerId);
             return;
           }
-          
+
           pendingDisconnects.delete(playerId);
           playerToSocket.delete(playerId);
-          
+
+          // CRITICAL: only forfeit / settle a match if gameplay actually
+          // started. Without this gate, a player who closed their tab
+          // while still on the "waiting for on-chain confirmation" screen
+          // would be flagged as a forfeiter — which previously produced
+          // bogus +stake/-stake history rows for never-played TON matches
+          // whose `getMatch` reader was broken. For never-started matches
+          // we just clean the rooms and notify the lobby; on-chain refunds
+          // are handled separately via the contract's RefundNoShow path,
+          // which either player can trigger from their wallet once the
+          // contract's deposit-timeout window elapses.
+          const started = gameStartedMatches.has(matchId);
+          if (!started) {
+            const hadAnyRoom =
+              matchRooms.has(matchId) ||
+              tetrisRooms.has(matchId) ||
+              checkersRooms.has(matchId) ||
+              battleshipRooms.has(matchId);
+            matchRooms.delete(matchId);
+            tetrisRooms.delete(matchId);
+            checkersRooms.delete(matchId);
+            battleshipRooms.delete(matchId);
+            // Also clear funded/started bookkeeping so these sets do not
+            // grow unbounded over the process lifetime when matches are
+            // abandoned before play.
+            fundedMatches.delete(matchId);
+            gameStartedMatches.delete(matchId);
+            if (hadAnyRoom) {
+              console.log("[socket] disconnect on never-started match — emitting match-cancelled, no forfeit:", matchId);
+              io.to(`match:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+              io.to(`tetris:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+              io.to(`checkers:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+              io.to(`battleship:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+            }
+            return;
+          }
+
           const chessRoom = matchRooms.get(matchId);
           if (chessRoom) {
             const player = chessRoom.players.get(playerId);
             if (player) {
               const winnerId = Array.from(chessRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
-              
+
               if (winnerId) {
                 storeGameResult(matchId, 'chess', winnerId, playerId, 'disconnect');
                 io.to(`match:${matchId}`).emit('opponent-disconnected', { forfeit: true });
@@ -1359,7 +1438,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               matchRooms.delete(matchId);
             }
           }
-          
+
           const tetrisRoom = tetrisRooms.get(matchId);
           if (tetrisRoom) {
             const winnerId = Array.from(tetrisRoom.players.keys()).find(id => id !== playerId);
@@ -1375,7 +1454,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
             }
             tetrisRooms.delete(matchId);
           }
-          
+
           const checkersRoom = checkersRooms.get(matchId);
           if (checkersRoom) {
             const player = checkersRoom.players.get(playerId);
@@ -1394,7 +1473,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               checkersRooms.delete(matchId);
             }
           }
-          
+
           const battleshipRoom = battleshipRooms.get(matchId);
           if (battleshipRoom && battleshipRoom.battlePhase) {
             const player = battleshipRoom.players.get(playerId);
@@ -1414,10 +1493,10 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
             }
           }
         }, 30000);
-        
+
         pendingDisconnects.set(playerId, timeout);
       }
-      
+
       socketToPlayer.delete(socket.id);
     });
   });

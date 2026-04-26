@@ -55,12 +55,12 @@ async function fetchSettleAuth(matchId: string): Promise<TonSettleAuth | null> {
   return data as TonSettleAuth;
 }
 
-async function notifyDeposit(matchId: string, txInfo: any): Promise<void> {
+async function notifyDeposit(matchId: string, txInfo: any, playerAddress: string | null): Promise<void> {
   try {
     await fetch(apiUrl("/api/ton/notify-deposit"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matchId, txInfo }),
+      body: JSON.stringify({ matchId, txInfo, playerAddress }),
     });
   } catch (e) {
     console.warn("[TonEscrow] notify-deposit failed (non-fatal):", e);
@@ -124,7 +124,8 @@ export class TonEscrowAdapter {
           },
         ],
       });
-      await notifyDeposit(matchId, { boc: result?.boc || null });
+      const playerAddress: string | null = tc.account?.address || null;
+      await notifyDeposit(matchId, { boc: result?.boc || null }, playerAddress);
     } catch (e: any) {
       console.error("[TonEscrow] sendTransaction failed:", e?.message || e);
       return false;
