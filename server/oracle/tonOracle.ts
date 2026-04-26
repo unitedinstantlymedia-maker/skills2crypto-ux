@@ -8,14 +8,27 @@
  *   - Reads on-chain match state via get-methods.
  *
  * Ed25519 keypair is derived from TON_ORACLE_MNEMONIC (24 words).
+ *
+ * Message bodies (Deposit / Settle / RefundNoShow) are built using the
+ * Tact-generated `store…` helpers in
+ * `contracts/ton/build/Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.ts`.
+ * Those helpers carry the correct 32-bit opcodes (SHA-256 of the TLB type
+ * signature, NOT crc32 of the message name) and the correct field layout
+ * for each message — in particular `Settle.signature` is `^slice` (a ref
+ * cell), not an inline slice. Hand-rolling those bytes is what caused the
+ * deployed contract to bounce every Deposit / Settle in V2 task #16.
  */
 import { createHash } from "node:crypto";
 import { TonClient } from "@ton/ton";
 import { mnemonicToPrivateKey } from "@ton/crypto";
-import { Address, beginCell, toNano, fromNano, Cell, Builder } from "@ton/core";
+import { Address, beginCell, toNano, fromNano, Cell } from "@ton/core";
 import type { KeyPair } from "@ton/crypto";
 import nacl from "tweetnacl";
-import { crc32 } from "./tonCrc32";
+import {
+  storeDeposit,
+  storeSettle,
+  storeRefundNoShow,
+} from "../../contracts/ton/build/Skills2CryptoEscrowTON_Skills2CryptoEscrowTON";
 
 export class TonOracleError extends Error {
   public readonly code: string;
@@ -111,14 +124,6 @@ function build() {
     })();
   }
 
-  // Tact opcodes are 32-bit hashes of the message name. We pre-compute via
-  // crc32 so we don't need to import the Tact-generated TS wrappers.
-  const OP = {
-    Deposit: crc32("Deposit"),
-    Settle: crc32("Settle"),
-    RefundNoShow: crc32("RefundNoShow"),
-  } as const;
-
   /**
    * Build the Deposit message body cell that the player attaches to their
    * TonConnect transaction. The contract handles match creation on first
@@ -135,19 +140,24 @@ function build() {
     const p2 = Address.parse(params.player2Friendly);
     const stakeNano = toNano(params.stakeTon.toString());
     const cell = beginCell()
-      .storeUint(OP.Deposit, 32)
-      .storeUint(matchIdHash, 256)
-      .storeAddress(p1)
-      .storeAddress(p2)
-      .storeCoins(stakeNano)
+      .store(
+        storeDeposit({
+          $$type: "Deposit",
+          matchId: matchIdHash,
+          player1: p1,
+          player2: p2,
+          stake: stakeNano,
+        })
+      )
       .endCell();
     return cell.toBoc().toString("base64");
   }
 
   /**
    * Sign the (matchId, winner, reason) outcome with the oracle's Ed25519
-   * key. Returns the BOC payload (Settle message body, signature embedded)
-   * and the signature alone — clients send the BOC via TonConnect.
+   * key. Returns the BOC payload (Settle message body, signature embedded
+   * as a ref cell) and the signature alone — clients send the BOC via
+   * TonConnect.
    */
   async function signMatchOutcome(params: {
     matchId: string;
@@ -165,6 +175,10 @@ function build() {
           Address.parseRaw("0:0000000000000000000000000000000000000000000000000000000000000000");
 
     // Build the cell hash that the contract will hash itself in checkSignature.
+    // This MUST match the contract's payload construction in
+    // `receive(msg: Settle)` exactly: matchId(uint256) | winner(address) |
+    // reason(uint8). The .hash() of this cell is what is signed off-chain
+    // and what the contract's checkSignature() will recompute.
     const payloadCell: Cell = beginCell()
       .storeUint(matchIdHash, 256)
       .storeAddress(winnerAddr)
@@ -175,17 +189,25 @@ function build() {
     const key = await ensureKey();
     const signature = nacl.sign.detached(messageHash, key.secretKey);
 
-    // Wrap into the Settle message body that the player will send.
-    // The Tact contract declares `signature: Slice` as the LAST field, which
-    // means the 64 raw signature bytes are stored inline in the message body
-    // (Tact reads `Slice` as "consume the rest of the slice"). Wrapping in a
-    // ref cell would mismatch the ABI and fail signature verification.
-    const settleBody = beginCell()
-      .storeUint(OP.Settle, 32)
-      .storeUint(matchIdHash, 256)
-      .storeAddress(winnerAddr)
-      .storeUint(params.reason, 8)
+    // The Tact contract declares `signature: Slice` on the Settle message,
+    // which the Tact compiler serialises as `^slice` (a referenced cell).
+    // Wrap the 64 raw signature bytes in a fresh cell, expose it as a
+    // Slice, and let storeSettle() emit the correct ref-cell layout.
+    const signatureSlice = beginCell()
       .storeBuffer(Buffer.from(signature))
+      .endCell()
+      .asSlice();
+
+    const settleBody = beginCell()
+      .store(
+        storeSettle({
+          $$type: "Settle",
+          matchId: matchIdHash,
+          winner: winnerAddr,
+          reason: BigInt(params.reason),
+          signature: signatureSlice,
+        })
+      )
       .endCell();
 
     return {
@@ -198,8 +220,12 @@ function build() {
   function encodeRefundNoShowPayload(matchId: string): string {
     const matchIdHash = matchIdToBigInt(matchId);
     return beginCell()
-      .storeUint(OP.RefundNoShow, 32)
-      .storeUint(matchIdHash, 256)
+      .store(
+        storeRefundNoShow({
+          $$type: "RefundNoShow",
+          matchId: matchIdHash,
+        })
+      )
       .endCell()
       .toBoc()
       .toString("base64");

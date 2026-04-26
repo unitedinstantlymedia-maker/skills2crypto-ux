@@ -41,7 +41,16 @@ context on how we got here. The authoritative current model is:
   `submitSettlement`, `estimateApproveTrxCost` (live energy estimate via
   `triggerConstantContract`).
 - `server/oracle/tonOracle.ts` — `signMatchOutcome` (Ed25519); no
-  on-chain submit.
+  on-chain submit. Deposit / Settle / RefundNoShow message bodies are
+  built using the auto-generated Tact wrapper at
+  `contracts/ton/build/Skills2CryptoEscrowTON_Skills2CryptoEscrowTON.ts`
+  so opcodes (Deposit `0xCD32A0F9`, Settle `0xDDC91D5F`, RefundNoShow
+  `0x58DDC04B`) and the `Settle.signature: ^slice` ref-cell layout stay
+  in sync with the deployed contract. The previous hand-rolled
+  `crc32(name)` opcode derivation in `server/oracle/tonCrc32.ts` was
+  wrong (Tact uses SHA-256 of the TLB type signature, not crc32 of the
+  name) and caused every on-chain Deposit / Settle to bounce; that file
+  is gone.
 - `server/socket.ts → settleMatchOnChain` — for EVM/TON: signs and
   persists `settle_auth:${matchId}` in Redis, emits `settle-ready` to
   the match room. For Tron: calls `submitSettlement` directly.
@@ -505,8 +514,10 @@ different VM (TVM) and curve (Ed25519) than the EVM/Tron stack.
 - Derives an Ed25519 keypair from `TON_ORACLE_MNEMONIC` (24 words) into a
   `WalletContractV4`. Independent of the EVM/Tron oracle.
 - Builds Tact message bodies (`PrepareMatch`, `PlayerDeposit`,
-  `Settle`, `CancelMatch`) with explicit opcodes hashed via
-  `server/oracle/tonCrc32.ts` — keeps the server free of generated wrappers.
+  `Settle`, `CancelMatch`) with explicit opcodes. (Historical: this used
+  to derive opcodes via `server/oracle/tonCrc32.ts`, which was wrong —
+  Task #26 replaced that with imports from the auto-generated Tact
+  wrapper and the crc32 helper file is removed.)
 - `prepareMatch / submitSettlement / cancelMatch / getMatchOnChain /
   encodePlayerDepositPayload`. Match IDs are sha256 → uint256 (TVM-friendly;
   doesn't need to match EVM's keccak256 since the contracts are separate).
