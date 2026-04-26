@@ -190,6 +190,7 @@ async function storeGameResult(
       // Match has fully resolved — drop it from the per-process tracking
       // sets so they don't leak across the lifetime of the server.
       gameStartedMatches.delete(matchId);
+      gameMovesRecorded.delete(matchId);
       fundedMatches.delete(matchId);
 
       settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
@@ -719,6 +720,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(matchId);
       fundedMatches.delete(matchId);
       gameStartedMatches.delete(matchId);
+      gameMovesRecorded.delete(matchId);
     });
 
     socket.on("chess-move", (move: ChessMove) => {
@@ -1463,6 +1465,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
             // abandoned before play.
             fundedMatches.delete(matchId);
             gameStartedMatches.delete(matchId);
+            gameMovesRecorded.delete(matchId);
             if (hadAnyRoom) {
               console.log("[socket] disconnect on never-started match — emitting match-cancelled, no forfeit:", matchId);
               io.to(`match:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
