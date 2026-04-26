@@ -590,6 +590,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         clearTimeout(pendingTimeout);
         pendingDisconnects.delete(playerId);
         console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        // Notify the surviving opponent that the absent player came back so
+        // their pending-disconnect banner can clear. socket.to() excludes the
+        // reconnecting socket itself; that player learns from their own
+        // socket.io 'connect' event.
+        socket.to(`match:${matchId}`).emit('opponent-reconnected', { matchId });
       }
 
       let room = matchRooms.get(matchId);
@@ -1428,6 +1433,19 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       if (socketInfo) {
         const { matchId, playerId } = socketInfo;
+
+        // Tell the surviving opponent immediately that this player's socket
+        // dropped, with the grace deadline so the client can render a live
+        // "forfeit in 0:30" countdown. We emit to all four game rooms because
+        // the disconnect handler does not know which game type this match is
+        // for; only the room with live subscribers will actually receive it.
+        // The disconnecting socket has already left its rooms at this point,
+        // so this never echoes back to the player who dropped.
+        const graceUntilMs = Date.now() + 30000;
+        io.to(`match:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
+        io.to(`tetris:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
+        io.to(`checkers:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
+        io.to(`battleship:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
 
         const timeout = setTimeout(() => {
           const currentSocketId = playerToSocket.get(playerId);
