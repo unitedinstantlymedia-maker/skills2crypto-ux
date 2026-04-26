@@ -1,8 +1,0 @@
-uploads = []
-generated = []
-
-[[outputs]]
-id = "rM7Tc7fKR8Na4eG7iicFp"
-uri = "file://contracts/DEPLOYMENT_GUIDE.md"
-type = "text"
-title = "Deployment & Testing Guide"
