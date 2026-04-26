@@ -9,6 +9,7 @@
  *
  * Ed25519 keypair is derived from TON_ORACLE_MNEMONIC (24 words).
  */
+import { createHash } from "node:crypto";
 import { TonClient } from "@ton/ton";
 import { mnemonicToPrivateKey } from "@ton/crypto";
 import { Address, beginCell, toNano, fromNano, Cell, Builder } from "@ton/core";
@@ -57,7 +58,6 @@ export function createTonOracle() {
 
 function matchIdToBigInt(matchId: string): bigint {
   // Hash the nanoid match ID to a uint256 so it fits the contract's Int slot.
-  const { createHash } = require("crypto");
   const h = createHash("sha256").update(matchId).digest();
   let n = 0n;
   for (const b of h) n = (n << 8n) | BigInt(b);
