@@ -40,7 +40,7 @@ interface TonDepositInfo {
 }
 
 interface TonMatchStatus {
-  status: number; // 0 none, 1 pending, 2 active, 3 settled
+  status: number; // 0 none, 1 pending, 2 active, 3 settled, 4 cancelled
   p1Funded: boolean;
   p2Funded: boolean;
 }
