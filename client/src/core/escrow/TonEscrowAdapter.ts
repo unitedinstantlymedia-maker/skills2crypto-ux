@@ -5,6 +5,32 @@ import { apiUrl } from "@/lib/api";
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 100;
 
+// Module-level in-flight cache so a duplicate `lockFunds(matchId)` call —
+// e.g. React StrictMode double-invocation, or both the HTTP `matched`
+// response and a follow-up `match-found` socket event for the same match
+// — returns the same Promise instead of triggering a second TonConnect
+// `sendTransaction`. The wallet would otherwise show two prompts (or
+// reject one of them as a duplicate), which surfaced as "Transaction was
+// not sent" SDK errors that prematurely cancelled funded matches.
+const inFlightDeposits: Map<string, Promise<boolean>> = new Map();
+
+// TonConnect's `UserRejectsError` is the ONLY error class that proves the
+// user actively dismissed the wallet prompt. Every other error
+// (TonConnectUIError "Transaction was not sent", network timeouts,
+// disconnect) is just a generic SDK failure — the on-chain transaction
+// may STILL land seconds later. Treating those as immediate cancellation
+// is what stranded confirmed deposits as orphans in the escrow contract.
+function isUserRejection(e: unknown): boolean {
+  const name = (e as any)?.name || (e as any)?.constructor?.name || "";
+  if (name === "UserRejectsError") return true;
+  const msg = (e as any)?.message || String(e ?? "");
+  // Defensive: minified bundles can mangle the class name; also match the
+  // SDK's documented error text. We deliberately do NOT match the generic
+  // "Transaction was not sent" text — that is the ambiguous SDK timeout
+  // we want to keep polling through.
+  return /\buser\s*reject/i.test(msg);
+}
+
 interface TonDepositInfo {
   matchId: string;
   escrowAddress: string;
@@ -98,6 +124,40 @@ export class TonEscrowAdapter {
       console.warn(`[TonEscrow] lockFunds called for non-TON asset ${asset} — ignoring`);
       return false;
     }
+    // Single-shot guard: a duplicate call for the same matchId returns the
+    // existing in-flight promise so the wallet is only prompted once.
+    const existing = inFlightDeposits.get(matchId);
+    if (existing) {
+      console.log(`[TonEscrow] lockFunds(${matchId}) already in-flight — reusing existing promise`);
+      return existing;
+    }
+    const promise = this._lockFundsImpl(matchId);
+    inFlightDeposits.set(matchId, promise);
+    promise.finally(() => {
+      // Clear after completion so a new match with a fresh matchId can
+      // acquire its own slot. Same matchId never re-runs (matchIds are
+      // single-use), but keeping the cache key lifecycle tidy is cheap.
+      inFlightDeposits.delete(matchId);
+    });
+    return promise;
+  }
+
+  /**
+   * Real deposit pipeline. Two-phase: (1) prompt the wallet via
+   * TonConnect, (2) poll the on-chain match status until it reaches
+   * Active (both players funded) or the funding window expires.
+   *
+   * Crucially, a thrown error from `tc.sendTransaction` does NOT
+   * automatically fail the deposit — only an explicit user rejection
+   * does. Generic SDK errors (timeouts, "Transaction was not sent",
+   * bridge disconnects) are noisy but do not prove the on-chain TX
+   * didn't land. We fall through to on-chain status polling and let the
+   * chain be the source of truth, which is how V2 worked before the
+   * regression. This prevents the case where the user really did
+   * confirm in TonKeeper, the deposit landed seconds later, but we'd
+   * already cancelled the match and orphaned their TON in the contract.
+   */
+  private async _lockFundsImpl(matchId: string): Promise<boolean> {
     const tc = (window as any).__TON_CONNECT_UI__;
     if (!tc || !tc.connected) {
       console.error("[TonEscrow] TonConnect not connected");
@@ -112,6 +172,7 @@ export class TonEscrowAdapter {
       return false;
     }
 
+    let sendThrew = false;
     try {
       console.log(`[TonEscrow] Prompting TonConnect: ${Number(info.amountNano) / 1e9} TON → ${info.escrowAddress}`);
       const result = await tc.sendTransaction({
@@ -127,16 +188,40 @@ export class TonEscrowAdapter {
       const playerAddress: string | null = tc.account?.address || null;
       await notifyDeposit(matchId, { boc: result?.boc || null }, playerAddress);
     } catch (e: any) {
-      console.error("[TonEscrow] sendTransaction failed:", e?.message || e);
-      return false;
+      if (isUserRejection(e)) {
+        // Explicit user rejection — fail fast so the lobby reverts and
+        // both sides are released cleanly within seconds.
+        console.warn(`[TonEscrow] sendTransaction rejected by user — failing deposit immediately`);
+        return false;
+      }
+      // Generic SDK failure. The on-chain TX may have been signed and
+      // broadcast anyway; do NOT cancel the match. Fall through to the
+      // patient polling loop — if the TX really didn't land, the loop
+      // will time out and return false, at which point the parent
+      // emits deposit-failed.
+      sendThrew = true;
+      console.warn(
+        `[TonEscrow] sendTransaction errored (${e?.name || "unknown"}: ${e?.message || e}) — not cancelling; will wait for on-chain confirmation`
+      );
     }
 
     for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
       try {
         const s = await fetchMatchStatus(matchId);
-        if (s.status === 2) return true;
+        // Contract status enum: 0 none / 1 pending / 2 active / 3 settled / 4 cancelled.
+        if (s.status === 2) {
+          if (sendThrew) {
+            console.log(`[TonEscrow] match ${matchId} reached Active despite SDK throw — deposit landed on-chain`);
+          }
+          return true;
+        }
         if (s.status === 3) {
           console.warn(`[TonEscrow] match ${matchId} already settled`);
+          return false;
+        }
+        if (s.status === 4) {
+          // Terminal cancelled state — no point waiting the full 5min.
+          console.warn(`[TonEscrow] match ${matchId} cancelled on-chain — exiting poll`);
           return false;
         }
       } catch (e: any) {
