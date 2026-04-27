@@ -6,6 +6,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import { Link } from "wouter";
 import { useState, useEffect, useRef } from "react";
 import { useGame } from "@/context/GameContext";
+import { useRealWallet } from "@/core/wallet/WalletProvider";
 import { Asset, Game } from "@/core/types";
 import { useToast } from "@/hooks/use-toast";
 import { apiUrl, socketUrl } from "@/lib/api";
@@ -27,6 +28,7 @@ export default function Challenge() {
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
   const { state, actions } = useGame();
+  const realWallet = useRealWallet();
   const { toast } = useToast();
   
   const [challengeData, setChallengeData] = useState<ChallengeData | null>(null);
@@ -114,6 +116,37 @@ export default function Challenge() {
       return;
     }
 
+    // Accepter ID MUST match the challenge's asset chain — the server
+    // writes this verbatim into the match's `addr2` and every downstream
+    // deposit / oracle call relies on its shape. `state.wallet.address`
+    // is whichever wallet was connected last, so we deliberately pick
+    // the per-chain address from the realWallet store instead.
+    const accepterId =
+      challengeData.asset === 'BNB' || challengeData.asset === 'ETH'
+        ? realWallet.evmAddress || ''
+        : challengeData.asset === 'USDT'
+        ? realWallet.tronAddress || ''
+        : challengeData.asset === 'TON'
+        ? realWallet.tonAddress || ''
+        : '';
+    if (!accepterId) {
+      const walletName =
+        challengeData.asset === 'BNB' || challengeData.asset === 'ETH'
+          ? 'MetaMask / EVM'
+          : challengeData.asset === 'USDT'
+          ? 'TronLink'
+          : 'TON';
+      toast({
+        title: t("Wrong wallet for asset", "Wrong wallet for asset"),
+        description: t(
+          `This challenge is for ${challengeData.asset}. Connect a ${walletName} wallet to accept it.`,
+          `This challenge is for ${challengeData.asset}. Connect a ${walletName} wallet to accept it.`
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsAccepting(true);
 
     try {
@@ -122,7 +155,7 @@ export default function Challenge() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           challengeId: challengeData.challengeId,
-          accepterId: state.wallet.address,
+          accepterId,
           accepterSocketId: socketRef.current.id
         })
       });

@@ -218,11 +218,43 @@ export default function Lobby() {
 
     if (isChallengeMode) {
        try {
+         // Challenger ID MUST match the chosen asset's chain — the server
+         // writes this verbatim into the match's `addr1` and every
+         // downstream deposit / oracle call relies on its shape. Picking
+         // by the connected-wallet preference order (evm > tron > ton)
+         // would cause e.g. a USDT challenge created from an EVM-only
+         // browser to fail at deposit time on the friend's device.
          const challengerId =
-           realWallet.evmAddress ||
-           realWallet.tronAddress ||
-           realWallet.tonAddress ||
-           playerName.trim();
+           state.selectedAsset === 'BNB' || state.selectedAsset === 'ETH'
+             ? realWallet.evmAddress || ''
+             : state.selectedAsset === 'USDT'
+             ? realWallet.tronAddress || ''
+             : state.selectedAsset === 'TON'
+             ? realWallet.tonAddress || ''
+             : '';
+         if (!challengerId) {
+           toast({
+             title: t("Wrong wallet for asset", "Wrong wallet for asset"),
+             description: t(
+               `Connect a ${
+                 state.selectedAsset === 'BNB' || state.selectedAsset === 'ETH'
+                   ? 'MetaMask / EVM'
+                   : state.selectedAsset === 'USDT'
+                   ? 'TronLink'
+                   : 'TON'
+               } wallet to create a ${state.selectedAsset} challenge.`,
+               `Connect a ${
+                 state.selectedAsset === 'BNB' || state.selectedAsset === 'ETH'
+                   ? 'MetaMask / EVM'
+                   : state.selectedAsset === 'USDT'
+                   ? 'TronLink'
+                   : 'TON'
+               } wallet to create a ${state.selectedAsset} challenge.`
+             ),
+             variant: "destructive",
+           });
+           return;
+         }
          const resp = await fetch(apiUrl('/api/create-challenge'), {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },

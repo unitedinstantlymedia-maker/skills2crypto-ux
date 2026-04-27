@@ -210,6 +210,38 @@ export async function registerRoutes(
       return res.status(400).json({ error: "Challenger ID required" });
     }
 
+    // Per-asset wallet format validation. Mirrors /api/find-match L66-83
+    // because `challengerId` IS the wallet address that will be written
+    // into the eventual match's `addr1`. If the challenger sends an
+    // EVM-shaped address while the asset is USDT (Tron) or TON, every
+    // downstream deposit/oracle call would fail with a confusing
+    // "wrong-shape" error several screens later. Catch it here.
+    {
+      const a = String(challengerId);
+      let okShape = false;
+      if (asset === "BNB" || asset === "ETH") {
+        okShape = /^0x[0-9a-fA-F]{40}$/.test(a);
+      } else if (asset === "USDT") {
+        okShape = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
+      } else {
+        // TON — accept any non-empty string; the TON adapter will validate
+        // the friendly/raw form when building the deposit BOC.
+        okShape = a.length > 0;
+      }
+      if (!okShape) {
+        return res.status(400).json({
+          error: "wallet_shape_mismatch",
+          message: `The connected wallet does not match the chosen asset (${asset}). Connect a ${
+            asset === "BNB" || asset === "ETH"
+              ? "MetaMask / EVM"
+              : asset === "USDT"
+              ? "TronLink"
+              : "TON"
+          } wallet and try again.`,
+        });
+      }
+    }
+
     // System-address guard for the challenge flow.
     //
     // The client passes its EVM/Tron/TON wallet address as `challengerId`
@@ -312,21 +344,74 @@ export async function registerRoutes(
     if (!challengeId || !accepterId || !accepterSocketId) {
       return res.status(400).json({ error: "Missing required fields" });
     }
-    
+
+    // Atomic accept lock — without this, two players who click the same
+    // share link within milliseconds of each other would BOTH pass the
+    // `status === "pending"` check below (since the read-then-write is
+    // not atomic) and BOTH spawn a match for the challenge, with the
+    // last writer's matchId silently winning the stored challenge state.
+    // SETNX with a short TTL guarantees only one accept request enters
+    // the critical section per challenge. The lock auto-expires so a
+    // crashed or slow request can't block legitimate retries forever.
+    const lockKey = `challenge_accept_lock:${challengeId}`;
+    const gotLock = await redis.set(lockKey, accepterId, { nx: true, ex: 30 });
+    if (!gotLock) {
+      return res.status(409).json({
+        error: "challenge_accept_in_progress",
+        message:
+          "Someone else is already accepting this challenge. Please try a different match.",
+      });
+    }
+
     const data = await redis.get(`challenge:${challengeId}`);
-    
+
     if (!data) {
+      await redis.del(lockKey);
       return res.status(404).json({ error: "Challenge not found or expired" });
     }
     
     const challenge: ChallengeData = typeof data === "string" ? JSON.parse(data) : data;
     
     if (challenge.status !== "pending") {
+      await redis.del(lockKey);
       return res.status(400).json({ error: "Challenge already accepted" });
     }
     
     if (challenge.challengerId === accepterId) {
+      await redis.del(lockKey);
       return res.status(400).json({ error: "Cannot accept your own challenge" });
+    }
+
+    // Per-asset wallet format validation for the accepter. Same rationale
+    // as in /api/create-challenge: `accepterId` will be written as
+    // `addr2` on the match and used by every downstream deposit/oracle
+    // call. The challenger's address was validated when the challenge
+    // was created, so we only need to re-check the accepter here.
+    {
+      const a = String(accepterId);
+      let okShape = false;
+      if (challenge.asset === "BNB" || challenge.asset === "ETH") {
+        okShape = /^0x[0-9a-fA-F]{40}$/.test(a);
+      } else if (challenge.asset === "USDT") {
+        okShape = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
+      } else {
+        okShape = a.length > 0;
+      }
+      if (!okShape) {
+        await redis.del(lockKey);
+        return res.status(400).json({
+          error: "wallet_shape_mismatch",
+          message: `Your connected wallet does not match this challenge's asset (${
+            challenge.asset
+          }). Connect a ${
+            challenge.asset === "BNB" || challenge.asset === "ETH"
+              ? "MetaMask / EVM"
+              : challenge.asset === "USDT"
+              ? "TronLink"
+              : "TON"
+          } wallet and try again.`,
+        });
+      }
     }
 
     // System-address guard for the challenge accept path. We check BOTH the
@@ -337,6 +422,7 @@ export async function registerRoutes(
     {
       const accepterCheck = await checkSystemAddress(challenge.asset, String(accepterId));
       if (!accepterCheck.ok) {
+        await redis.del(lockKey);
         console.warn(
           `[security] /api/accept-challenge rejected forbidden accepter ${accepterId} for ${challenge.asset} (${accepterCheck.reason})`
         );
@@ -352,6 +438,7 @@ export async function registerRoutes(
         String(challenge.challengerId)
       );
       if (!challengerCheck.ok) {
+        await redis.del(lockKey);
         console.warn(
           `[security] /api/accept-challenge rejected — stored challenger ${challenge.challengerId} is a forbidden system address for ${challenge.asset} (${challengerCheck.reason})`
         );
@@ -378,6 +465,18 @@ export async function registerRoutes(
     
     await addChallengeHistory(challengeId, "accepted", "challenge_accepted");
     
+    // V2: every deposit / oracle-auth / settlement endpoint reads the
+    // players' wallet addresses from `addr1` / `addr2` (see
+    // /api/oracle/match-auth, /api/oracle/sign-deposit-permit,
+    // /api/ton/deposit-info, /api/ton/notify-deposit, and the queue path
+    // in matchmaking/redisMatchmaking.ts L73-74). The challenge flow
+    // previously only wrote `p1`/`p2` (which the queue uses for socket
+    // ids), so challenge matches could never actually be funded — every
+    // deposit attempt failed with "Match missing wallet addresses".
+    // Both `challengerId` and `accepterId` ARE the wallet addresses (set
+    // by the client in Lobby.tsx and Challenge.tsx), already validated
+    // for shape and against the system-address blacklist above, so we
+    // store them verbatim here exactly as the queue path does.
     const matchData = {
       matchId,
       game: challenge.game,
@@ -387,6 +486,8 @@ export async function registerRoutes(
       player2Id: accepterId,
       p1: challenge.challengerId,
       p2: accepterId,
+      addr1: challenge.challengerId,
+      addr2: accepterId,
       challengeId,
       status: "waiting_for_players"
     };
@@ -410,7 +511,13 @@ export async function registerRoutes(
         accepterName: accepterName || "Unknown"
       });
     }
-    
+
+    // Release the accept lock — challenge.status is now "accepted" in
+    // Redis, so the status check above will reject any future accept
+    // even with the lock gone. Releasing now keeps the lock from
+    // sitting on a dead key for the rest of its 30s TTL.
+    await redis.del(lockKey);
+
     return res.status(200).json({
       matchId,
       game: challenge.game,
