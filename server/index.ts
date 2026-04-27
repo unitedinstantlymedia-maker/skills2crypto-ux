@@ -7,6 +7,7 @@ import { setupVite } from "./vite";
 import { setupSocket, markMatchFunded } from "./socket";
 import { startChallengeCleanup } from "./matchmaking/challengeCleanup";
 import { redis } from "./redis";
+import { initSystemAddresses } from "./security/systemAddresses";
 
 async function resolveAppMatchId(matchIdBytes32: string): Promise<string | null> {
   try {
@@ -73,6 +74,15 @@ app.get("/tonconnect-manifest.json", (req, res) => {
 });
 
 async function bootstrap() {
+  // Pre-load the system-address blacklist (oracle / deployer / platform
+  // wallets per chain) so the matchmaking guard rejects them on the very
+  // first request instead of waiting for the lazy init to complete.
+  // Failure here is non-fatal — the module is fail-open and the warning
+  // is already logged inside.
+  await initSystemAddresses().catch((err) => {
+    console.warn(`[startup] initSystemAddresses failed (continuing): ${err?.message || err}`);
+  });
+
   // ROUTES
   await registerRoutes(httpServer, app, io);
 

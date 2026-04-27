@@ -283,6 +283,21 @@ function build() {
     if (params.player1Base58 === params.player2Base58) {
       throw new TronOracleError("Players cannot share an address", "INVALID_INPUT");
     }
+    // Defense-in-depth: refuse to issue deposit auth for the platform's own
+    // infrastructure addresses (oracle / platform wallet). The matchmaking
+    // layer (server/security/systemAddresses.ts via /api/find-match) is the
+    // primary guard; this is a backstop. `null` means the registry has not
+    // yet initialised — fail open so a cold-start race can't deadlock.
+    const { isForbiddenTronAddressSync } = await import("../security/systemAddresses");
+    if (
+      isForbiddenTronAddressSync(params.player1Base58) === true ||
+      isForbiddenTronAddressSync(params.player2Base58) === true
+    ) {
+      throw new TronOracleError(
+        "Refusing to issue deposit auth: one of the players is a platform infrastructure wallet",
+        "FORBIDDEN_PLAYER"
+      );
+    }
     if (!Number.isFinite(params.stakeUsdt) || params.stakeUsdt <= 0) {
       throw new TronOracleError("stake must be > 0", "INVALID_INPUT");
     }

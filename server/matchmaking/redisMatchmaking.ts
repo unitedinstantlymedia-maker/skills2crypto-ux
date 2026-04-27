@@ -1,6 +1,7 @@
 import { redis } from "../redis";
 import { nanoid } from "nanoid";
 import type { Game, Asset, MatchFound } from "../core/types";
+import { walletAddressesEqual } from "../security/systemAddresses";
 
 type FindMatchArgs = {
   game: Game;
@@ -41,7 +42,20 @@ export async function findOrCreateMatch(
   if (opponentRaw) {
     const opponent = decodeQueueMember(opponentRaw);
 
-    if (opponent.socketId === socketId) {
+    // Refuse to pair the requester with themselves. Two ways this can
+    // happen:
+    //   1. Same socket id (legacy reconnect / duplicate request).
+    //   2. Different socket ids but the same wallet address — e.g. the
+    //      same wallet connected from two browsers/devices. The on-chain
+    //      contract would later reject this with `require(player1 != player2)`,
+    //      but only AFTER both deposits, wasting gas. Catch it here.
+    const sameSocket = opponent.socketId === socketId;
+    const sameWallet =
+      !!walletAddress &&
+      !!opponent.walletAddress &&
+      (await walletAddressesEqual(asset, opponent.walletAddress, walletAddress));
+
+    if (sameSocket || sameWallet) {
       await redis.zadd(key, { score: Date.now(), member: opponentRaw });
       await redis.expire(key, 60 * 5);
       opponentRaw = null;

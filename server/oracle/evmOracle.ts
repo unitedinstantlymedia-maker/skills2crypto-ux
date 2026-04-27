@@ -197,6 +197,21 @@ function buildOracle(chain: EvmChain) {
     if (params.player1.toLowerCase() === params.player2.toLowerCase()) {
       throw new EvmOracleError("player1 and player2 cannot be the same", "INVALID_INPUT");
     }
+    // Defense-in-depth: even if a system address slipped past the
+    // matchmaking-layer guard (server/security/systemAddresses.ts), refuse
+    // to issue oracle-signed deposit authorisation for it. `null` means
+    // the registry has not yet initialised — fail open in that case so a
+    // cold-start race can't deadlock matches; the matchmaking layer is the
+    // primary defence.
+    const { isForbiddenEvmAddressSync } = await import("../security/systemAddresses");
+    const p1Forbidden = isForbiddenEvmAddressSync(params.player1);
+    const p2Forbidden = isForbiddenEvmAddressSync(params.player2);
+    if (p1Forbidden === true || p2Forbidden === true) {
+      throw new EvmOracleError(
+        "Refusing to sign MatchAuth: one of the players is a platform infrastructure wallet",
+        "FORBIDDEN_PLAYER"
+      );
+    }
     if (params.stake <= 0n) throw new EvmOracleError("stake must be positive", "INVALID_INPUT");
     if (!Number.isFinite(params.deadline) || params.deadline <= Math.floor(Date.now() / 1000)) {
       throw new EvmOracleError("deadline must be a future unix timestamp", "INVALID_INPUT");

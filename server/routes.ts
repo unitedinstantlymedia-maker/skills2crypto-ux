@@ -3,6 +3,7 @@ import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
 import { eq, or, desc } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
+import { checkSystemAddress } from "./security/systemAddresses";
 import type { Game, Asset } from "./core/types";
 import { db } from "./db";
 import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
@@ -78,6 +79,24 @@ export async function registerRoutes(
     if (!cleanWallet) {
       return res.status(400).json({
         error: `Wallet address required for asset ${asset} (BNB/ETH need EVM, USDT needs Tron base58, TON needs TON address)`,
+      });
+    }
+
+    // Block the platform's own infrastructure wallets (oracle / deployer /
+    // platform/cold wallet) from ever entering matchmaking. See
+    // server/security/systemAddresses.ts for the full rationale: this stops
+    // both insider mistakes (operator imports the oracle key into MetaMask
+    // and clicks Find Match) and external griefing attacks (anyone who
+    // scrapes BscScan can see the oracle's public address and use it to
+    // claim a queue slot they can never sign for, locking the matched real
+    // player's deposit until the 15-min auth deadline expires).
+    const sysCheck = await checkSystemAddress(asset, cleanWallet);
+    if (!sysCheck.ok) {
+      console.warn(`[find-match] Rejected system-address wallet ${cleanWallet} (asset=${asset}, socket=${socketId})`);
+      return res.status(403).json({
+        error: sysCheck.reason,
+        message:
+          "This wallet address is reserved for platform infrastructure (oracle / deployer / platform wallet). Please connect a different wallet.",
       });
     }
 
@@ -190,7 +209,30 @@ export async function registerRoutes(
     if (!challengerId) {
       return res.status(400).json({ error: "Challenger ID required" });
     }
-    
+
+    // System-address guard for the challenge flow.
+    //
+    // The client passes its EVM/Tron/TON wallet address as `challengerId`
+    // (see Lobby.tsx — `realWallet.evmAddress || .tronAddress || .tonAddress`).
+    // /api/find-match has the same guard; mirroring it here is required
+    // because challenges are a *separate* entry point into matchmaking and
+    // would otherwise allow the very same DoS / self-match-against-oracle
+    // accident the blacklist exists to prevent.
+    {
+      const sysCheck = await checkSystemAddress(asset, String(challengerId));
+      if (!sysCheck.ok) {
+        console.warn(
+          `[security] /api/create-challenge rejected forbidden challenger ${challengerId} for ${asset} (${sysCheck.reason})`
+        );
+        return res.status(403).json({
+          error: sysCheck.reason,
+          message:
+            "This wallet is reserved for platform infrastructure and cannot play. Please use a personal wallet.",
+          code: "wallet_is_system_address",
+        });
+      }
+    }
+
     const challengeId = nanoid(12);
     const now = Date.now();
     
@@ -286,7 +328,42 @@ export async function registerRoutes(
     if (challenge.challengerId === accepterId) {
       return res.status(400).json({ error: "Cannot accept your own challenge" });
     }
-    
+
+    // System-address guard for the challenge accept path. We check BOTH the
+    // accepter (incoming) and the stored challenger — the latter as
+    // defense-in-depth so an old pending challenge created before this
+    // guard was added (or before an env var rotation enlarged the
+    // forbidden set) can still be blocked at accept time.
+    {
+      const accepterCheck = await checkSystemAddress(challenge.asset, String(accepterId));
+      if (!accepterCheck.ok) {
+        console.warn(
+          `[security] /api/accept-challenge rejected forbidden accepter ${accepterId} for ${challenge.asset} (${accepterCheck.reason})`
+        );
+        return res.status(403).json({
+          error: accepterCheck.reason,
+          message:
+            "This wallet is reserved for platform infrastructure and cannot play. Please use a personal wallet.",
+          code: "wallet_is_system_address",
+        });
+      }
+      const challengerCheck = await checkSystemAddress(
+        challenge.asset,
+        String(challenge.challengerId)
+      );
+      if (!challengerCheck.ok) {
+        console.warn(
+          `[security] /api/accept-challenge rejected — stored challenger ${challenge.challengerId} is a forbidden system address for ${challenge.asset} (${challengerCheck.reason})`
+        );
+        return res.status(403).json({
+          error: challengerCheck.reason,
+          message:
+            "This challenge cannot be accepted because the challenger's wallet is reserved for platform infrastructure.",
+          code: "challenger_is_system_address",
+        });
+      }
+    }
+
     const matchId = nanoid(16);
     
     challenge.status = "accepted";
@@ -1111,6 +1188,32 @@ export async function registerRoutes(
 
       const player1 = String(matchData.addr1);
       const player2 = String(matchData.addr2);
+
+      // Defense-in-depth backstop for TON.
+      //
+      // Unlike EVM (signMatchAuth) and Tron (buildDepositAuth), there's no
+      // oracle deposit-auth signature path on TON to reject a forbidden
+      // address from. /api/ton/deposit-info is therefore the last
+      // server-side checkpoint before the player builds the deposit BOC,
+      // so we re-validate both addresses here. Matchmaking already blocks
+      // these wallets at queue time, but this protects any future code
+      // path that lands a forbidden address into a TON match without going
+      // through the matchmaking guard.
+      for (const [label, addr] of [["addr1", player1], ["addr2", player2]] as const) {
+        const sysCheck = await checkSystemAddress("TON", addr);
+        if (!sysCheck.ok) {
+          console.warn(
+            `[security] /api/ton/deposit-info rejected — match ${matchId} ${label}=${addr} is a forbidden system address (${sysCheck.reason})`
+          );
+          return res.status(403).json({
+            error: sysCheck.reason,
+            message:
+              "This match cannot be funded because one of the wallets is reserved for platform infrastructure.",
+            code: "wallet_is_system_address",
+          });
+        }
+      }
+
       const stakeNum = Number(matchData.stake);
 
       const { createTonOracle } = await import("./oracle/tonOracle");
