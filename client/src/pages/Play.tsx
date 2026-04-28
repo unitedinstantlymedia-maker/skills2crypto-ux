@@ -9,9 +9,11 @@ import { CheckersGame } from "@/components/games/CheckersGame";
 import { BattleshipGame } from "@/components/games/BattleshipGame";
 import { WaitingRoom } from "@/components/games/WaitingRoom";
 import { ErrorBoundary } from "@/components/system/ErrorBoundary";
+import { OpponentStatusBanner } from "@/components/system/OpponentStatusBanner";
+import { OwnConnectionBanner } from "@/components/system/OwnConnectionBanner";
 
 export default function Play() {
-  const { state, actions } = useGame();
+  const { state, actions, socket } = useGame();
   const [, setLocation] = useLocation();
   const { t } = useLanguage();
 
@@ -59,6 +61,17 @@ export default function Play() {
         <div className="font-mono font-bold text-primary">
           {t("Pot", "Pot")}: {pot} {state.selectedAsset}
         </div>
+      </div>
+
+      {/*
+        Connection-status banners — mounted ONCE here so they apply to
+        all four games (Chess/Tetris/Checkers/Battleship) without each
+        game having to know about sockets. The wrapper has `empty:hidden`
+        so it collapses entirely when both banners self-suppress.
+      */}
+      <div className="flex flex-col gap-2 w-full mb-3 empty:hidden">
+        <OwnConnectionBanner socket={socket} />
+        <OpponentStatusBanner socket={socket} matchId={state.currentMatch?.id} />
       </div>
 
       <div className="flex-1 flex items-center justify-center">
