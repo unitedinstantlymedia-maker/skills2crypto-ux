@@ -28,8 +28,12 @@ export function OpponentStatusBanner({ socket, matchId }: OpponentStatusBannerPr
   useEffect(() => {
     if (!socket) return;
     const matchesActive = (payload: { matchId?: string } | undefined) => {
+      // Without an active matchId in props we cannot scope; let everything
+      // through (banner is mounted on a non-match screen). Otherwise the
+      // payload MUST carry matchId and it must match — silently ignoring
+      // legacy emits without matchId prevents banner bleed across matches.
       if (!matchId) return true;
-      if (!payload || typeof payload.matchId !== "string") return true;
+      if (!payload || typeof payload.matchId !== "string") return false;
       return payload.matchId === matchId;
     };
 

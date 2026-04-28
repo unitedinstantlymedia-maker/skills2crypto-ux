@@ -251,7 +251,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             ? 'Match was cancelled before it started.'
             : 'Match cancelled.';
       const refundMsg =
-        'If your deposit reached the escrow, it can be reclaimed via the contract refund window — check your wallet history within ~24h.';
+        payload.reason === 'never_started'
+          ? 'No deposit was likely made. If your wallet did broadcast a deposit, the contract refund window (~24h) lets you reclaim it — check your wallet history.'
+          : 'Any deposited funds are returned via the contract refund window — check your wallet history within ~24h.';
       toast({
         title: 'Match cancelled',
         description: `${baseMsg} ${refundMsg}`,
