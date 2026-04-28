@@ -14,7 +14,12 @@
  * Redis blip can't take matchmaking offline.
  */
 
-import rateLimit, { type RateLimitRequestHandler } from "express-rate-limit";
+import rateLimit, {
+  type IncrementResponse,
+  type Options as RateLimitOptions,
+  type RateLimitRequestHandler,
+  type Store,
+} from "express-rate-limit";
 import { redis } from "../redis";
 
 interface UpstashStoreOptions {
@@ -22,25 +27,27 @@ interface UpstashStoreOptions {
   windowMs: number;
 }
 
-class UpstashRedisStore {
+// Implements the express-rate-limit `Store` contract directly so we
+// don't have to silence TypeScript with `as any` at the call site.
+// Only `increment` is strictly required; we also implement `decrement`
+// and `resetKey` for completeness.
+class UpstashRedisStore implements Store {
   prefix: string;
   windowMs: number;
   windowSec: number;
-  // express-rate-limit v8 sets this from `init()`
-  // and we mirror its default to keep types happy.
-  // (incr is the only method it requires.)
+
   constructor(opts: UpstashStoreOptions) {
     this.prefix = opts.prefix;
     this.windowMs = opts.windowMs;
     this.windowSec = Math.max(1, Math.ceil(opts.windowMs / 1000));
   }
 
-  init(opts: { windowMs: number }) {
+  init(opts: RateLimitOptions) {
     this.windowMs = opts.windowMs;
     this.windowSec = Math.max(1, Math.ceil(opts.windowMs / 1000));
   }
 
-  async increment(key: string) {
+  async increment(key: string): Promise<IncrementResponse> {
     const fullKey = `${this.prefix}:${key}`;
     try {
       const current = await redis.incr(fullKey);
@@ -93,7 +100,7 @@ function makeLimiter(opts: {
     max: opts.max,
     standardHeaders: "draft-7",
     legacyHeaders: false,
-    store: new UpstashRedisStore({ prefix: opts.prefix, windowMs: opts.windowMs }) as any,
+    store: new UpstashRedisStore({ prefix: opts.prefix, windowMs: opts.windowMs }),
     message: { error: "rate_limited", message: opts.message },
     skip: (req) => req.method === "OPTIONS",
     keyGenerator: (req) => {

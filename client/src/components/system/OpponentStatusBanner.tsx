@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { useLanguage } from "@/context/LanguageContext";
+import { useToast } from "@/hooks/use-toast";
 
 interface DisconnectPending {
   // Absolute unix-ms deadline by which the opponent must reconnect.
@@ -33,9 +34,9 @@ interface OpponentStatusBannerProps {
 
 export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
   const { t } = useLanguage();
+  const { toast } = useToast();
   const [pending, setPending] = useState<DisconnectPending | null>(null);
   const [forfeited, setForfeited] = useState(false);
-  const [reconnectedAt, setReconnectedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!socket) return;
@@ -48,13 +49,23 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
           ? payload.graceUntilMs
           : Date.now() + Math.max(0, payload?.secondsRemaining ?? 30) * 1000;
       setForfeited(false);
-      setReconnectedAt(null);
       setPending({ graceUntilMs: deadline });
     };
     const onReconnected = () => {
-      setPending(null);
+      // Track whether we were actually showing a pending banner — only
+      // toast in that case so we don't fire a confusing "reconnected"
+      // toast on the very first join (where no disconnect ever happened).
+      setPending((prev) => {
+        if (prev) {
+          toast({
+            title: t("Opponent reconnected", "Opponent reconnected"),
+            description: t("The match continues.", "The match continues."),
+            duration: 3000,
+          });
+        }
+        return null;
+      });
       setForfeited(false);
-      setReconnectedAt(Date.now());
     };
     const onDisconnected = () => {
       setPending(null);
@@ -69,7 +80,7 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       socket.off("opponent-reconnected", onReconnected);
       socket.off("opponent-disconnected", onDisconnected);
     };
-  }, [socket]);
+  }, [socket, toast, t]);
 
   // Tick the live countdown every second while pending.
   const [now, setNow] = useState(Date.now());
@@ -78,13 +89,6 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
     const i = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(i);
   }, [pending]);
-
-  // Auto-dismiss the "reconnected" toast after 4s.
-  useEffect(() => {
-    if (!reconnectedAt) return;
-    const timeout = setTimeout(() => setReconnectedAt(null), 4000);
-    return () => clearTimeout(timeout);
-  }, [reconnectedAt]);
 
   if (forfeited) {
     return (
@@ -99,13 +103,6 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100" data-testid="banner-opponent-disconnect-pending">
         {t("Opponent disconnected. Forfeit in", "Opponent disconnected. Forfeit in")}{" "}
         <span className="font-mono font-semibold">{remaining}s</span>
-      </div>
-    );
-  }
-  if (reconnectedAt) {
-    return (
-      <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100" data-testid="banner-opponent-reconnected">
-        {t("Opponent reconnected.", "Opponent reconnected.")}
       </div>
     );
   }
