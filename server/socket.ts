@@ -1508,7 +1508,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
               if (winnerId) {
                 storeGameResult(matchId, 'chess', winnerId, playerId, 'disconnect');
-                io.to(`match:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`match:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
                 io.to(`match:${matchId}`).emit('game-result', {
                   matchId,
                   winnerId,
@@ -1525,7 +1525,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
             const winnerId = Array.from(tetrisRoom.players.keys()).find(id => id !== playerId);
             if (winnerId) {
               storeGameResult(matchId, 'tetris', winnerId, playerId, 'disconnect');
-              io.to(`tetris:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+              io.to(`tetris:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
               io.to(`tetris:${matchId}`).emit('game-result', {
                 matchId,
                 winnerId,
@@ -1543,7 +1543,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               const winnerId = Array.from(checkersRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
               if (winnerId) {
                 storeGameResult(matchId, 'checkers', winnerId, playerId, 'disconnect');
-                io.to(`checkers:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`checkers:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
                 io.to(`checkers:${matchId}`).emit('game-result', {
                   matchId,
                   winnerId,
@@ -1562,7 +1562,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               const winnerId = Array.from(battleshipRoom.players.entries()).find(([id, _]) => id !== playerId)?.[0];
               if (winnerId) {
                 storeGameResult(matchId, 'battleship', winnerId, playerId, 'disconnect');
-                io.to(`battleship:${matchId}`).emit('opponent-disconnected', { forfeit: true });
+                io.to(`battleship:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
                 io.to(`battleship:${matchId}`).emit('game-result', {
                   matchId,
                   winnerId,

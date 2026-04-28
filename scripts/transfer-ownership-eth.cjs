@@ -1,16 +1,6 @@
 /* eslint-disable no-console */
-/**
- * Transfer ownership of the live Ethereum Skills2CryptoEscrow contract.
- * See scripts/transfer-ownership-bsc.cjs for the full safety doc — this
- * is the same script with ETH-specific defaults.
- *
- * USAGE
- *   ETH_ESCROW_ADDRESS=<addr> NEW_OWNER=<safe-addr> CONFIRM=YES \
- *     npx hardhat run scripts/transfer-ownership-eth.cjs --network ethMainnet
- *
- * Verify the Safe exists at https://app.safe.global/eth:<addr> before
- * running with CONFIRM=YES.
- */
+// Transfer ownership of the live Ethereum Skills2CryptoEscrow contract.
+// Env: ETH_ESCROW_ADDRESS, NEW_OWNER, CONFIRM=YES (DRY-RUN otherwise).
 
 const { ethers } = require("hardhat");
 

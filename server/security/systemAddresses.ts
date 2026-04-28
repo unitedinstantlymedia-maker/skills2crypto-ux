@@ -1,37 +1,7 @@
-/**
- * Forbidden-address registry: prevents the platform's own infrastructure
- * wallets (oracle, deployer, platform/cold wallet) from being used as a
- * player wallet on any chain.
- *
- * Why: a player whose address equals one of the system addresses creates
- * two failure modes:
- *
- *   1. Insider mistake — anyone holding the oracle/deployer key (operators,
- *      future devs) can accidentally connect that wallet via MetaMask /
- *      Tonkeeper / TronLink and play. The smart contracts don't ban this,
- *      so the funds get locked the same way they did during testing.
- *
- *   2. Griefing — an external attacker only needs the *public* oracle
- *      address (visible on every BscScan tx the oracle has ever signed) to
- *      claim that address in matchmaking. They can't sign deposits without
- *      the private key, but they can get matched against real players who
- *      *do* deposit, locking their stake until the auth deadline expires
- *      (15 min). Repeat at scale = DoS on matchmaking.
- *
- * This module is a server-side blacklist enforced at two layers:
- *
- *   (A) `/api/find-match` and any other matchmaking entry point — reject
- *        the request before queueing.
- *   (B) Defense-in-depth inside the EVM/Tron oracle's MatchAuth signing —
- *        even if a system address somehow reaches the oracle, refuse to
- *        sign authorisation.
- *
- * Addresses are derived from the same secrets the rest of the server uses
- * (ORACLE_PRIVATE_KEY, DEPLOYER_PRIVATE_KEY, TON_*_MNEMONIC, *_PLATFORM_*).
- * If any secret is missing the corresponding entry is skipped with a
- * warning — the module is fail-open by design so misconfigured envs don't
- * lock all matchmaking.
- */
+// Registry of forbidden player wallets (oracle/deployer/platform).
+// Enforced at the matchmaking entry points and inside the oracle as
+// defense-in-depth. Addresses are derived from the server's own secrets;
+// missing secrets are skipped with a warning (fail-open by design).
 
 import { ethers } from "ethers";
 

@@ -1,25 +1,7 @@
 /* eslint-disable no-console */
-/**
- * Transfer ownership of the live BSC Skills2CryptoEscrow contract to a
- * new address (intended: a Gnosis Safe multisig, or a TimelockController
- * front-running a Safe).
- *
- * USAGE
- *   1. Set the env var NEW_OWNER to the address that should own the
- *      contract going forward (e.g. your Safe address on BSC).
- *   2. Set CONFIRM=YES to actually broadcast. Without it, the script
- *      prints what it WOULD do and exits.
- *   3. Run: `npx hardhat run scripts/transfer-ownership-bsc.cjs --network bscMainnet`
- *
- * SAFETY
- *   - The script refuses to run if NEW_OWNER is unset or zero.
- *   - The script refuses to run if NEW_OWNER == current owner.
- *   - The script refuses to run if NEW_OWNER == oracle / platformWallet
- *     (almost always a misconfiguration).
- *   - Transferring to a Safe address that does NOT yet exist on BSC will
- *     PERMANENTLY brick the owner role. Verify the Safe address opens on
- *     https://app.safe.global/bsc:<addr> before running with CONFIRM=YES.
- */
+// Transfer ownership of the live BSC Skills2CryptoEscrow contract.
+// Env: BSC_ESCROW_ADDRESS, NEW_OWNER, CONFIRM=YES (DRY-RUN otherwise).
+// Run: npx hardhat run scripts/transfer-ownership-bsc.cjs --network bscMainnet
 
 const { ethers } = require("hardhat");
 

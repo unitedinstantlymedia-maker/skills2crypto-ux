@@ -1,23 +1,7 @@
 /* eslint-disable no-console */
-/**
- * Transfer ownership of the live Tron Skills2CryptoEscrowTron contract.
- *
- * USAGE
- *   TRON_ESCROW_CONTRACT=<base58> NEW_OWNER=<base58> \
- *     ORACLE_PRIVATE_KEY=<owner-key-hex> CONFIRM=YES \
- *     node scripts/transfer-ownership-tron.cjs
- *
- * Tron note: the "owner" of the contract is whoever called the
- * constructor at deploy time — usually `DEPLOYER_PRIVATE_KEY`. Set
- * that key in the env (or override via OWNER_PRIVATE_KEY) so the
- * sender of the transferOwnership tx == the current owner. The script
- * derives + checks before broadcasting.
- *
- * Tron does not have a Safe equivalent; the recommended replacement is
- * a Tron multi-sig wallet (https://shasta.tronscan.org/#/wallet/multisign)
- * or a smart-contract proxy you control. Verify the new owner address
- * exists on Tronscan before running with CONFIRM=YES.
- */
+// Transfer ownership of the live Tron Skills2CryptoEscrowTron contract.
+// Env: TRON_ESCROW_CONTRACT (base58), NEW_OWNER (base58),
+// OWNER_PRIVATE_KEY (defaults to DEPLOYER_PRIVATE_KEY), CONFIRM=YES.
 
 const TronWeb = require("tronweb");
 

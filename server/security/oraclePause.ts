@@ -1,28 +1,7 @@
-/**
- * Off-chain oracle pause kill-switch.
- *
- * Why this exists: the live V2 escrow contracts on BSC, ETH, Tron,
- * and TON have no `Pausable` modifier (they were deployed before this
- * concern was prioritized). If a vulnerability is found in the
- * matchmaking layer, the oracle code, the SunSwap accumulator, etc.,
- * we cannot pause the contract itself.
- *
- * BUT every new deposit on every chain requires either an oracle-
- * signed MatchAuth (BSC/ETH), an oracle-issued depositUSDTGasless
- * call (Tron), or an oracle-issued deposit-info BOC (TON). If the
- * oracle refuses to issue any of these, no new money flows in. This
- * module is the single switch that does that.
- *
- * Existing matches always settle: settle-auth signing is intentionally
- * NOT gated so funds already in escrow can always exit per the rules.
- *
- * Storage: Redis keys `oracle:paused:<scope>` where scope is
- *   - "all"  — global kill (blocks every chain's new deposits)
- *   - "BNB" / "ETH" / "USDT" / "TON" — per-asset kill
- *
- * Set/clear via POST /api/oracle/pause with the OPS_KILLSWITCH_TOKEN
- * shared secret in the X-Ops-Token header.
- */
+// Off-chain oracle kill-switch. When set, the oracle refuses to issue
+// new deposit authorisations on the named scope (or "all"). Settlement
+// is intentionally NOT gated so in-flight matches still resolve.
+// Toggle via POST /api/oracle/pause + X-Ops-Token header.
 
 import { redis } from "../redis";
 import { fireOpsAlert } from "./opsAlert";

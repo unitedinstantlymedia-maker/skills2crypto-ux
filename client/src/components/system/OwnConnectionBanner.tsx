@@ -14,28 +14,21 @@ export function OwnConnectionBanner({ socket }: OwnConnectionBannerProps) {
 
   useEffect(() => {
     if (!socket) return;
-    let warnTimeout: ReturnType<typeof setTimeout> | null = null;
     let dangerTimeout: ReturnType<typeof setTimeout> | null = null;
     let restoreTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const clearAll = () => {
-      if (warnTimeout) clearTimeout(warnTimeout);
-      if (dangerTimeout) clearTimeout(dangerTimeout);
-      warnTimeout = null;
-      dangerTimeout = null;
-    };
-
     const onDisconnect = () => {
-      clearAll();
-      warnTimeout = setTimeout(() => {
-        setPhase((p) => (p === "terminal" ? p : "warn"));
-      }, 2000);
+      if (dangerTimeout) clearTimeout(dangerTimeout);
+      // Show "Reconnecting…" immediately. Escalate to "Still trying…"
+      // after 10s if we haven't recovered.
+      setPhase((p) => (p === "terminal" ? p : "warn"));
       dangerTimeout = setTimeout(() => {
         setPhase((p) => (p === "terminal" ? p : "danger"));
       }, 10000);
     };
     const onConnect = () => {
-      clearAll();
+      if (dangerTimeout) clearTimeout(dangerTimeout);
+      dangerTimeout = null;
       setPhase((p) => {
         if (p === "warn" || p === "danger") {
           if (restoreTimeout) clearTimeout(restoreTimeout);
@@ -54,7 +47,7 @@ export function OwnConnectionBanner({ socket }: OwnConnectionBannerProps) {
       }
     };
     const onReconnectFailed = () => {
-      clearAll();
+      if (dangerTimeout) clearTimeout(dangerTimeout);
       setPhase("terminal");
     };
 
@@ -67,7 +60,7 @@ export function OwnConnectionBanner({ socket }: OwnConnectionBannerProps) {
       socket.off("disconnect", onDisconnect);
       socket.io.off("reconnect_attempt", onReconnectAttempt);
       socket.io.off("reconnect_failed", onReconnectFailed);
-      clearAll();
+      if (dangerTimeout) clearTimeout(dangerTimeout);
       if (restoreTimeout) clearTimeout(restoreTimeout);
     };
   }, [socket]);

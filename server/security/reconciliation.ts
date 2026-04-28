@@ -1,26 +1,7 @@
-/**
- * DB ↔ on-chain reconciliation job.
- *
- * Why: every settled match writes a row to the `matches` Postgres
- * table from socket.ts → storeGameResult. In parallel, every chain's
- * escrow contract holds the canonical funds. If those two ever
- * diverge — DB says "settled, X paid" but the contract still holds
- * the pot, or vice versa — we want to know IMMEDIATELY, not at the
- * next user complaint.
- *
- * What it does:
- *   1. Every RECONCILE_INTERVAL_MS (default: 10 min) scan the last
- *      RECONCILE_LOOKBACK_HOURS (default: 24h) of matches rows.
- *   2. For each row, query the corresponding chain's `getMatch`
- *      view. Expect status === Settled (3).
- *   3. Surface anything else as a discrepancy: log loudly and fire
- *      an ops alert.
- *
- * Read-only and idempotent — safe to run on a schedule.
- *
- * The summary is cached so /api/health/oracles can show it without
- * triggering another scan.
- */
+// Periodic DB ↔ on-chain reconciliation. Scans the last N hours of
+// matches rows and verifies each chain's escrow status === Settled.
+// Read-only, idempotent. Discrepancies are logged and fire an ops alert.
+// Summary cached for /api/health/oracles.
 
 import { db } from "../db";
 import { matches, type Match } from "../../shared/schema";

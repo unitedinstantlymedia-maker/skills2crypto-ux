@@ -12,15 +12,29 @@ interface OpponentStatusBannerProps {
   matchId?: string;
 }
 
-export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
+export function OpponentStatusBanner({ socket, matchId }: OpponentStatusBannerProps) {
   const { t } = useLanguage();
   const { toast } = useToast();
   const [pending, setPending] = useState<DisconnectPending | null>(null);
   const [forfeited, setForfeited] = useState(false);
 
+  // Reset banner state whenever the active match changes so banners
+  // from a previous match never bleed into the next one.
+  useEffect(() => {
+    setPending(null);
+    setForfeited(false);
+  }, [matchId]);
+
   useEffect(() => {
     if (!socket) return;
-    const onPending = (payload: { graceUntilMs?: number; secondsRemaining?: number }) => {
+    const matchesActive = (payload: { matchId?: string } | undefined) => {
+      if (!matchId) return true;
+      if (!payload || typeof payload.matchId !== "string") return true;
+      return payload.matchId === matchId;
+    };
+
+    const onPending = (payload: { matchId?: string; graceUntilMs?: number; secondsRemaining?: number }) => {
+      if (!matchesActive(payload)) return;
       const deadline =
         typeof payload?.graceUntilMs === "number"
           ? payload.graceUntilMs
@@ -28,7 +42,8 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       setForfeited(false);
       setPending({ graceUntilMs: deadline });
     };
-    const onReconnected = () => {
+    const onReconnected = (payload: { matchId?: string }) => {
+      if (!matchesActive(payload)) return;
       setPending((prev) => {
         if (prev) {
           toast({
@@ -41,7 +56,8 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       });
       setForfeited(false);
     };
-    const onDisconnected = () => {
+    const onDisconnected = (payload: { matchId?: string }) => {
+      if (!matchesActive(payload)) return;
       setPending(null);
       setForfeited(true);
     };
@@ -54,7 +70,7 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       socket.off("opponent-reconnected", onReconnected);
       socket.off("opponent-disconnected", onDisconnected);
     };
-  }, [socket, toast, t]);
+  }, [socket, toast, t, matchId]);
 
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
