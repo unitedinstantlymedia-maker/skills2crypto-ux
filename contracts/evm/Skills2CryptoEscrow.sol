@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
@@ -27,7 +28,14 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
  *   - Draw:       each gets stake - 1.5% (half of 3% applied to each side)
  *   - Disconnect: each gets full stake (no fee — neither player completed)
  */
-contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
+/**
+ * Pausable: only `depositNative` is gated. Settlement, refundNoShow, and
+ * the owner setters MUST stay reachable when paused so funds escrowed
+ * before the pause can always exit per the rules. The pause lever is
+ * intended as an incident-response brake on NEW money entering the
+ * contract — never as a way to trap existing matches.
+ */
+contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, Pausable, EIP712 {
     using ECDSA for bytes32;
 
     enum MatchStatus { None, WaitingForP2, Active, Settled }
@@ -86,7 +94,7 @@ contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
         uint256 stake,
         uint256 deadline,
         bytes calldata oracleSig
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         require(player1 != player2, "Same player");
         require(player1 != address(0) && player2 != address(0), "Zero address");
         require(stake > 0, "Zero stake");
@@ -221,6 +229,24 @@ contract Skills2CryptoEscrow is Ownable, ReentrancyGuard, EIP712 {
         require(_bps <= 1000, "Max 10%");
         platformFeeBps = _bps;
         emit PlatformFeeUpdated(_bps);
+    }
+
+    /**
+     * Owner-only emergency brake. When paused, no NEW deposits are
+     * accepted — settlement, refundNoShow and all setters remain
+     * available so in-flight matches can always resolve and the
+     * operator can recover.
+     *
+     * Recommended deployment: transfer ownership to a Gnosis Safe
+     * multisig + (optionally) a TimelockController so a single
+     * compromised key cannot pause or change parameters unilaterally.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     function getMatch(bytes32 matchId) external view returns (Match memory) {

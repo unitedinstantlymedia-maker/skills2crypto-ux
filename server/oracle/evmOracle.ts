@@ -217,6 +217,20 @@ function buildOracle(chain: EvmChain) {
       throw new EvmOracleError("deadline must be a future unix timestamp", "INVALID_INPUT");
     }
 
+    // Off-chain pause kill-switch: refuse to issue new MatchAuth when
+    // the operator has paused this asset (or "all"). Settlement
+    // (signMatchOutcome) is intentionally NOT gated so in-flight
+    // matches can always exit per the contract rules.
+    const asset = chain === "ETH" ? "ETH" : "BNB";
+    const { isOraclePaused } = await import("../security/oraclePause");
+    const pausedCheck = await isOraclePaused(asset);
+    if (pausedCheck.paused) {
+      throw new EvmOracleError(
+        `Oracle paused for scope=${pausedCheck.scope} (reason: ${pausedCheck.reason ?? "n/a"})`,
+        "ORACLE_PAUSED"
+      );
+    }
+
     const matchIdBytes32 = toMatchIdBytes32(params.matchId);
     const types = {
       MatchAuth: [

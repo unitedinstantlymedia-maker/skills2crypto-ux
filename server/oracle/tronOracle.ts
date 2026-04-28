@@ -102,6 +102,16 @@ function resolveConfig(): TronConfig {
 
 let _cached: ReturnType<typeof build> | null = null;
 let _startupRun = false;
+// Last balance sample, surfaced in /api/health/oracles. Updated by the
+// periodic timer in build(). Read-only via getLastTrxBalanceCheck().
+let _lastBalanceCheck: {
+  trx: number | null;
+  at: number;
+  error: string | null;
+} | null = null;
+export function getLastTrxBalanceCheck() {
+  return _lastBalanceCheck;
+}
 
 export function createTronOracle() {
   if (!_cached) _cached = build();
@@ -124,18 +134,48 @@ function build() {
 
   if (!_startupRun) {
     _startupRun = true;
-    // Periodic balance logger: Tron is the only chain whose oracle still
-    // broadcasts on-chain transactions (USDT deposits + settlements), so
-    // it's the only one that can run out of "gas". Log every 5 minutes
-    // so operators see balance drift before users hit ORACLE_NO_GAS.
+    // Periodic balance check: Tron is the only chain whose oracle still
+    // broadcasts on-chain transactions (USDT deposits + settlements),
+    // so it's the only one that can run out of "gas". Every 5 minutes
+    // we sample the TRX balance and:
+    //   - If < minTrxForGas → fire a "critical" ops alert (LOUD log line +
+    //     POST to OPS_ALERT_WEBHOOK if set). Hysteresis is built into
+    //     opsAlert so we don't spam.
+    //   - If < 2× minTrxForGas → fire a "warn" ops alert (early warning).
+    //   - If recovered above 2× → clear both alert keys so the next dip
+    //     re-fires promptly.
+    // Status is exposed via getOracleBalanceTrx + lastBalanceCheck to
+    // /api/health/oracles for at-a-glance visibility.
     const PERIODIC_BALANCE_INTERVAL_MS = 5 * 60_000;
     const balanceTimer = setInterval(async () => {
       try {
         const sun = await tw.trx.getBalance(oracleBase58);
         const trx = sun / 1_000_000;
-        const tag = trx < cfg.minTrxForGas ? "WARN" : "info";
-        console.log(`[TronOracle] [periodic ${tag}] Oracle TRX balance: ${trx} (min: ${cfg.minTrxForGas})`);
+        _lastBalanceCheck = { trx, at: Date.now(), error: null };
+        const { fireOpsAlert, clearOpsAlert } = await import("../security/opsAlert");
+        if (trx < cfg.minTrxForGas) {
+          fireOpsAlert({
+            key: "tron_oracle_low_trx_critical",
+            severity: "critical",
+            title: "Tron oracle CRITICAL low TRX",
+            message: `Oracle TRX balance ${trx} below floor ${cfg.minTrxForGas}. Settlements and deposits will fail. Top up ${oracleBase58} immediately.`,
+            context: { trx, floor: cfg.minTrxForGas, oracle: oracleBase58 },
+          });
+        } else if (trx < cfg.minTrxForGas * 2) {
+          fireOpsAlert({
+            key: "tron_oracle_low_trx_warn",
+            severity: "warn",
+            title: "Tron oracle low TRX (early warning)",
+            message: `Oracle TRX balance ${trx} below 2× floor (${cfg.minTrxForGas * 2}). Top up ${oracleBase58} soon.`,
+            context: { trx, floor: cfg.minTrxForGas, oracle: oracleBase58 },
+          });
+          clearOpsAlert("tron_oracle_low_trx_critical");
+        } else {
+          clearOpsAlert("tron_oracle_low_trx_warn");
+          clearOpsAlert("tron_oracle_low_trx_critical");
+        }
       } catch (e: any) {
+        _lastBalanceCheck = { trx: null, at: Date.now(), error: String(e?.message || e) };
         console.warn(`[TronOracle] [periodic] balance check failed: ${e?.message || e}`);
       }
     }, PERIODIC_BALANCE_INTERVAL_MS);
@@ -300,6 +340,18 @@ function build() {
     }
     if (!Number.isFinite(params.stakeUsdt) || params.stakeUsdt <= 0) {
       throw new TronOracleError("stake must be > 0", "INVALID_INPUT");
+    }
+
+    // Off-chain pause kill-switch: refuse to issue new deposit auth
+    // when the operator has paused USDT (or "all"). Settlement
+    // (signMatchOutcome / submitSettlement) is intentionally NOT gated.
+    const { isOraclePaused } = await import("../security/oraclePause");
+    const pausedCheck = await isOraclePaused("USDT");
+    if (pausedCheck.paused) {
+      throw new TronOracleError(
+        `Oracle paused for scope=${pausedCheck.scope} (reason: ${pausedCheck.reason ?? "n/a"})`,
+        "ORACLE_PAUSED"
+      );
     }
 
     const stakeUnits = BigInt(Math.round(params.stakeUsdt * 10 ** USDT_TRC20_DECIMALS));

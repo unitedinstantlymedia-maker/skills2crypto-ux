@@ -906,6 +906,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         clearTimeout(pendingTimeout);
         pendingDisconnects.delete(playerId);
         console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        // Notify the surviving opponent so their disconnect banner clears.
+        socket.to(`tetris:${matchId}`).emit('opponent-reconnected', { matchId });
       }
 
       let room = tetrisRooms.get(matchId);
@@ -1008,6 +1010,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         clearTimeout(pendingTimeout);
         pendingDisconnects.delete(playerId);
         console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        // Notify the surviving opponent so their disconnect banner clears.
+        socket.to(`checkers:${matchId}`).emit('opponent-reconnected', { matchId });
       }
 
       let room = checkersRooms.get(matchId);
@@ -1180,6 +1184,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         clearTimeout(pendingTimeout);
         pendingDisconnects.delete(playerId);
         console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        // Notify the surviving opponent so their disconnect banner clears.
+        socket.to(`battleship:${matchId}`).emit('opponent-reconnected', { matchId });
       }
 
       let room = battleshipRooms.get(matchId);

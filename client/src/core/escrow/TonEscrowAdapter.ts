@@ -1,5 +1,6 @@
 import { Asset } from "@/core/types";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { getCachedAssetFee, ensureFeeSnapshotLoaded } from "@/core/networkFees";
 import { apiUrl } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 3000;
@@ -110,6 +111,9 @@ export async function ensureTonReadyForStake(stakeTon: number): Promise<void> {
 
 export class TonEscrowAdapter {
   getEstimatedNetworkFee(asset: Asset): number {
+    void ensureFeeSnapshotLoaded();
+    const live = getCachedAssetFee(asset);
+    if (typeof live === "number" && live >= 0) return live;
     const price = ASSET_PRICES_USD[asset];
     if (!price || NETWORK_FEE_USD_PER_PLAYER === 0) return 0;
     return NETWORK_FEE_USD_PER_PLAYER / price;

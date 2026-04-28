@@ -1,10 +1,14 @@
 import { Asset, MatchResult } from "@/core/types";
 import { walletAdapter } from "@/core/wallet/WalletAdapter";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { getCachedAssetFee, ensureFeeSnapshotLoaded } from "@/core/networkFees";
 
 export class MockEscrowAdapter {
   
   getEstimatedNetworkFee(asset: Asset): number {
+    void ensureFeeSnapshotLoaded();
+    const live = getCachedAssetFee(asset);
+    if (typeof live === "number" && live >= 0) return live;
     const price = ASSET_PRICES_USD[asset];
     if (!price) return 0;
     return NETWORK_FEE_USD_PER_PLAYER / price;

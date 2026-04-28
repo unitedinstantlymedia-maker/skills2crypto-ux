@@ -45,6 +45,9 @@ const FORBIDDEN: Record<AssetGroup, Set<string>> = {
 
 let _initialized = false;
 let _initPromise: Promise<void> | null = null;
+let _initFailed = false;
+let _initStartedAt = 0;
+const REQUEST_INIT_WAIT_MS = 5000;
 
 function normalizeEvm(addr: string): string {
   return addr.trim().toLowerCase();
@@ -208,6 +211,7 @@ async function doInit(): Promise<void> {
     // Should be unreachable given the per-deriver catches above, but keep
     // it as the final guarantee that init always completes.
     console.error(`[systemAddresses] init failed unexpectedly: ${e?.message || e}`);
+    _initFailed = true;
   } finally {
     _initialized = true;
   }
@@ -215,8 +219,51 @@ async function doInit(): Promise<void> {
 
 export function initSystemAddresses(): Promise<void> {
   if (_initialized) return Promise.resolve();
-  if (!_initPromise) _initPromise = doInit();
+  if (!_initPromise) {
+    _initStartedAt = Date.now();
+    _initPromise = doInit();
+  }
   return _initPromise;
+}
+
+/**
+ * Block-until-ready helper for request handlers. If init is still in
+ * flight, awaits up to REQUEST_INIT_WAIT_MS. Returns true if the
+ * registry is loaded (even if some derivations failed — the partial
+ * blacklist is better than none); returns false only if the wait
+ * timed out without init completing. Callers should reject the
+ * request with 503 in that rare case rather than fail open.
+ */
+export async function waitForSystemAddressesReady(): Promise<boolean> {
+  if (_initialized) return true;
+  if (!_initPromise) initSystemAddresses();
+  try {
+    await Promise.race([
+      _initPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("init_timeout")), REQUEST_INIT_WAIT_MS)
+      ),
+    ]);
+  } catch {
+    return _initialized;
+  }
+  return _initialized;
+}
+
+/**
+ * For diagnostics + the /api/health/oracles endpoint.
+ */
+export function getSystemAddressesStatus() {
+  return {
+    initialized: _initialized,
+    initFailed: _initFailed,
+    initStartedAt: _initStartedAt || null,
+    counts: {
+      EVM: FORBIDDEN.EVM.size,
+      TRON: FORBIDDEN.TRON.size,
+      TON: FORBIDDEN.TON.size,
+    },
+  };
 }
 
 function assetGroup(asset: string): AssetGroup | null {
@@ -236,7 +283,14 @@ export async function checkSystemAddress(
   walletAddress: string | null | undefined
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!walletAddress) return { ok: true };
-  await initSystemAddresses();
+  // Block-until-ready (with timeout). If we never finish initialising,
+  // tell the caller — the request handler decides whether to return
+  // 503 or proceed. We deliberately don't fall through to the empty
+  // FORBIDDEN sets, since that's the cold-start fail-open hole.
+  const ready = await waitForSystemAddressesReady();
+  if (!ready) {
+    return { ok: false, reason: "system_addresses_not_ready" };
+  }
   const group = assetGroup(asset);
   if (!group) return { ok: true };
 

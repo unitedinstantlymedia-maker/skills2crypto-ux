@@ -3,13 +3,19 @@ import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
 import { eq, or, desc } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
-import { checkSystemAddress } from "./security/systemAddresses";
+import { checkSystemAddress, getSystemAddressesStatus } from "./security/systemAddresses";
 import type { Game, Asset } from "./core/types";
 import { db } from "./db";
 import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
-import { randomBytes } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
+import { rlTight, rlMedium, rlLoose } from "./security/rateLimit";
+import { isOraclePaused, setPause, getPauseStatus, type PauseScope } from "./security/oraclePause";
+import { getOpsAlertStatus } from "./security/opsAlert";
+import { getReconciliationStatus } from "./security/reconciliation";
+import { getNetworkFees } from "./security/networkFees";
+import { isValidWalletShape } from "../shared/walletShape";
 
 const CHALLENGE_TTL = 3600;
 const EXPIRED_CHALLENGE_TTL = 86400;
@@ -52,8 +58,23 @@ export async function registerRoutes(
   io: SocketIOServer
 ): Promise<Server> {
 
-  app.post("/api/find-match", async (req, res) => {
+  app.post("/api/find-match", rlTight, async (req, res) => {
     const { game, asset, stake, socketId, walletAddress } = (req.body ?? {}) as Partial<FindMatchBody>;
+    // Off-chain kill switch: if the operator has paused this asset (or
+    // global), refuse to enter matchmaking so no new money flows in.
+    // Live matches still settle via /api/escrow/settle-auth which is
+    // intentionally NOT pause-gated.
+    if (typeof asset === "string") {
+      const p = await isOraclePaused(asset);
+      if (p.paused) {
+        return res.status(503).json({
+          error: "oracle_paused",
+          message: "Matchmaking is temporarily paused by the platform. Existing matches will settle normally.",
+          scope: p.scope,
+          reason: p.reason,
+        });
+      }
+    }
 
     if (!isGame(game) || !isAsset(asset) || !socketId) {
       return res.status(400).json({ error: "bad params" });
@@ -63,18 +84,13 @@ export async function registerRoutes(
       return res.status(400).json({ error: "invalid stake" });
     }
 
-    // Per-asset wallet validation: BNB/ETH require an EVM 0x-address; USDT
-    // requires a Tron base58 address (T…); TON accepts any non-empty address.
+    // Per-asset wallet validation. Single source of truth in
+    // shared/walletShape.ts — all three matchmaking entry points
+    // (find-match, create-challenge, accept-challenge) use the same
+    // validator so they cannot drift apart again.
     let cleanWallet = "";
-    if (walletAddress && typeof walletAddress === "string") {
-      if (asset === "BNB" || asset === "ETH") {
-        if (/^0x[0-9a-fA-F]{40}$/.test(walletAddress)) cleanWallet = walletAddress;
-      } else if (asset === "USDT") {
-        if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(walletAddress)) cleanWallet = walletAddress;
-      } else {
-        // TON — keep raw address; deeper validation happens in the TON adapter.
-        cleanWallet = walletAddress;
-      }
+    if (walletAddress && typeof walletAddress === "string" && isValidWalletShape(asset, walletAddress)) {
+      cleanWallet = walletAddress;
     }
     if (!cleanWallet) {
       return res.status(400).json({
@@ -194,7 +210,7 @@ export async function registerRoutes(
   // CHALLENGE FRIEND FEATURE
   // =====================
   
-  app.post("/api/create-challenge", async (req, res) => {
+  app.post("/api/create-challenge", rlTight, async (req, res) => {
     const { game, asset, stake, challengerId, challengerName, challengerSocketId } = req.body ?? {};
     
     if (!isGame(game) || !isAsset(asset)) {
@@ -218,16 +234,11 @@ export async function registerRoutes(
     // "wrong-shape" error several screens later. Catch it here.
     {
       const a = String(challengerId);
-      let okShape = false;
-      if (asset === "BNB" || asset === "ETH") {
-        okShape = /^0x[0-9a-fA-F]{40}$/.test(a);
-      } else if (asset === "USDT") {
-        okShape = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
-      } else {
-        // TON — accept any non-empty string; the TON adapter will validate
-        // the friendly/raw form when building the deposit BOC.
-        okShape = a.length > 0;
-      }
+      // Centralised in shared/walletShape.ts so all three matchmaking
+      // entry points stay in sync — divergence here was the original
+      // root cause of the "create-challenge accepts EVM addr for USDT"
+      // bug from the audit.
+      const okShape = isValidWalletShape(asset, a);
       if (!okShape) {
         return res.status(400).json({
           error: "wallet_shape_mismatch",
@@ -320,7 +331,7 @@ export async function registerRoutes(
   });
   
   // Get challenge details
-  app.get("/api/challenge/:challengeId", async (req, res) => {
+  app.get("/api/challenge/:challengeId", rlLoose, async (req, res) => {
     const { challengeId } = req.params;
     
     if (!challengeId) {
@@ -338,7 +349,7 @@ export async function registerRoutes(
     return res.status(200).json(challenge);
   });
   
-  app.post("/api/accept-challenge", async (req, res) => {
+  app.post("/api/accept-challenge", rlTight, async (req, res) => {
     const { challengeId, accepterId, accepterSocketId, accepterName } = req.body ?? {};
     
     if (!challengeId || !accepterId || !accepterSocketId) {
@@ -389,14 +400,7 @@ export async function registerRoutes(
     // was created, so we only need to re-check the accepter here.
     {
       const a = String(accepterId);
-      let okShape = false;
-      if (challenge.asset === "BNB" || challenge.asset === "ETH") {
-        okShape = /^0x[0-9a-fA-F]{40}$/.test(a);
-      } else if (challenge.asset === "USDT") {
-        okShape = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a);
-      } else {
-        okShape = a.length > 0;
-      }
+      const okShape = isValidWalletShape(String(challenge.asset), a);
       if (!okShape) {
         await redis.del(lockKey);
         return res.status(400).json({
@@ -528,7 +532,7 @@ export async function registerRoutes(
     });
   });
 
-  app.post("/api/cancel-challenge", async (req, res) => {
+  app.post("/api/cancel-challenge", rlMedium, async (req, res) => {
     const { challengeId, challengerId } = req.body ?? {};
     
     if (!challengeId || !challengerId) {
@@ -570,7 +574,7 @@ export async function registerRoutes(
     return res.status(200).json({ success: true, challengeId });
   });
 
-  app.get("/api/challenges/:userId", async (req, res) => {
+  app.get("/api/challenges/:userId", rlLoose, async (req, res) => {
     const { userId } = req.params;
     const { status } = req.query;
     
@@ -607,7 +611,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/history/:playerId", async (req, res) => {
+  app.get("/api/history/:playerId", rlLoose, async (req, res) => {
     const { playerId } = req.params;
     
     if (!playerId) {
@@ -673,7 +677,7 @@ export async function registerRoutes(
    * the player must supply to `depositNativeAsPlayer` on-chain. Both players
    * pull the same auth (cached in Redis) for a given match.
    */
-  app.post("/api/oracle/match-auth", async (req, res) => {
+  app.post("/api/oracle/match-auth", rlMedium, async (req, res) => {
     const { matchId } = req.body ?? {};
 
     if (!matchId || typeof matchId !== "string") {
@@ -752,7 +756,7 @@ export async function registerRoutes(
    * Polling endpoint clients use after submitting their native deposit.
    * Returns the on-chain match status so the UI can wait for both players.
    */
-  app.get("/api/oracle/match-status/:matchId", async (req, res) => {
+  app.get("/api/oracle/match-status/:matchId", rlLoose, async (req, res) => {
     const { matchId } = req.params;
     if (!matchId) return res.status(400).json({ error: "matchId required" });
 
@@ -802,7 +806,7 @@ export async function registerRoutes(
    * for the on-chain depositUSDT call. Cached in Redis so both players get
    * consistent nonces during the deposit window.
    */
-  app.post("/api/tron/deposit-auth", async (req, res) => {
+  app.post("/api/tron/deposit-auth", rlMedium, async (req, res) => {
     const { matchId } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
@@ -854,7 +858,7 @@ export async function registerRoutes(
    * the oracle bundles the two sigs and broadcasts depositUSDT on Tron
    * (single on-chain call pulls both stakes via prior allowance).
    */
-  app.post("/api/tron/deposit-sig", async (req, res) => {
+  app.post("/api/tron/deposit-sig", rlMedium, async (req, res) => {
     const { matchId, signature } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
@@ -966,7 +970,7 @@ export async function registerRoutes(
    * Polled by the client to know when the on-chain match has flipped to Active.
    * Returns the same shape as /api/oracle/match-status.
    */
-  app.get("/api/tron/match-status/:matchId", async (req, res) => {
+  app.get("/api/tron/match-status/:matchId", rlLoose, async (req, res) => {
     const { matchId } = req.params;
     if (!matchId) return res.status(400).json({ error: "matchId required" });
 
@@ -1003,7 +1007,7 @@ export async function registerRoutes(
    * Public Tron config so the frontend can call approve() against the right
    * escrow contract without hardcoding addresses per environment.
    */
-  app.get("/api/tron/config", async (_req, res) => {
+  app.get("/api/tron/config", rlLoose, async (_req, res) => {
     try {
       const { createTronOracle } = await import("./oracle/tronOracle");
       const tron = createTronOracle();
@@ -1025,7 +1029,7 @@ export async function registerRoutes(
    * tx and whether their USDT allowance to the escrow already covers the
    * requested stake. Used as a pre-flight before /api/find-match for USDT.
    */
-  app.get("/api/tron/readiness", async (req, res) => {
+  app.get("/api/tron/readiness", rlMedium, async (req, res) => {
     const wallet = String(req.query.wallet || "");
     const stake = Number(req.query.stake || 0);
     if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(wallet)) {
@@ -1121,9 +1125,9 @@ export async function registerRoutes(
       return res.status(500).json({ error: err?.message || "Settle-auth lookup failed" });
     }
   };
-  app.get("/api/escrow/settle-auth/:matchId", settleAuthHandler);
-  app.post("/api/escrow/settle-auth/:matchId", settleAuthHandler);
-  app.post("/api/escrow/settle-auth", settleAuthHandler);
+  app.get("/api/escrow/settle-auth/:matchId", rlMedium, settleAuthHandler);
+  app.post("/api/escrow/settle-auth/:matchId", rlMedium, settleAuthHandler);
+  app.post("/api/escrow/settle-auth", rlMedium, settleAuthHandler);
 
   // ============================================================
   // Oracle health check (Task #10)
@@ -1142,7 +1146,7 @@ export async function registerRoutes(
   // Each chain is wrapped in its own try/catch so a single misconfigured
   // chain does not blank out the others. HTTP status is always 200 — the
   // response body documents which chains are healthy.
-  app.get("/api/health/oracles", async (_req, res) => {
+  app.get("/api/health/oracles", rlLoose, async (_req, res) => {
     const results: Record<string, any> = {};
 
     for (const chain of ["BSC", "ETH"] as const) {
@@ -1166,7 +1170,7 @@ export async function registerRoutes(
     }
 
     try {
-      const { createTronOracle } = await import("./oracle/tronOracle");
+      const { createTronOracle, getLastTrxBalanceCheck } = await import("./oracle/tronOracle");
       const t = createTronOracle();
       const trx = await t.getOracleBalanceTrx();
       const minTrx = Number(process.env.TRON_MIN_GAS_TRX ?? 50);
@@ -1179,6 +1183,7 @@ export async function registerRoutes(
         nativeBalance: trx,
         minGasBalance: minTrx,
         okForGas: trx >= minTrx,
+        lastBalanceCheck: getLastTrxBalanceCheck(),
         accumulatedGasFundUSDT: (await t.getAccumulatedGasFundUSDT()).toString(),
       };
     } catch (err: any) {
@@ -1202,8 +1207,116 @@ export async function registerRoutes(
       results.TON = { ok: false, error: err?.message || String(err) };
     }
 
+    // Per-asset off-chain pause kill-switch state. The contracts
+    // themselves are not Pausable on-chain (deployed before that was
+    // prioritized), so the operator's only "pause" lever is refusing
+    // to issue oracle signatures — surfacing the live state here lets
+    // anyone monitoring see whether the platform is accepting deposits.
+    let pauseState: any;
+    try {
+      pauseState = await getPauseStatus();
+    } catch (e: any) {
+      pauseState = { error: e?.message || String(e) };
+    }
+
     const overallOk = Object.values(results).every((r) => r.ok && r.okForGas !== false);
-    return res.json({ ok: overallOk, chains: results, timestamp: Date.now() });
+    return res.json({
+      ok: overallOk,
+      chains: results,
+      systemAddresses: getSystemAddressesStatus(),
+      pause: pauseState,
+      ops: getOpsAlertStatus(),
+      reconciliation: getReconciliationStatus(),
+      timestamp: Date.now(),
+    });
+  });
+
+  // ============================================================
+  // Off-chain oracle kill-switch (Task #5)
+  // ============================================================
+  //
+  // The live V2 escrows on every chain are NOT Pausable on-chain —
+  // they were deployed before that was prioritized. So the only lever
+  // we have to halt new deposits across the board is to refuse to
+  // issue oracle signatures. This endpoint flips the Redis flag that
+  // the oracle signing paths consult on every call.
+  //
+  // Auth model: shared secret in `OPS_KILLSWITCH_TOKEN` sent in the
+  // X-Ops-Token header. Constant-time compare. NOT exposed to the
+  // browser bundle anywhere — only ops tooling should know it.
+  //
+  // Settlement (signMatchOutcome / submitSettlement) is intentionally
+  // NOT gated. If the platform is paused, in-flight matches still
+  // resolve so escrowed funds always have a path out.
+  function checkOpsToken(req: any): boolean {
+    const provided = String(req.headers["x-ops-token"] || "");
+    const expected = process.env.OPS_KILLSWITCH_TOKEN || "";
+    if (!expected || expected.length < 16) return false;
+    if (!provided || provided.length !== expected.length) return false;
+    try {
+      return timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================
+  // Live network-fee estimates (Task #8)
+  // ============================================================
+  // Returns a per-asset breakdown of the gas/network fee a player will
+  // pay (or that the platform will pay on their behalf for Tron settles).
+  // Cached server-side for 60s and rate-limited under the loose tier.
+  app.get("/api/network-fees", rlLoose, async (_req, res) => {
+    try {
+      const snapshot = await getNetworkFees();
+      return res.json(snapshot);
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || "fee estimation failed" });
+    }
+  });
+
+  app.get("/api/oracle/pause", rlMedium, async (_req, res) => {
+    // Public read of the current pause state. Anyone (including the
+    // browser UI) can see this; only POST is protected.
+    try {
+      const status = await getPauseStatus();
+      return res.json({ ok: true, pause: status });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
+  app.post("/api/oracle/pause", rlMedium, async (req, res) => {
+    if (!checkOpsToken(req)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const { scope, paused, reason, setBy } = (req.body ?? {}) as {
+      scope?: string;
+      paused?: boolean;
+      reason?: string;
+      setBy?: string;
+    };
+    const validScopes: PauseScope[] = ["all", "BNB", "ETH", "USDT", "TON"];
+    if (!scope || !validScopes.includes(scope as PauseScope)) {
+      return res.status(400).json({
+        error: "invalid scope",
+        validScopes,
+      });
+    }
+    if (typeof paused !== "boolean") {
+      return res.status(400).json({ error: "paused must be a boolean" });
+    }
+    try {
+      const record = await setPause(
+        scope as PauseScope,
+        paused,
+        reason || null,
+        setBy || "ops"
+      );
+      return res.json({ ok: true, scope, record });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
   });
 
   // ============================================================
@@ -1214,7 +1327,7 @@ export async function registerRoutes(
    * GET /api/ton/config
    * Public TON config so the frontend knows the escrow address + chain info.
    */
-  app.get("/api/ton/config", async (_req, res) => {
+  app.get("/api/ton/config", rlLoose, async (_req, res) => {
     try {
       const { createTonOracle } = await import("./oracle/tonOracle");
       const ton = createTonOracle();
@@ -1235,7 +1348,7 @@ export async function registerRoutes(
    * Confirms the player wallet exists on-chain and has enough TON to cover
    * stake + gas reserve. Used as a pre-flight before /api/find-match.
    */
-  app.get("/api/ton/readiness", async (req, res) => {
+  app.get("/api/ton/readiness", rlMedium, async (req, res) => {
     const wallet = String(req.query.wallet || "");
     const stake = Number(req.query.stake || 0);
     if (!wallet) return res.status(400).json({ error: "wallet required" });
@@ -1276,10 +1389,23 @@ export async function registerRoutes(
    * V2: PrepareMatch is gone — the contract auto-creates the match on the
    * first Deposit message. We just return the BOC the player must send.
    */
-  app.post("/api/ton/deposit-info", async (req, res) => {
+  app.post("/api/ton/deposit-info", rlMedium, async (req, res) => {
     const { matchId } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
+    }
+    // Off-chain pause kill-switch: TON has no oracle signature on the
+    // deposit (the contract auto-creates the match on the first
+    // Deposit message), so the only place we can refuse new TON
+    // deposits is right here, before handing back the BOC payload.
+    const pausedCheck = await isOraclePaused("TON");
+    if (pausedCheck.paused) {
+      return res.status(503).json({
+        error: "oracle_paused",
+        message: "TON deposits are temporarily paused. Existing matches will settle normally.",
+        scope: pausedCheck.scope,
+        reason: pausedCheck.reason,
+      });
     }
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
@@ -1361,7 +1487,7 @@ export async function registerRoutes(
    * players have funded). When that happens we also fire match-funded so
    * the existing socket-based gameplay gate releases.
    */
-  app.get("/api/ton/match-status/:matchId", async (req, res) => {
+  app.get("/api/ton/match-status/:matchId", rlLoose, async (req, res) => {
     const { matchId } = req.params;
     if (!matchId) return res.status(400).json({ error: "matchId required" });
     try {
@@ -1440,7 +1566,7 @@ export async function registerRoutes(
    * TonConnect proof-of-ownership signature here so the path can be
    * promoted to fully trusted.
    */
-  app.post("/api/ton/notify-deposit", async (req, res) => {
+  app.post("/api/ton/notify-deposit", rlMedium, async (req, res) => {
     const { matchId, txInfo, playerAddress } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });

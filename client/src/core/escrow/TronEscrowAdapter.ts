@@ -1,5 +1,6 @@
 import { Asset } from "@/core/types";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { getCachedAssetFee, ensureFeeSnapshotLoaded } from "@/core/networkFees";
 import { apiUrl } from "@/lib/api";
 
 const POLL_INTERVAL_MS = 3000;
@@ -127,6 +128,13 @@ export async function ensureTronUsdtReadyForStake(stakeUsdt: number): Promise<vo
 
 export class TronEscrowAdapter {
   getEstimatedNetworkFee(asset: Asset): number {
+    // Live one-time-approve TRX cost from the server-side estimator
+    // (Tron settles are oracle-paid, so this is the only on-chain
+    // fee the player ever sees on USDT). Falls back to the legacy
+    // USD-conversion only during the boot window.
+    void ensureFeeSnapshotLoaded();
+    const live = getCachedAssetFee(asset);
+    if (typeof live === "number" && live >= 0) return live;
     const price = ASSET_PRICES_USD[asset];
     if (!price) return 0;
     return NETWORK_FEE_USD_PER_PLAYER / price;

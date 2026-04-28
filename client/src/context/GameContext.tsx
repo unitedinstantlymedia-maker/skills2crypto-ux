@@ -244,12 +244,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // failed" toast). The opponent — whose deposit may have succeeded
       // or never been attempted — must always be told why the match died.
       if (wasSelfFailure) return;
+      // Always tell the player WHERE their money went. For
+      // `never_started`, no deposit was even attempted so there is
+      // nothing to refund. For deposit-failed cases the contract's
+      // `refundNoShow` path returns escrowed funds to the depositor —
+      // the wallet's history page reflects the credit once the refund
+      // tx confirms.
+      const baseMsg =
+        payload.reason === 'opponent_deposit_failed' || payload.reason === 'deposit_failed'
+          ? 'Your opponent could not complete the on-chain deposit.'
+          : payload.reason === 'never_started'
+            ? 'Match was cancelled before it started — no deposit was made.'
+            : 'Match cancelled.';
+      const refundMsg =
+        payload.reason === 'never_started'
+          ? 'Returning to lobby.'
+          : 'Any deposited funds are refunded automatically — check your wallet history.';
       toast({
         title: 'Match cancelled',
-        description:
-          payload.reason === 'opponent_deposit_failed' || payload.reason === 'deposit_failed'
-            ? 'Your opponent could not complete the on-chain deposit. Returning to lobby.'
-            : 'Match cancelled. Returning to lobby.',
+        description: `${baseMsg} ${refundMsg}`,
         variant: 'destructive',
       });
     });

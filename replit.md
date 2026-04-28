@@ -683,3 +683,85 @@ Tron's gas economics are handled by the on-chain SunSwap V2 auto-swap
 described elsewhere in this file (0.5% gas-fund fee accumulates and
 swaps to TRX at the configured threshold), so it does not need a JS
 gas-price oracle either.
+
+## Hardening pass — Apr 2026
+
+Implemented in this branch:
+
+- **Test scaffold (vitest)** — `npm test`. 17 tests cover the EVM
+  oracle EIP-712 schema, the cold-start gate of the system-address
+  registry, and the centralised wallet-shape validator.
+- **Cold-start fail-open fix** — `server/security/systemAddresses.ts`
+  now exports `_initialized` state. `isForbiddenEvmAddressSync` /
+  `isForbiddenTronAddressSync` return `null` (not `false`) before init
+  so the request layer can distinguish "checked, safe" from "not ready".
+  The async `isForbidden*Address` paths await init with a 5s timeout.
+- **Rate limiting** — `server/security/rateLimit.ts` exports `rlTight`
+  / `rlMedium` / `rlLoose` (Upstash-Redis store, fail-open if Redis
+  is down). Wired across every REST endpoint in `server/routes.ts`.
+- **Tron low-TRX alert** — `server/security/opsAlert.ts` plus the
+  hysteresis layer in `tronOracle.ts`. Fires `OPS_ALERT_WEBHOOK` on
+  threshold cross, exposes state via `/api/health/oracles`.
+- **Off-chain oracle pause** — `server/security/oraclePause.ts` is a
+  Redis-backed kill-switch. Gated into `evmOracle.signMatchAuth`,
+  `tronOracle.buildDepositAuth`, `/api/find-match`, and
+  `/api/ton/deposit-info`. Settle paths intentionally NOT gated so
+  in-flight matches always exit. Toggle via
+  `POST /api/oracle/pause` with the `OPS_KILLSWITCH_TOKEN` shared
+  secret in the `X-Ops-Token` header (≥16 chars, timing-safe compare).
+- **Reconciliation job** — `server/security/reconciliation.ts` scans
+  the last 24h of matches every 30min and queries each chain's
+  `getMatch`. Divergence (DB says settled / chain says active, etc.)
+  triggers an ops alert. Status visible at `/api/health/oracles`.
+  Disable via `RECONCILE_ENABLED=false`.
+- **Contract Pausable + transfer-ownership scripts** — Both EVM and
+  Tron escrow source now inherit OZ `Pausable`. Only the deposit
+  paths (`depositNative`, `depositUSDTGasless`) are gated on
+  `whenNotPaused`; settlement and SunSwap auto-swap stay open so
+  in-flight matches always resolve. `pause()` / `unpause()` are
+  `onlyOwner`. Source-only — no re-deploy in this branch.
+  - Migration scripts: `scripts/transfer-ownership-bsc.cjs`,
+    `transfer-ownership-eth.cjs`, `transfer-ownership-tron.cjs`. Each
+    refuses to run unless `CONFIRM=YES` is set, refuses if the
+    intended new owner equals the current oracle / platform wallet,
+    and prints a full pre-flight summary. Recommended target: Gnosis
+    Safe on EVM (verify the Safe exists at
+    `https://app.safe.global/<chain>:<addr>` first), Tron multi-sig
+    on Tron.
+- **Live network-fee estimates** — `server/security/networkFees.ts`
+  produces a 60s server-cached snapshot of per-chain settle gas
+  costs. Exposed at `/api/network-fees`. The client adapters
+  (`Evm/Tron/Ton/MockEscrowAdapter`) read from a shared
+  `client/src/core/networkFees.ts` cache and fall back to the legacy
+  hard-coded value only during the boot window.
+- **Disconnect visibility** — Server now emits `opponent-reconnected`
+  when a pending-disconnect is cancelled (chess already had this;
+  added to tetris/checkers/battleship join handlers). Client mounts
+  two shared banners inside `GameShell.tsx`:
+  - `OwnConnectionBanner` — reads socket.io reconnect lifecycle,
+    suppresses for the first 2s (wifi blip), warns at 2s, escalates
+    at 10s, shows "restored" for 3s on reconnect.
+  - `OpponentStatusBanner` — `opponent-disconnect-pending` shows live
+    countdown; `opponent-reconnected` clears; `opponent-disconnected`
+    shows terminal "forfeited" line before the result modal.
+  - `match-cancelled` toast in `GameContext.tsx` now distinguishes
+    `never_started` (no deposit, nothing to refund) from deposit-failure
+    cases ("Any deposited funds are refunded automatically — check
+    your wallet history.").
+- **Wallet-shape validator** — `shared/walletShape.ts` is the single
+  source of truth for per-asset address-format checks. Used by
+  `find-match`, `create-challenge`, and `accept-challenge` so they
+  cannot drift apart again.
+
+### What is OUT of scope for this hardening pass
+
+- **Per-chain oracle key rotation** — currently one
+  `ORACLE_PRIVATE_KEY` signs for BSC and ETH and one set of
+  `TON_ORACLE_MNEMONIC` words signs for TON. Splitting into
+  per-chain keys is a follow-up because it requires a coordinated
+  `setOracle()` tx on every live escrow plus a rotation runbook.
+- **Re-deploying the live escrows with the new Pausable code** —
+  source-only change in this branch. The on-chain pause lever does
+  not exist on the deployed V2 contracts; the off-chain oracle pause
+  above is the operational kill-switch until a re-deploy is
+  scheduled.

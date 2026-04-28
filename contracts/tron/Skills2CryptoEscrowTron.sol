@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -44,7 +45,13 @@ interface ISunSwapV2Router {
  *   - Disconnect: each gets stake - 0.25% (no platform fee, but gas fund still
  *                 charged because the oracle still spent TRX on deposit + settle)
  */
-contract Skills2CryptoEscrowTron is Ownable, ReentrancyGuard, EIP712 {
+/**
+ * Pausable: only `depositUSDTGasless` is gated. Settlement and the
+ * SunSwap/owner setters MUST stay reachable when paused so funds
+ * escrowed before the pause can always exit per the rules. Same
+ * lever-on-new-money philosophy as the EVM contract.
+ */
+contract Skills2CryptoEscrowTron is Ownable, ReentrancyGuard, Pausable, EIP712 {
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
@@ -137,7 +144,7 @@ contract Skills2CryptoEscrowTron is Ownable, ReentrancyGuard, EIP712 {
         uint256 stake,
         bytes calldata sig1,
         bytes calldata sig2
-    ) external onlyOracle nonReentrant {
+    ) external onlyOracle nonReentrant whenNotPaused {
         require(matches[matchId].status == MatchStatus.None, "Match exists");
         require(player1 != player2, "Same player");
         require(player1 != address(0) && player2 != address(0), "Zero address");
@@ -321,6 +328,24 @@ contract Skills2CryptoEscrowTron is Ownable, ReentrancyGuard, EIP712 {
         require(v <= 200, "Max 2%");
         gasFundFeeBps = v;
         emit ConfigUpdated("gasFundFee");
+    }
+
+    /**
+     * Owner-only emergency brake. When paused, no NEW deposits are
+     * accepted — settlement, the SunSwap auto-funder, and all setters
+     * remain available so in-flight matches can always resolve and the
+     * operator can recover.
+     *
+     * Recommended: transfer ownership to a Gnosis Safe (or equivalent
+     * Tron multisig wallet) so a single compromised key cannot pause
+     * or change parameters unilaterally.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 
     function getMatch(bytes32 matchId) external view returns (Match memory) {

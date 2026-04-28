@@ -1,5 +1,6 @@
 import { Asset } from "@/core/types";
 import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config/economy";
+import { getCachedAssetFee, ensureFeeSnapshotLoaded } from "@/core/networkFees";
 import { writeContract, waitForTransactionReceipt, getAccount, switchChain, getChainId } from "@wagmi/core";
 import { parseAbi } from "viem";
 import { wagmiConfig } from "@/config/wagmi";
@@ -77,6 +78,13 @@ async function ensureChain(targetChainId: number): Promise<boolean> {
 
 export class EvmEscrowAdapter {
   getEstimatedNetworkFee(asset: Asset): number {
+    // Prefer the live server-cached estimate (fetched once at app boot
+    // by /api/network-fees). Falls back to the legacy hard-coded
+    // USD/coin conversion ONLY during the brief window before the
+    // first fetch resolves.
+    void ensureFeeSnapshotLoaded();
+    const live = getCachedAssetFee(asset);
+    if (typeof live === "number" && live >= 0) return live;
     const price = ASSET_PRICES_USD[asset];
     if (!price) return 0;
     return NETWORK_FEE_USD_PER_PLAYER / price;

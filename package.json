@@ -12,7 +12,9 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "start:server": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc && npm test",
-    "test": "tsx scripts/test-ton-encoding.mts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:legacy-ton": "tsx scripts/test-ton-encoding.mts",
     "db:push": "drizzle-kit push",
     "deploy:bsc": "hardhat run scripts/deploy-bsc.cjs --network bscMainnet",
     "deploy:eth": "hardhat run scripts/deploy-eth.cjs --network ethMainnet",
@@ -71,12 +73,14 @@
     "embla-carousel-react": "^8.6.0",
     "ethers": "^6.16.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.4.1",
     "framer-motion": "^12.23.24",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.545.0",
     "nanoid": "^5.1.6",
     "next-themes": "^0.4.6",
     "pg": "^8.16.3",
+    "rate-limit-redis": "^4.3.1",
     "react": "^19.2.0",
     "react-chessboard": "^5.8.6",
     "react-day-picker": "^9.11.1",
@@ -124,7 +128,8 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
-    "vite": "^7.1.9"
+    "vite": "^7.1.9",
+    "vitest": "^4.1.5"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"

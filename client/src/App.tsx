@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { Switch, Route } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { GameProvider } from "@/context/GameContext";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { WalletProvider } from "@/core/wallet/WalletProvider";
 import { Layout } from "@/components/layout/Layout";
+import { ensureFeeSnapshotLoaded } from "@/core/networkFees";
 
 import Landing from "@/pages/Landing";
 import Rules from "@/pages/Rules";
@@ -38,6 +40,12 @@ function Router() {
 }
 
 function App() {
+  // Prime the live network-fee cache at boot so the wager UI shows
+  // real numbers on the first paint of /lobby. Errors are swallowed —
+  // adapters fall back to legacy hard-coded values.
+  useEffect(() => {
+    void ensureFeeSnapshotLoaded();
+  }, []);
   return (
     <LanguageProvider>
       <WalletProvider>

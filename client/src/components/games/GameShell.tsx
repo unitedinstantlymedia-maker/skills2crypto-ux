@@ -1,4 +1,7 @@
 import { ReactNode } from "react";
+import { useGame } from "@/context/GameContext";
+import { OpponentStatusBanner } from "@/components/system/OpponentStatusBanner";
+import { OwnConnectionBanner } from "@/components/system/OwnConnectionBanner";
 
 interface GameShellProps {
   pot: string;
@@ -9,6 +12,12 @@ export function GameShell({
   pot,
   children,
 }: GameShellProps) {
+  // Pull the live socket so we can mount the disconnect/reconnect
+  // banners ONCE here instead of duplicating them inside every game
+  // (Chess/Tetris/Checkers/Battleship). When the user is on a result
+  // screen or hasn't finished a match yet, the socket is still
+  // connected and these banners self-suppress to no-ops.
+  const { socket } = useGame();
   return (
     <div className="flex flex-col items-center justify-between h-full w-full px-4 py-6">
       
@@ -21,6 +30,12 @@ export function GameShell({
         <div className="text-green-400 font-semibold">
           Pot: {pot}
         </div>
+      </div>
+
+      {/* CONNECTION BANNERS — render slot, components self-suppress when healthy */}
+      <div className="flex flex-col gap-2 w-full mb-2 empty:hidden">
+        <OwnConnectionBanner socket={socket} />
+        <OpponentStatusBanner socket={socket} />
       </div>
 
       {/* GAME CANVAS */}

@@ -32,6 +32,16 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
 // APP SETUP
 // =======================
 const app = express();
+
+// Trust the FIRST hop only — Replit's reverse proxy. We need this so
+// `req.ip` reflects the real client (not 127.0.0.1) for the
+// rate-limit `keyGenerator`. Anything beyond hop-1 is untrusted, so
+// `X-Forwarded-For` chain extension by a malicious client is ignored
+// by Express's IP resolver. Keep this in sync with the limiter
+// (server/security/rateLimit.ts) — they MUST agree on which IP
+// bucket a request lands in.
+app.set("trust proxy", 1);
+
 const httpServer = http.createServer(app);
 const io = setupSocket(httpServer, { isProd, allowedOrigins });
 
@@ -85,6 +95,15 @@ async function bootstrap() {
 
   // ROUTES
   await registerRoutes(httpServer, app, io);
+
+  // Schedule the periodic DB ↔ on-chain reconciliation job. Runs in
+  // the background, alerts on divergence, and is read-only — safe
+  // to enable in every environment. Disable by setting
+  // RECONCILE_ENABLED=false.
+  if (process.env.RECONCILE_ENABLED !== "false") {
+    const { startReconciliation } = await import("./security/reconciliation");
+    startReconciliation();
+  }
 
   // FRONTEND (DEV / PROD)
   if (NODE_ENV === "production") {
