@@ -33,13 +33,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "")
 // =======================
 const app = express();
 
-// Trust the FIRST hop only — Replit's reverse proxy. We need this so
-// `req.ip` reflects the real client (not 127.0.0.1) for the
-// rate-limit `keyGenerator`. Anything beyond hop-1 is untrusted, so
-// `X-Forwarded-For` chain extension by a malicious client is ignored
-// by Express's IP resolver. Keep this in sync with the limiter
-// (server/security/rateLimit.ts) — they MUST agree on which IP
-// bucket a request lands in.
+// Trust the first hop (Replit edge) so `req.ip` resolves to the real
+// client IP for rate limiting. Required by server/security/rateLimit.ts.
 app.set("trust proxy", 1);
 
 const httpServer = http.createServer(app);

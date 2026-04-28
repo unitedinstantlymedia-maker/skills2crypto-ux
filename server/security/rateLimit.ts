@@ -1,18 +1,6 @@
-/**
- * Rate limiting middleware.
- *
- * Three tiers:
- *   - tight   — money-touching matchmaking endpoints (find-match,
- *               create-challenge, accept-challenge): 10 req / min / IP.
- *   - medium  — oracle/auth/info endpoints called many times per
- *               match: 60 req / min / IP.
- *   - loose   — read-only / config / health: 240 req / min / IP.
- *
- * We use Upstash Redis as the backend (already used everywhere else
- * in this codebase) so the limiter is consistent across instances.
- * Falls back to in-memory if Redis is unavailable so a transient
- * Redis blip can't take matchmaking offline.
- */
+// Three tiers of rate limiting backed by Upstash Redis. Falls back to
+// allowing the request on Redis errors so a transient blip doesn't
+// take matchmaking offline.
 
 import rateLimit, {
   type IncrementResponse,
@@ -27,10 +15,6 @@ interface UpstashStoreOptions {
   windowMs: number;
 }
 
-// Implements the express-rate-limit `Store` contract directly so we
-// don't have to silence TypeScript with `as any` at the call site.
-// Only `increment` is strictly required; we also implement `decrement`
-// and `resetKey` for completeness.
 class UpstashRedisStore implements Store {
   prefix: string;
   windowMs: number;
@@ -103,15 +87,9 @@ function makeLimiter(opts: {
     store: new UpstashRedisStore({ prefix: opts.prefix, windowMs: opts.windowMs }),
     message: { error: "rate_limited", message: opts.message },
     skip: (req) => req.method === "OPTIONS",
-    keyGenerator: (req) => {
-      // SECURITY: do NOT read `x-forwarded-for` here. Express's
-      // `req.ip` already resolves to the proxy-respecting client IP
-      // because we set `app.set("trust proxy", 1)` in server/index.ts
-      // (single trusted hop = Replit's edge). Reading XFF directly
-      // here would let any client spoof the header and rotate buckets
-      // to bypass the limiter — see audit fix Apr 2026.
-      return req.ip || "unknown";
-    },
+    // Use req.ip only — it honors `app.set("trust proxy", 1)`. Do not
+    // read X-Forwarded-For directly (clients can spoof it).
+    keyGenerator: (req) => req.ip || "unknown",
   });
 }
 

@@ -244,13 +244,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // failed" toast). The opponent — whose deposit may have succeeded
       // or never been attempted — must always be told why the match died.
       if (wasSelfFailure) return;
-      // Always tell the player WHERE their money went. The on-chain
-      // escrow exposes a `refundNoShow` / refund window path that lets
-      // a depositor reclaim their stake when the counter-party never
-      // funds. Even for `never_started`, a player MAY have already
-      // broadcast a deposit tx that arrived after the match was
-      // cancelled — so we always point to the refund pathway rather
-      // than promising "no deposit was made".
       const baseMsg =
         payload.reason === 'opponent_deposit_failed' || payload.reason === 'deposit_failed'
           ? 'Your opponent could not complete the on-chain deposit.'

@@ -63,12 +63,6 @@ export default function Play() {
         </div>
       </div>
 
-      {/*
-        Connection-status banners — mounted ONCE here so they apply to
-        all four games (Chess/Tetris/Checkers/Battleship) without each
-        game having to know about sockets. The wrapper has `empty:hidden`
-        so it collapses entirely when both banners self-suppress.
-      */}
       <div className="flex flex-col gap-2 w-full mb-3 empty:hidden">
         <OwnConnectionBanner socket={socket} />
         <OpponentStatusBanner socket={socket} matchId={state.currentMatch?.id} />

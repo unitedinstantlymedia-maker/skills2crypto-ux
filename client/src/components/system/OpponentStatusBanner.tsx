@@ -1,29 +1,9 @@
-/**
- * Shared banner mounted inside every game shell (Chess, Tetris,
- * Checkers, Battleship). Listens for the three opponent-state events
- * the server emits during a match:
- *
- *   - opponent-disconnect-pending : opponent dropped, server is giving
- *     them `secondsRemaining` to reconnect before forfeiting.
- *   - opponent-reconnected        : opponent came back; clear the warning.
- *   - opponent-disconnected       : terminal — opponent is forfeited
- *     and a `game-result` is incoming. We show a brief confirmation
- *     so the player understands WHY the result modal is about to pop.
- *
- * Tailwind-only; no extra deps. Sits above the board, fixed position
- * relative to the game shell so layout doesn't jump.
- */
-
 import { useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { useLanguage } from "@/context/LanguageContext";
 import { useToast } from "@/hooks/use-toast";
 
 interface DisconnectPending {
-  // Absolute unix-ms deadline by which the opponent must reconnect.
-  // The server emits `graceUntilMs` (Date.now() + grace_window) — we
-  // use it directly so the countdown does not drift if the user's
-  // wall-clock disagrees with the server's by a few hundred ms.
   graceUntilMs: number;
 }
 
@@ -41,9 +21,6 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
   useEffect(() => {
     if (!socket) return;
     const onPending = (payload: { graceUntilMs?: number; secondsRemaining?: number }) => {
-      // The server emits `graceUntilMs` (absolute deadline). Older
-      // clients used to expect `secondsRemaining` — we tolerate both
-      // so a partial deploy can't break the banner.
       const deadline =
         typeof payload?.graceUntilMs === "number"
           ? payload.graceUntilMs
@@ -52,9 +29,6 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
       setPending({ graceUntilMs: deadline });
     };
     const onReconnected = () => {
-      // Track whether we were actually showing a pending banner — only
-      // toast in that case so we don't fire a confusing "reconnected"
-      // toast on the very first join (where no disconnect ever happened).
       setPending((prev) => {
         if (prev) {
           toast({
@@ -82,7 +56,6 @@ export function OpponentStatusBanner({ socket }: OpponentStatusBannerProps) {
     };
   }, [socket, toast, t]);
 
-  // Tick the live countdown every second while pending.
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!pending) return;

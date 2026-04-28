@@ -84,10 +84,8 @@ export async function registerRoutes(
       return res.status(400).json({ error: "invalid stake" });
     }
 
-    // Per-asset wallet validation. Single source of truth in
-    // shared/walletShape.ts — all three matchmaking entry points
-    // (find-match, create-challenge, accept-challenge) use the same
-    // validator so they cannot drift apart again.
+    // Wallet shape validation via shared/walletShape.ts (same validator
+    // used by create-challenge and accept-challenge).
     let cleanWallet = "";
     if (walletAddress && typeof walletAddress === "string" && isValidWalletShape(asset, walletAddress)) {
       cleanWallet = walletAddress;
