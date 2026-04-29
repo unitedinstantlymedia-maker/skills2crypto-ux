@@ -1,8 +1,5 @@
-// Thin client-side wrapper around the shared/games/xiangqi rules engine.
-// Owns reactive state for the React UI: current board, whose turn it is,
-// the selected piece, and its highlighted legal destinations. Mirrors the
-// CheckersEngine shape (callback-driven onStateChange) so XiangqiGame.tsx
-// can subscribe the same way.
+// Reactive client wrapper around the shared rules engine. Mirrors the
+// CheckersEngine shape (callback-driven onStateChange).
 
 import {
   applyMove,
@@ -25,14 +22,8 @@ export interface XiangqiClientState {
   selectedSquare: Square | null;
   validMoves: Square[];
   gameOver: boolean;
-  // Winning side (or 'draw'). Populated when the engine itself detects a
-  // terminal state. Resignation/timeout are reported externally by the
-  // socket layer, not by the engine.
   winner: Color | "draw" | null;
-  // Distinguish stalemate vs checkmate vs in-check vs ok for UI labels.
   status: Status;
-  // Counts plies since the last capture; used for the 60-ply no-capture
-  // draw rule. Resets to 0 on every capture.
   pliesSinceCapture: number;
 }
 
@@ -69,11 +60,7 @@ export class XiangqiEngine {
     this.notifyChange();
   }
 
-  // Hydrate the engine from a server-authoritative snapshot. Used on
-  // game-start and on reconnect so the client always lines up with the
-  // server's board, current turn, and no-capture counter — without this,
-  // a mid-match refresh would leave the player viewing the initial
-  // position with red to move regardless of true game state.
+  // Hydrate from a server snapshot (used on game-start and reconnect).
   hydrate(serializedBoard: string, currentTurn: Color, pliesSinceCapture: number): void {
     const board = deserializeBoard(serializedBoard);
     this.state = {
@@ -109,8 +96,7 @@ export class XiangqiEngine {
     this.notifyChange();
   }
 
-  // Apply a move LOCALLY initiated by this player. Returns true on
-  // success. Caller is responsible for emitting the wire event.
+  // Apply a local move; caller emits the wire event on success.
   makeMove(to: Square, playerColor: Color): boolean {
     if (this.state.gameOver) return false;
     if (this.state.currentTurn !== playerColor) return false;
@@ -125,9 +111,6 @@ export class XiangqiEngine {
     return true;
   }
 
-  // Apply a move announced by the opponent over the socket. Trusts the
-  // server's `newTurn`; we only use it to overwrite our local turn (it
-  // should always equal the flipped colour, but the server is authoritative).
   applyOpponentMove(from: Square, to: Square, newTurn: Color): void {
     this.applyAndAdvance({ from, to }, newTurn);
   }
@@ -140,15 +123,12 @@ export class XiangqiEngine {
     this.state.selectedSquare = null;
     this.state.validMoves = [];
 
-    // Engine-detected terminal states. Asian-rules stalemate counts as
-    // a loss for the side to move (same outcome as checkmate).
     const status = statusFor(this.state.board, this.state.currentTurn);
     this.state.status = status;
     if (status === "checkmate" || status === "stalemate") {
       this.state.gameOver = true;
       this.state.winner = this.state.currentTurn === "red" ? "black" : "red";
     } else if (this.state.pliesSinceCapture >= NO_CAPTURE_DRAW_PLIES) {
-      // 60-ply no-capture draw — applies regardless of whose turn it is.
       this.state.gameOver = true;
       this.state.winner = "draw";
     }
@@ -156,9 +136,7 @@ export class XiangqiEngine {
     this.notifyChange();
   }
 
-  // External terminal event from the socket layer (timeout / resign /
-  // disconnect / draw agreement). Sets gameOver locally so the UI stops
-  // accepting input.
+  // External terminal event (timeout / resign / disconnect / draw).
   forceEnd(winner: Color | "draw" | null): void {
     this.state.gameOver = true;
     this.state.winner = winner;

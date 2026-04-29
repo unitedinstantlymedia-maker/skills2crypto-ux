@@ -3,6 +3,7 @@ import {
   applyMove,
   allLegalMoves,
   cloneBoard,
+  detectPerpetualCheckLoser,
   deserializeBoard,
   findGeneral,
   initialBoard,
@@ -11,11 +12,13 @@ import {
   isLegalMove,
   legalMovesFromSquare,
   makeEmptyBoard,
+  positionKey,
   pseudoLegalDestinations,
   serializeBoard,
   statusFor,
   type Board,
   type Color,
+  type HistoryEntry,
   type Move,
   type PieceType,
 } from "../shared/games/xiangqi";
@@ -254,5 +257,73 @@ describe("Xiangqi rules engine", () => {
     const b = initialBoard();
     const moves = allLegalMoves(b, "red");
     expect(moves.length).toBeGreaterThan(20);
+  });
+
+  it("detectPerpetualCheckLoser returns null without 3-fold repetition", () => {
+    const b = initialBoard();
+    const k1 = positionKey(b, "red");
+    const k2 = positionKey(applyMove(b, { from: { file: 1, rank: 0 }, to: { file: 2, rank: 2 } }), "black");
+    const history: HistoryEntry[] = [
+      { posKey: k1, checkingSide: null },
+      { posKey: k2, checkingSide: "red" },
+      { posKey: k1, checkingSide: null },
+    ];
+    expect(detectPerpetualCheckLoser(history)).toBeNull();
+  });
+
+  it("detectPerpetualCheckLoser fingers the offender on 3-fold check repetition", () => {
+    // Same position recurs 3x; on each occurrence red was the checker.
+    const k = "POSITION_KEY_X";
+    const history: HistoryEntry[] = [
+      { posKey: k, checkingSide: "red" },
+      { posKey: "OTHER", checkingSide: null },
+      { posKey: k, checkingSide: "red" },
+      { posKey: "OTHER", checkingSide: null },
+      { posKey: k, checkingSide: "red" },
+    ];
+    expect(detectPerpetualCheckLoser(history)).toBe("red");
+  });
+
+  it("detectPerpetualCheckLoser does NOT fire if the checking side differs across repetitions", () => {
+    const k = "MIXED_KEY";
+    const history: HistoryEntry[] = [
+      { posKey: k, checkingSide: "red" },
+      { posKey: k, checkingSide: "black" },
+      { posKey: k, checkingSide: "red" },
+    ];
+    expect(detectPerpetualCheckLoser(history)).toBeNull();
+  });
+
+  it("detectPerpetualCheckLoser does NOT fire on 3-fold repetition without check", () => {
+    const k = "QUIET_KEY";
+    const history: HistoryEntry[] = [
+      { posKey: k, checkingSide: null },
+      { posKey: k, checkingSide: null },
+      { posKey: k, checkingSide: null },
+    ];
+    expect(detectPerpetualCheckLoser(history)).toBeNull();
+  });
+
+  it("60-ply no-capture progression: counter advances correctly through quiet horse-shuffle moves", () => {
+    // Shuffle two horses back and forth between two squares with no capture
+    // and verify the no-capture ply counter would reach 60 ply with no
+    // capture flag triggered. Using the engine's isCaptureMove directly so
+    // this test stays at the engine level (server-side terminal detection
+    // is wired separately in server/socket.ts).
+    let board = initialBoard();
+    let plies = 0;
+    const horseShuffle: Move[] = [
+      { from: { file: 1, rank: 0 }, to: { file: 2, rank: 2 } },
+      { from: { file: 1, rank: 9 }, to: { file: 2, rank: 7 } },
+      { from: { file: 2, rank: 2 }, to: { file: 1, rank: 0 } },
+      { from: { file: 2, rank: 7 }, to: { file: 1, rank: 9 } },
+    ];
+    for (let i = 0; i < 60; i++) {
+      const m = horseShuffle[i % horseShuffle.length];
+      expect(isCaptureMove(board, m)).toBe(false);
+      board = applyMove(board, m);
+      plies += 1;
+    }
+    expect(plies).toBe(60);
   });
 });

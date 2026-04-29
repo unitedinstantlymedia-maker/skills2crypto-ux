@@ -54,13 +54,9 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
   const handleStateChange = useCallback(
     (newState: XiangqiClientState) => {
       setGameState(newState);
-      // Engine-detected terminal state (checkmate / stalemate / general
-      // captured / 60-ply draw): show the local Game Over modal and stop
-      // the clock. We do NOT notify the server here — the SERVER runs the
-      // same shared engine on every accepted move, detects the same
-      // terminal state authoritatively, and broadcasts `game-result`.
-      // That removes the only forge-able terminal path (a malicious
-      // client emitting "I won by checkmate").
+      // Local engine detected terminal state — show the modal and stop the
+      // clock. Server's `game-result` is the canonical signal; we don't
+      // notify it from here.
       if (newState.gameOver && !gameEndedRef.current) {
         gameEndedRef.current = true;
         setGameEnded(true);
@@ -104,13 +100,7 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
       setWaitingForOpponent(false);
       const engine = new XiangqiEngine(handleStateChange);
       engineRef.current = engine;
-      // Server includes the authoritative board snapshot + currentTurn +
-      // no-capture counter on every game-start. We always hydrate from
-      // it so reconnecting mid-match (refresh, transient disconnect,
-      // tab suspend) restores the true game state — board, whose turn
-      // it is, and the 60-ply draw counter — instead of resetting to
-      // the initial position. Falls back to a fresh start only if the
-      // server somehow omits the snapshot.
+      // Hydrate from server snapshot so reconnect restores true state.
       if (data?.publicState?.board) {
         engine.hydrate(
           data.publicState.board,
@@ -284,21 +274,16 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
           const from = gameState.selectedSquare;
           if (engineRef.current.makeMove(sq, playerColor)) {
             const newTurn: Color = playerColor === "red" ? "black" : "red";
-            // Optimistically deduct a tiny slice for the broadcast — the
-            // server overrides with authoritative times anyway.
-            const nextRed = playerColor === "red" ? redTime : redTime;
-            const nextBlack = playerColor === "black" ? blackTime : blackTime;
             if (socket && matchId) {
               socket.emit("xiangqi-move", {
                 matchId,
                 from,
                 to: sq,
                 newTurn,
-                redTime: nextRed,
-                blackTime: nextBlack,
+                redTime,
+                blackTime,
               });
             }
-            // Clear any local draw-offer state since we just played a move.
             setDrawOfferedByOpponent(false);
             setDrawOfferSent(false);
           }

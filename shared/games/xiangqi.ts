@@ -446,3 +446,39 @@ export function deserializeBoard(s: string): Board {
   }
   return b;
 }
+
+// Position key = serialized board + side to move. Used by the perpetual-
+// check detector to recognise repeated positions.
+export function positionKey(b: Board, sideToMove: Color): string {
+  return serializeBoard(b) + ":" + sideToMove;
+}
+
+// One entry of the per-game move-history log used for perpetual-check
+// detection. `posKey` is the position AFTER the move was applied;
+// `checkingSide` is the colour that delivered check by the move (null
+// if the move did not deliver check).
+export interface HistoryEntry {
+  posKey: string;
+  checkingSide: Color | null;
+}
+
+// Basic perpetual-check rule: if the same position has occurred 3+ times
+// in a single game and on every one of those occurrences the same side
+// delivered check, that side loses. Returns the offending colour (the
+// loser) or null. The locked spec defers full WXF rules; this is the
+// minimum they require: "implement basic perpetual-check loss only."
+export function detectPerpetualCheckLoser(history: HistoryEntry[]): Color | null {
+  const buckets = new Map<string, HistoryEntry[]>();
+  for (const e of history) {
+    const list = buckets.get(e.posKey) ?? [];
+    list.push(e);
+    buckets.set(e.posKey, list);
+  }
+  for (const list of buckets.values()) {
+    if (list.length < 3) continue;
+    const first = list[0].checkingSide;
+    if (first === null) continue;
+    if (list.every((e) => e.checkingSide === first)) return first;
+  }
+  return null;
+}

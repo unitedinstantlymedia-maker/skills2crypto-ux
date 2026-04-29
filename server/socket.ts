@@ -16,15 +16,19 @@ import {
 } from "../shared/games/dominoes";
 import {
   applyMove as xiangqiApplyMove,
+  detectPerpetualCheckLoser as xiangqiDetectPerpetualCheckLoser,
   findGeneral as xiangqiFindGeneral,
   initialBoard as xiangqiInitialBoard,
   INITIAL_TIME_MS as XIANGQI_INITIAL_TIME_MS,
   isCaptureMove as xiangqiIsCaptureMove,
+  isInCheck as xiangqiIsInCheck,
   isLegalMove as xiangqiIsLegalMove,
+  positionKey as xiangqiPositionKey,
   serializeBoard as xiangqiSerializeBoard,
   statusFor as xiangqiStatusFor,
   type Board as XiangqiBoard,
   type Color as XiangqiColor,
+  type HistoryEntry as XiangqiHistoryEntry,
   type Square as XiangqiSquare,
 } from "../shared/games/xiangqi";
 
@@ -599,26 +603,17 @@ interface XiangqiPlayerInfo {
 interface XiangqiRoom {
   players: Map<string, XiangqiPlayerInfo>;
   started: boolean;
-  // Server-authoritative board state. Used to validate every move's
-  // legality with the shared rules engine — clients cannot spoof moves.
+  // Server-authoritative board, turn, clocks, no-capture counter,
+  // outstanding draw offer, and per-game position history (for
+  // perpetual-check detection).
   board: XiangqiBoard;
-  // Server-authoritative turn — only the player whose colour equals
-  // `currentTurn` may submit a move. Updated atomically on each accepted
-  // move so a malicious client can't shove moves out of turn.
   currentTurn: XiangqiColor;
-  // Server-authoritative clock. `lastTickAt` is the wall-clock instant
-  // when the active player's clock started running for the current turn.
-  // On each move/resign/timeout we deduct (Date.now() - lastTickAt) from
-  // the active side's remaining time before applying state changes.
   redTime: number;
   blackTime: number;
   lastTickAt: number;
-  // Plies since the last capturing move. Resets to 0 on capture and
-  // settles the game as a draw if it reaches XIANGQI_NO_CAPTURE_DRAW_PLIES.
   pliesSinceCapture: number;
-  // Tracks whether either side has offered a draw, so the opposite side's
-  // 'xiangqi-draw-accept' can be matched against an outstanding offer.
   drawOfferedBy: XiangqiColor | null;
+  history: XiangqiHistoryEntry[];
 }
 
 const xiangqiRooms = new Map<string, XiangqiRoom>();
@@ -653,6 +648,7 @@ function startXiangqiGame(io: SocketIOServer, matchId: string, room: XiangqiRoom
   room.lastTickAt = Date.now();
   room.pliesSinceCapture = 0;
   room.drawOfferedBy = null;
+  room.history = [{ posKey: xiangqiPositionKey(room.board, room.currentTurn), checkingSide: null }];
   io.to(`xiangqi:${matchId}`).emit("xiangqi-game-start", {
     publicState: xiangqiPublicState(room),
   });
@@ -2055,6 +2051,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
           lastTickAt: 0,
           pliesSinceCapture: 0,
           drawOfferedBy: null,
+          history: [],
         };
         xiangqiRooms.set(matchId, room);
       }
@@ -2103,10 +2100,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchId: string;
       from: { file: number; rank: number };
       to: { file: number; rank: number };
-      // The client also sends newTurn/redTime/blackTime per the locked
-      // wire spec, but the server ignores all three — its own values are
-      // authoritative and broadcast back. Keeping them in the payload
-      // shape so the spec contract is unchanged.
+      // Wire-format compatibility only — server ignores client-claimed
+      // turn/clock and overrides with its own authoritative values.
       newTurn?: XiangqiColor;
       redTime?: number;
       blackTime?: number;
@@ -2134,8 +2129,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Validate move SHAPE before consulting the engine. The shared
-      // engine assumes integer file [0..8] / rank [0..9] coordinates.
+      // Validate move shape before consulting the engine.
       const isValidSquare = (s: unknown): s is XiangqiSquare =>
         !!s &&
         typeof (s as XiangqiSquare).file === 'number' &&
@@ -2149,9 +2143,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Authoritative clock: bleed elapsed think-time off the active
-      // clock FIRST. If it has truly drained, the mover loses on time —
-      // forfeit and settle the match here rather than accepting the move.
+      // Authoritative clock: deduct think-time first; forfeit if drained.
       const now = Date.now();
       const elapsed = Math.max(0, now - room.lastTickAt);
       const remaining =
@@ -2171,18 +2163,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Server-authoritative legality: run the shared rules engine
-      // against the server's board. Any illegal move (wrong piece,
-      // blocked path, self-check, palace/river violation, etc.) is
-      // dropped on the floor.
+      // Server-authoritative legality via the shared rules engine.
       const move = { from: data.from, to: data.to };
       if (!xiangqiIsLegalMove(room.board, player.color, move)) {
         console.log("[socket] xiangqi-move rejected - illegal move", data.from, "→", data.to);
         return;
       }
 
-      // Apply the move to the server's authoritative board. Track the
-      // capture flag for the 60-ply no-capture draw counter.
       const wasCapture = xiangqiIsCaptureMove(room.board, move);
       room.board = xiangqiApplyMove(room.board, move);
       room.pliesSinceCapture = wasCapture ? 0 : room.pliesSinceCapture + 1;
@@ -2194,9 +2181,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         room.blackTime = Math.max(0, room.blackTime - elapsed);
       }
 
-      // Any move clears any outstanding draw offer — the spec is that a
-      // draw offer is implicitly declined the moment the offered side
-      // continues playing.
+      // Any move implicitly declines any outstanding draw offer.
       room.drawOfferedBy = null;
 
       const opponentColor: XiangqiColor = player.color === 'red' ? 'black' : 'red';
@@ -2205,25 +2190,27 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       markGameplayActivity(data.matchId);
 
-      // Broadcast the move to the OPPONENT only — the moving client has
-      // already applied the move locally via its optimistic engine call.
-      // Echoing it back would cause a second engine advance from a stale
-      // `from` square, corrupting the board / turn / no-capture counter.
+      // Opponent-only broadcast: the mover already applied the move
+      // optimistically; echoing it would double-advance their engine.
       socket.to(`xiangqi:${data.matchId}`).emit('opponent-xiangqi-move', {
         from: data.from,
         to: data.to,
-        // Server-authoritative values — clients overwrite their own
-        // hints with these.
         newTurn: room.currentTurn,
         redTime: room.redTime,
         blackTime: room.blackTime,
       });
 
-      // ── Server-side terminal-state detection ──
-      // Order matters: general capture is checked first because once the
-      // opposing general is off the board, statusFor() can return
-      // misleading values. Then checkmate/stalemate via shared engine,
-      // finally the 60-ply no-capture draw rule.
+      // Record this position + whether the move delivered check, for
+      // perpetual-check detection downstream.
+      const deliveredCheck = xiangqiIsInCheck(room.board, opponentColor);
+      room.history.push({
+        posKey: xiangqiPositionKey(room.board, room.currentTurn),
+        checkingSide: deliveredCheck ? player.color : null,
+      });
+
+      // Terminal-state detection. Order matters: general capture first
+      // (statusFor can be misleading if a general is off-board), then
+      // checkmate/stalemate, then perpetual check, then 60-ply draw.
       const opponentGeneral = xiangqiFindGeneral(room.board, opponentColor);
       let terminal: { reason: string; winner: XiangqiColor | null } | null = null;
       if (!opponentGeneral) {
@@ -2233,11 +2220,16 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         if (status === 'checkmate') {
           terminal = { reason: 'checkmate', winner: player.color };
         } else if (status === 'stalemate') {
-          // Asian-rules stalemate: side to move with no legal reply
-          // loses. So the mover wins, same as checkmate.
+          // Asian-rules stalemate: side to move loses, so mover wins.
           terminal = { reason: 'stalemate', winner: player.color };
-        } else if (room.pliesSinceCapture >= XIANGQI_NO_CAPTURE_DRAW_PLIES) {
-          terminal = { reason: 'draw', winner: null };
+        } else {
+          const offender = xiangqiDetectPerpetualCheckLoser(room.history);
+          if (offender) {
+            const winner: XiangqiColor = offender === 'red' ? 'black' : 'red';
+            terminal = { reason: 'perpetual_check', winner };
+          } else if (room.pliesSinceCapture >= XIANGQI_NO_CAPTURE_DRAW_PLIES) {
+            terminal = { reason: 'draw', winner: null };
+          }
         }
       }
 
