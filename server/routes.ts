@@ -34,7 +34,7 @@ async function addChallengeHistory(
   await redis.expire(`challenge:${challengeId}:history`, EXPIRED_CHALLENGE_TTL);
 }
 
-const GAMES: readonly Game[] = ["chess", "tetris", "checkers", "battleship"] as const;
+const GAMES: readonly Game[] = ["chess", "tetris", "checkers", "battleship", "dominoes"] as const;
 const ASSETS: readonly Asset[] = ["USDT", "ETH", "BNB", "TON"] as const;
 
 function isGame(x: unknown): x is Game {

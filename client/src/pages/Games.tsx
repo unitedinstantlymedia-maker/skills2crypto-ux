@@ -9,6 +9,7 @@ import photorealisticChessImage from "@assets/generated_images/elegant_photoreal
 import cleanTetrisImage from "@assets/generated_images/clean_3d_colorful_tetris_blocks.png";
 import photorealisticCheckersImage from "@assets/generated_images/classic_photorealistic_checkers_board.png";
 import cinematicBattleshipImage from "@assets/generated_images/cinematic_realistic_battleship_game.png";
+import elegantDominoesImage from "@assets/generated_images/elegant_photorealistic_dominoes.png";
 
 type GameCard = { id: Game; name: string; image: string; players: string };
 
@@ -17,6 +18,7 @@ const GAMES: GameCard[] = [
   { id: "tetris",     name: "TETRIS",       image: cleanTetrisImage,           players: "850"  },
   { id: "checkers",   name: "Checkers Pro", image: photorealisticCheckersImage,players: "430"  },
   { id: "battleship", name: "Battleship",   image: cinematicBattleshipImage,   players: "342"  },
+  { id: "dominoes",   name: "Dominoes",     image: elegantDominoesImage,       players: "210"  },
 ];
 
 export default function Games() {

@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Wallet, Shield, Swords, Crown, Gamepad2, Grid3X3, Ship } from "lucide-react";
+import { ArrowLeft, Wallet, Shield, Swords, Crown, Gamepad2, Grid3X3, Ship, Square } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLanguage } from "@/context/LanguageContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -62,11 +62,12 @@ export default function Rules() {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="chess" className="w-full">
-              <TabsList className="grid w-full grid-cols-4 mb-4">
+              <TabsList className="grid w-full grid-cols-5 mb-4">
                 <TabsTrigger value="chess" className="text-xs"><Crown className="h-3 w-3 mr-1" />{t('Chess', 'Chess')}</TabsTrigger>
                 <TabsTrigger value="tetris" className="text-xs"><Gamepad2 className="h-3 w-3 mr-1" />{t('Tetris', 'Tetris')}</TabsTrigger>
                 <TabsTrigger value="checkers" className="text-xs"><Grid3X3 className="h-3 w-3 mr-1" />{t('Checkers', 'Checkers')}</TabsTrigger>
                 <TabsTrigger value="battleship" className="text-xs"><Ship className="h-3 w-3 mr-1" />{t('Battleship', 'Battleship')}</TabsTrigger>
+                <TabsTrigger value="dominoes" className="text-xs"><Square className="h-3 w-3 mr-1" />{t('Dominoes', 'Dominoes')}</TabsTrigger>
               </TabsList>
               <TabsContent value="chess" className="text-sm text-muted-foreground space-y-2">
                 <p>{t('Standard chess rules apply. Each player has 30 minutes on their clock.', 'Standard chess rules apply. Each player has 30 minutes on their clock.')}</p>
@@ -89,6 +90,12 @@ export default function Rules() {
                 <p>{t('Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).', 'Place 5 ships on your grid: Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).')}</p>
                 <p>{t('Take turns firing at enemy coordinates. Hit = red, Miss = gray.', 'Take turns firing at enemy coordinates. Hit = red, Miss = gray.')}</p>
                 <p>{t('60 seconds per turn. First to sink all 5 enemy ships wins.', '60 seconds per turn. First to sink all 5 enemy ships wins.')}</p>
+              </TabsContent>
+              <TabsContent value="dominoes" className="text-sm text-muted-foreground space-y-2">
+                <p>{t('Double-six block dominoes. Each player is dealt 7 tiles; 14 tiles stay face-down (no draws).', 'Double-six block dominoes. Each player is dealt 7 tiles; 14 tiles stay face-down (no draws).')}</p>
+                <p>{t('The player holding the highest double leads with that tile. Each turn, place a tile whose pip matches an open end of the chain.', 'The player holding the highest double leads with that tile. Each turn, place a tile whose pip matches an open end of the chain.')}</p>
+                <p>{t('If you have no legal move, you must pass. Two consecutive passes = blocked board: lowest pip count wins, ties draw.', 'If you have no legal move, you must pass. Two consecutive passes = blocked board: lowest pip count wins, ties draw.')}</p>
+                <p>{t('First player to empty their hand wins. 10 minutes per side on the clock.', 'First player to empty their hand wins. 10 minutes per side on the clock.')}</p>
               </TabsContent>
             </Tabs>
           </CardContent>

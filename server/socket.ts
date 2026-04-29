@@ -2,6 +2,18 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { db } from "./db";
 import { matches } from "../shared/schema";
+import {
+  blockedWinner as dominoesBlockedWinner,
+  canPlayAt as dominoesCanPlayAt,
+  dealHands as dominoesDealHands,
+  hasLegalMove as dominoesHasLegalMove,
+  INITIAL_TIME_MS as DOMINOES_INITIAL_TIME_MS,
+  placeTile as dominoesPlaceTile,
+  type ChainEnd as DominoesChainEnd,
+  type PlacedTile as DominoesPlacedTile,
+  type PlayerRole as DominoesPlayerRole,
+  type Tile as DominoesTile,
+} from "../shared/games/dominoes";
 import { redis } from "./redis";
 
 interface SocketOptions {
@@ -421,6 +433,117 @@ interface BattleshipRoom {
 
 const battleshipRooms = new Map<string, BattleshipRoom>();
 
+interface DominoesPlayerInfo {
+  socketId: string;
+  role: DominoesPlayerRole;
+  hand: DominoesTile[];
+}
+
+interface DominoesRoom {
+  players: Map<string, DominoesPlayerInfo>;
+  started: boolean;
+  dealt: boolean;
+  chain: DominoesPlacedTile[];
+  leftEnd: number | null;
+  rightEnd: number | null;
+  currentTurn: DominoesPlayerRole;
+  // The tile the starter MUST lead with — enforced server-side on the
+  // first move so a malicious client can't substitute a different tile.
+  // Cleared (set to null) once the lead move has been played.
+  starterTile: DominoesTile | null;
+  p1Time: number;
+  p2Time: number;
+  consecutivePasses: number;
+  // Wall-clock at the moment the active player's turn started — used to
+  // deduct elapsed time from their server-side clock on each move/pass so
+  // the server stays the source of truth for the timer.
+  lastTickAt: number;
+}
+
+const dominoesRooms = new Map<string, DominoesRoom>();
+
+function dominoesPublicState(room: DominoesRoom) {
+  let p1: DominoesPlayerInfo | undefined;
+  let p2: DominoesPlayerInfo | undefined;
+  for (const p of room.players.values()) {
+    if (p.role === "p1") p1 = p;
+    else p2 = p;
+  }
+  // Bleed elapsed time from the active player's clock for any consumer
+  // that reads state mid-turn (snapshots, reconnect payloads).
+  const now = Date.now();
+  const elapsed = room.dealt ? Math.max(0, now - room.lastTickAt) : 0;
+  const p1Time =
+    room.currentTurn === "p1" ? Math.max(0, room.p1Time - elapsed) : room.p1Time;
+  const p2Time =
+    room.currentTurn === "p2" ? Math.max(0, room.p2Time - elapsed) : room.p2Time;
+  return {
+    chain: room.chain,
+    leftEnd: room.leftEnd,
+    rightEnd: room.rightEnd,
+    currentTurn: room.currentTurn,
+    p1TileCount: p1?.hand.length ?? 0,
+    p2TileCount: p2?.hand.length ?? 0,
+    p1Time,
+    p2Time,
+    consecutivePasses: room.consecutivePasses,
+  };
+}
+
+function startDominoesGame(io: SocketIOServer, room: DominoesRoom): void {
+  const seed = Math.floor(Math.random() * 0xffffffff);
+  const deal = dominoesDealHands(seed);
+  let p1Player: DominoesPlayerInfo | undefined;
+  let p2Player: DominoesPlayerInfo | undefined;
+  for (const p of room.players.values()) {
+    if (p.role === "p1") p1Player = p;
+    else p2Player = p;
+  }
+  if (!p1Player || !p2Player) return;
+  p1Player.hand = deal.p1Hand;
+  p2Player.hand = deal.p2Hand;
+  room.chain = [];
+  room.leftEnd = null;
+  room.rightEnd = null;
+  room.currentTurn = deal.starter;
+  room.starterTile = deal.starterTile;
+  room.p1Time = DOMINOES_INITIAL_TIME_MS;
+  room.p2Time = DOMINOES_INITIAL_TIME_MS;
+  room.consecutivePasses = 0;
+  room.dealt = true;
+  room.lastTickAt = Date.now();
+
+  const publicState = dominoesPublicState(room);
+  const p1Sock = io.sockets.sockets.get(p1Player.socketId);
+  const p2Sock = io.sockets.sockets.get(p2Player.socketId);
+  if (p1Sock) {
+    p1Sock.emit("dominoes-game-start", {
+      role: "p1",
+      hand: p1Player.hand,
+      publicState,
+      starterTile: deal.starterTile,
+    });
+  }
+  if (p2Sock) {
+    p2Sock.emit("dominoes-game-start", {
+      role: "p2",
+      hand: p2Player.hand,
+      publicState,
+      starterTile: deal.starterTile,
+    });
+  }
+}
+
+function dominoesOpponentId(
+  room: DominoesRoom,
+  playerId: string,
+): string | null {
+  for (const id of room.players.keys()) {
+    if (id !== playerId) return id;
+  }
+  return null;
+}
+
 // Tracks matches whose on-chain escrow has been funded by both players
 // (i.e. the contract emitted MatchActive). Game-start events are gated on
 // this set so gameplay never begins before crypto is locked.
@@ -503,6 +626,14 @@ export function markMatchFunded(matchId: string): void {
     io.to(`battleship:${matchId}`).emit('battleship-game-start');
     markGameStarted(matchId);
     console.log("[socket] battleship-game-start (post-funding)", matchId);
+  }
+
+  const dominoes = dominoesRooms.get(matchId);
+  if (dominoes && dominoes.players.size === 2 && !dominoes.started) {
+    dominoes.started = true;
+    startDominoesGame(io, dominoes);
+    markGameStarted(matchId);
+    console.log("[socket] dominoes-game-start (post-funding)", matchId);
   }
 }
 
@@ -1410,6 +1541,340 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
     });
 
+    // ─────────────────── Dominoes ───────────────────
+
+    socket.on("join-dominoes-match", (data: { matchId: string; playerId: string }) => {
+      const { matchId, playerId } = data;
+      socket.join(`dominoes:${matchId}`);
+      console.log("[socket] join dominoes match", matchId, socket.id, playerId);
+
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+
+      socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        socket.to(`dominoes:${matchId}`).emit('opponent-reconnected', { matchId });
+      }
+
+      let room = dominoesRooms.get(matchId);
+      if (!room) {
+        room = {
+          players: new Map(),
+          started: false,
+          dealt: false,
+          chain: [],
+          leftEnd: null,
+          rightEnd: null,
+          currentTurn: 'p1',
+          starterTile: null,
+          p1Time: DOMINOES_INITIAL_TIME_MS,
+          p2Time: DOMINOES_INITIAL_TIME_MS,
+          consecutivePasses: 0,
+          lastTickAt: 0,
+        };
+        dominoesRooms.set(matchId, room);
+      }
+
+      const existingPlayer = room.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.socketId = socket.id;
+        socket.emit('dominoes-role-assigned', { role: existingPlayer.role });
+        if (room.dealt) {
+          // On reconnect, re-send this player's full game state.
+          socket.emit('dominoes-game-start', {
+            role: existingPlayer.role,
+            hand: existingPlayer.hand,
+            publicState: dominoesPublicState(room),
+          });
+        }
+        console.log("[socket] dominoes reconnect, role preserved:", existingPlayer.role);
+        return;
+      }
+
+      if (room.players.size >= 2) {
+        console.log("[socket] dominoes match full, rejecting player", playerId);
+        socket.emit('match-full');
+        return;
+      }
+
+      const existingRoles = Array.from(room.players.values()).map(p => p.role);
+      const assignedRole: DominoesPlayerRole = existingRoles.includes('p1') ? 'p2' : 'p1';
+
+      room.players.set(playerId, {
+        socketId: socket.id,
+        role: assignedRole,
+        hand: [],
+      });
+
+      socket.emit('dominoes-role-assigned', { role: assignedRole });
+      console.log("[socket] dominoes role assigned", matchId, playerId, assignedRole);
+
+      if (room.players.size === 2 && !room.started) {
+        if (fundedMatches.has(matchId)) {
+          room.started = true;
+          startDominoesGame(io, room);
+          markGameStarted(matchId);
+          console.log("[socket] dominoes-game-start", matchId);
+        } else {
+          console.log("[socket] dominoes-game-start gated on funding", matchId);
+        }
+      }
+    });
+
+    socket.on("dominoes-move", (data: { matchId: string; tileA: number; tileB: number; end: DominoesChainEnd }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = dominoesRooms.get(data.matchId);
+      if (!room || !room.dealt) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) return;
+
+      // Helper: shove the player's true server-side hand back at them so
+      // any optimistic mutation on the client is reverted by re-sync.
+      const reject = (reason: string): void => {
+        console.log("[socket] dominoes-move rejected —", reason);
+        socket.emit('dominoes-resync', {
+          hand: player.hand,
+          publicState: dominoesPublicState(room),
+          reason,
+        });
+      };
+
+      if (player.role !== room.currentTurn) {
+        reject("not your turn");
+        return;
+      }
+      if (data.end !== 'left' && data.end !== 'right') {
+        reject("invalid end");
+        return;
+      }
+      if (
+        typeof data.tileA !== 'number' ||
+        typeof data.tileB !== 'number' ||
+        data.tileA < 0 || data.tileA > 6 ||
+        data.tileB < 0 || data.tileB > 6
+      ) {
+        reject("invalid tile pips");
+        return;
+      }
+
+      // Resolve by tile identity (canonical a<=b). Tile order in the hand
+      // is server-private — the client uses identity so its UI can sort
+      // freely without ever desyncing on indices.
+      const wantA = Math.min(data.tileA, data.tileB);
+      const wantB = Math.max(data.tileA, data.tileB);
+      const tileIndex = player.hand.findIndex((t) => t.a === wantA && t.b === wantB);
+      if (tileIndex === -1) {
+        reject("tile not in hand");
+        return;
+      }
+      const tile = player.hand[tileIndex];
+      const chainEnd = data.end === 'left' ? room.leftEnd : room.rightEnd;
+      if (!dominoesCanPlayAt(tile, chainEnd)) {
+        reject("tile does not match end");
+        return;
+      }
+      // Lead-tile enforcement: the very first move of the game MUST be
+      // the starter's mandated highest-double (or heaviest if no doubles).
+      if (room.chain.length === 0 && room.starterTile) {
+        if (tile.a !== room.starterTile.a || tile.b !== room.starterTile.b) {
+          reject("must lead with starter tile");
+          return;
+        }
+      }
+
+      // Deduct elapsed clock time from the moving player BEFORE applying the
+      // move so the public-state snapshot reflects the time spent thinking.
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      if (room.currentTurn === 'p1') {
+        room.p1Time = Math.max(0, room.p1Time - elapsed);
+      } else {
+        room.p2Time = Math.max(0, room.p2Time - elapsed);
+      }
+
+      markGameplayActivity(data.matchId);
+
+      const { placed, newEnd } = dominoesPlaceTile(tile, chainEnd, data.end, player.role);
+      if (data.end === 'left') {
+        room.chain.unshift(placed);
+        room.leftEnd = newEnd;
+        if (room.rightEnd === null) room.rightEnd = placed.right;
+      } else {
+        room.chain.push(placed);
+        room.rightEnd = newEnd;
+        if (room.leftEnd === null) room.leftEnd = placed.left;
+      }
+      // First lead move: both ends are exposed by the single placed tile.
+      if (room.chain.length === 1) {
+        room.leftEnd = placed.left;
+        room.rightEnd = placed.right;
+      }
+      player.hand.splice(tileIndex, 1);
+      room.consecutivePasses = 0;
+      // The starter's lead requirement is satisfied — clear the gate.
+      room.starterTile = null;
+
+      const winnerByEmpty = player.hand.length === 0;
+
+      if (winnerByEmpty) {
+        const opponentId = dominoesOpponentId(room, socketInfo.playerId);
+        if (!opponentId) return;
+        storeGameResult(data.matchId, 'dominoes', socketInfo.playerId, opponentId, 'played_out');
+        io.to(`dominoes:${data.matchId}`).emit('dominoes-move-played', {
+          player: player.role,
+          placed,
+          end: data.end,
+          publicState: dominoesPublicState(room),
+        });
+        io.to(`dominoes:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId: socketInfo.playerId,
+          loserId: opponentId,
+          reason: 'played_out',
+        });
+        dominoesRooms.delete(data.matchId);
+        return;
+      }
+
+      // Switch turn and start the opponent's clock.
+      room.currentTurn = room.currentTurn === 'p1' ? 'p2' : 'p1';
+      room.lastTickAt = Date.now();
+
+      io.to(`dominoes:${data.matchId}`).emit('dominoes-move-played', {
+        player: player.role,
+        placed,
+        end: data.end,
+        publicState: dominoesPublicState(room),
+      });
+    });
+
+    socket.on("dominoes-pass", (data: { matchId: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = dominoesRooms.get(data.matchId);
+      if (!room || !room.dealt) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.role !== room.currentTurn) return;
+
+      // Server-authoritative legality: a pass is only allowed if the player
+      // truly has no playable tile against either chain end.
+      if (dominoesHasLegalMove(player.hand, room.leftEnd, room.rightEnd)) {
+        console.log("[socket] dominoes-pass rejected — legal move available");
+        return;
+      }
+
+      // Deduct elapsed clock from the passing player.
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      if (room.currentTurn === 'p1') {
+        room.p1Time = Math.max(0, room.p1Time - elapsed);
+      } else {
+        room.p2Time = Math.max(0, room.p2Time - elapsed);
+      }
+
+      markGameplayActivity(data.matchId);
+      room.consecutivePasses += 1;
+
+      // Two consecutive passes = blocked board → settle by lowest pip count.
+      if (room.consecutivePasses >= 2) {
+        let p1Player: DominoesPlayerInfo | undefined;
+        let p2Player: DominoesPlayerInfo | undefined;
+        let p1Id = '';
+        let p2Id = '';
+        for (const [id, p] of room.players.entries()) {
+          if (p.role === 'p1') { p1Player = p; p1Id = id; }
+          else { p2Player = p; p2Id = id; }
+        }
+        if (!p1Player || !p2Player) return;
+        const winnerRole = dominoesBlockedWinner(p1Player.hand, p2Player.hand);
+        if (winnerRole === null) {
+          storeGameResult(data.matchId, 'dominoes', null, null, 'draw');
+          io.to(`dominoes:${data.matchId}`).emit('dominoes-pass-played', {
+            player: player.role,
+            publicState: dominoesPublicState(room),
+          });
+          io.to(`dominoes:${data.matchId}`).emit('game-result', {
+            matchId: data.matchId,
+            winnerId: null,
+            loserId: null,
+            reason: 'draw',
+          });
+        } else {
+          const winnerId = winnerRole === 'p1' ? p1Id : p2Id;
+          const loserId = winnerRole === 'p1' ? p2Id : p1Id;
+          storeGameResult(data.matchId, 'dominoes', winnerId, loserId, 'blocked');
+          io.to(`dominoes:${data.matchId}`).emit('dominoes-pass-played', {
+            player: player.role,
+            publicState: dominoesPublicState(room),
+          });
+          io.to(`dominoes:${data.matchId}`).emit('game-result', {
+            matchId: data.matchId,
+            winnerId,
+            loserId,
+            reason: 'blocked',
+          });
+        }
+        dominoesRooms.delete(data.matchId);
+        return;
+      }
+
+      // Switch turn and start the opponent's clock.
+      room.currentTurn = room.currentTurn === 'p1' ? 'p2' : 'p1';
+      room.lastTickAt = Date.now();
+
+      io.to(`dominoes:${data.matchId}`).emit('dominoes-pass-played', {
+        player: player.role,
+        publicState: dominoesPublicState(room),
+      });
+    });
+
+    socket.on("dominoes-timeout", (data: { matchId: string; role: DominoesPlayerRole }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = dominoesRooms.get(data.matchId);
+      if (!room || !room.dealt) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.role !== data.role || room.currentTurn !== data.role) return;
+
+      // Server-side clock gate: only honor the timeout if the player's
+      // remaining time has actually drained to zero on the authoritative
+      // clock. Otherwise a malicious client could declare a fake timeout.
+      const elapsed = Math.max(0, Date.now() - room.lastTickAt);
+      const remaining =
+        data.role === 'p1' ? room.p1Time - elapsed : room.p2Time - elapsed;
+      if (remaining > 0) {
+        console.log("[socket] dominoes-timeout rejected — clock not drained", remaining);
+        return;
+      }
+
+      const opponentId = dominoesOpponentId(room, socketInfo.playerId);
+      if (!opponentId) return;
+
+      storeGameResult(data.matchId, 'dominoes', opponentId, socketInfo.playerId, 'timeout');
+      io.to(`dominoes:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId: opponentId,
+        loserId: socketInfo.playerId,
+        reason: 'timeout',
+      });
+      dominoesRooms.delete(data.matchId);
+    });
+
     socket.on("battleship-timeout", (data: { matchId: string; role: 'player1' | 'player2' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1452,6 +1917,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         io.to(`tetris:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`checkers:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`battleship:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
+        io.to(`dominoes:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
 
         const timeout = setTimeout(() => {
           const currentSocketId = playerToSocket.get(playerId);
@@ -1479,11 +1945,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               matchRooms.has(matchId) ||
               tetrisRooms.has(matchId) ||
               checkersRooms.has(matchId) ||
-              battleshipRooms.has(matchId);
+              battleshipRooms.has(matchId) ||
+              dominoesRooms.has(matchId);
             matchRooms.delete(matchId);
             tetrisRooms.delete(matchId);
             checkersRooms.delete(matchId);
             battleshipRooms.delete(matchId);
+            dominoesRooms.delete(matchId);
             // Also clear funded/started bookkeeping so these sets do not
             // grow unbounded over the process lifetime when matches are
             // abandoned before play.
@@ -1496,6 +1964,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               io.to(`tetris:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
               io.to(`checkers:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
               io.to(`battleship:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+              io.to(`dominoes:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
             }
             return;
           }
@@ -1571,6 +2040,25 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
                 });
               }
               battleshipRooms.delete(matchId);
+            }
+          }
+
+          const dominoesRoom = dominoesRooms.get(matchId);
+          if (dominoesRoom && dominoesRoom.dealt) {
+            const player = dominoesRoom.players.get(playerId);
+            if (player) {
+              const winnerId = dominoesOpponentId(dominoesRoom, playerId);
+              if (winnerId) {
+                storeGameResult(matchId, 'dominoes', winnerId, playerId, 'disconnect');
+                io.to(`dominoes:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
+                io.to(`dominoes:${matchId}`).emit('game-result', {
+                  matchId,
+                  winnerId,
+                  loserId: playerId,
+                  reason: 'disconnect'
+                });
+              }
+              dominoesRooms.delete(matchId);
             }
           }
         }, 30000);
