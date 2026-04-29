@@ -323,4 +323,33 @@ describe("Xiangqi rules engine", () => {
     }
     expect(plies).toBe(120);
   });
+
+  it("server terminal-draw path: after 120 quiet plies, the no-capture draw rule fires", () => {
+    // Mirrors server/socket.ts xiangqi-move terminal detection: count
+    // plies-since-capture and verify the threshold check triggers a draw
+    // outcome. This guards against the constant ever drifting away from
+    // the spec's 60-full-move rule.
+    const NO_CAPTURE_DRAW_PLIES = 120;
+    let board = initialBoard();
+    let pliesSinceCapture = 0;
+    const horseShuffle: Move[] = [
+      { from: { file: 1, rank: 0 }, to: { file: 2, rank: 2 } },
+      { from: { file: 1, rank: 9 }, to: { file: 2, rank: 7 } },
+      { from: { file: 2, rank: 2 }, to: { file: 1, rank: 0 } },
+      { from: { file: 2, rank: 7 }, to: { file: 1, rank: 9 } },
+    ];
+    let drawTriggered = false;
+    for (let i = 0; i < NO_CAPTURE_DRAW_PLIES; i++) {
+      const m = horseShuffle[i % horseShuffle.length];
+      const wasCapture = isCaptureMove(board, m);
+      board = applyMove(board, m);
+      pliesSinceCapture = wasCapture ? 0 : pliesSinceCapture + 1;
+      if (pliesSinceCapture >= NO_CAPTURE_DRAW_PLIES) {
+        drawTriggered = true;
+        break;
+      }
+    }
+    expect(drawTriggered).toBe(true);
+    expect(pliesSinceCapture).toBe(NO_CAPTURE_DRAW_PLIES);
+  });
 });

@@ -4,6 +4,7 @@
 import {
   applyMove,
   deserializeBoard,
+  findGeneral,
   initialBoard,
   isCaptureMove,
   isInCheck,
@@ -122,6 +123,18 @@ export class XiangqiEngine {
     this.state.currentTurn = forcedTurn ?? (this.state.currentTurn === "red" ? "black" : "red");
     this.state.selectedSquare = null;
     this.state.validMoves = [];
+
+    // If the opposing general is gone (was captured by this move), the
+    // mover wins immediately. Mirrors server-side terminal detection so
+    // the local UI doesn't lag waiting for the canonical `game-result`.
+    const opponentColor: Color = this.state.currentTurn;
+    if (!findGeneral(this.state.board, opponentColor)) {
+      this.state.gameOver = true;
+      this.state.winner = opponentColor === "red" ? "black" : "red";
+      this.state.status = "ok";
+      this.notifyChange();
+      return;
+    }
 
     const status = statusFor(this.state.board, this.state.currentTurn);
     this.state.status = status;
