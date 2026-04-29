@@ -21,10 +21,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
   const { state, socket } = useGame();
 
-  // The local Chess instance MIRRORS the server's authoritative position.
-  // We never trust it for finality; on every server message we replace it
-  // by `new Chess(serverFen)` so divergence is impossible. Local move
-  // attempts go directly to the server, which validates and rebroadcasts.
   const [game, setGame] = useState(() => new Chess(INITIAL_FEN));
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
@@ -65,9 +61,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setPlayerColor(data.color);
     };
 
-    // Server-authoritative game-start. Includes FEN, both clocks, side to
-    // move, and the last move (for reconnect mid-game). On a fresh start
-    // lastMove is null and FEN is the starting position.
     const onGameStart = (data: {
       fen: string;
       whiteTime: number;
@@ -89,8 +82,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       }
     };
 
-    // Authoritative move broadcast — sent to BOTH players, including the
-    // mover, so the local engine is always replaced by server truth.
     const onOpponentMove = (data: {
       from: string;
       to: string;
@@ -107,7 +98,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setMoveHistory(prev => [...prev, data.san]);
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
-      // Clear any half-built selection so the new turn starts cleanly.
       setSelectedSquare(null);
       setLegalMoves([]);
     };
@@ -179,12 +169,6 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     };
   }, [socket, matchId, playerId, onFinish, t, playerColor]);
 
-  // Local clock display tick. We tick the local copy of the clock so the
-  // user sees seconds counting down between server messages, but the next
-  // `opponent-move` payload from the server overwrites whatever we have
-  // — the server's value wins. If the local copy hits zero we surface a
-  // hint to the server via `chess-timeout`; the server independently
-  // verifies and only settles when its own clock confirms.
   useEffect(() => {
     if (gameOver || waitingForOpponent) return;
 
@@ -214,22 +198,15 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     };
   }, [gameOver, waitingForOpponent]);
 
-  // Just a hint — the server is canonical. We never set local game-over
-  // here; that comes back via the `game-result` broadcast.
   const handleTimeoutHint = useCallback((color: 'white' | 'black') => {
     if (color === playerColor && socket && matchId) {
       socket.emit('chess-timeout', { matchId, color });
     }
   }, [socket, playerColor, matchId]);
 
-  // Send the move intent to the server. We do NOT optimistically apply
-  // the move locally — the server's `opponent-move` echo is what updates
-  // the board. This keeps the client a thin renderer of server state.
   const requestMove = useCallback((from: Square, to: Square) => {
     if (!isPlayerTurn || !playerColor) return false;
 
-    // Cheap local legality check just to suppress UI noise; the server
-    // will reject anything that's actually illegal.
     let legal = false;
     try {
       const probe = new Chess(game.fen());
@@ -241,12 +218,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     if (!legal) return false;
 
     if (socket && matchId) {
-      socket.emit('chess-move', {
-        matchId,
-        from,
-        to,
-        promotion: 'q',
-      });
+      socket.emit('chess-move', { matchId, from, to, promotion: 'q' });
     }
     setSelectedSquare(null);
     setLegalMoves([]);

@@ -5,12 +5,9 @@ import { matches } from "../shared/schema";
 import {
   applyMove as chessApplyMove,
   detectTerminal as chessDetectTerminal,
-  INITIAL_FEN as CHESS_INITIAL_FEN,
   INITIAL_TIME_MS as CHESS_INITIAL_TIME_MS,
-  loadFen as chessLoadFen,
   newGame as chessNewGame,
   type Chess as ChessInstance,
-  type Color as ChessColor,
 } from "../shared/games/chess";
 import {
   blockedWinner as dominoesBlockedWinner,
@@ -51,9 +48,6 @@ interface SocketOptions {
   allowedOrigins: string[];
 }
 
-// What the client now sends — only the move intent. Any FEN / SAN / clock
-// fields the client tries to attach are ignored: the server is the
-// single source of truth for state.
 interface ChessMoveInput {
   matchId: string;
   from: string;
@@ -68,21 +62,11 @@ interface PlayerInfo {
 
 interface MatchRoom {
   players: Map<string, PlayerInfo>;
-  // Server-authoritative chess.js instance.
   game: ChessInstance;
-  // Per-side clock remaining in ms. The clock for whoever's turn it is
-  // is bled down by `now - lastTickAt` whenever a move arrives or a
-  // public-state snapshot is requested.
   whiteTime: number;
   blackTime: number;
-  // ms-epoch the active player's clock last started ticking — set on
-  // game-start and re-set after every applied move.
   lastTickAt: number;
-  // Last applied move, kept so reconnecting clients can re-render the
-  // last-move highlight without re-running the whole move history.
   lastMove: { from: string; to: string; san: string } | null;
-  // Has game-start been emitted at least once? Used by the funded-gate
-  // re-fire to avoid resetting the board on a late funding callback.
   started: boolean;
 }
 
@@ -668,7 +652,7 @@ function xiangqiPublicState(room: XiangqiRoom) {
 function chessPublicState(room: MatchRoom) {
   const now = Date.now();
   const elapsed = room.started ? Math.max(0, now - room.lastTickAt) : 0;
-  const turn: ChessColor = room.game.turn() as ChessColor;
+  const turn: 'w' | 'b' = room.game.turn();
   const whiteTime = turn === "w" ? Math.max(0, room.whiteTime - elapsed) : room.whiteTime;
   const blackTime = turn === "b" ? Math.max(0, room.blackTime - elapsed) : room.blackTime;
   return {
@@ -1037,11 +1021,6 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       gameMovesRecorded.delete(matchId);
     });
 
-    // SERVER-AUTHORITATIVE chess-move handler. The client now sends only
-    // the move intent {from, to, promotion}; everything else (FEN, SAN,
-    // clocks, terminal detection) is computed server-side from the room's
-    // chess.js instance. Any FEN/SAN/clock fields the client tries to
-    // attach to the payload are ignored.
     socket.on("chess-move", (move: ChessMoveInput) => {
       const { matchId, from, to, promotion } = move ?? ({} as ChessMoveInput);
       if (!matchId || !from || !to) return;
@@ -1069,27 +1048,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Turn check before doing anything else — only the side to move
-      // may submit a move. Prevents a player from submitting their
-      // opponent's move (e.g. via a forged event) and also stops them
-      // from spamming moves out of turn.
       const expectedColor: 'white' | 'black' = room.game.turn() === 'w' ? 'white' : 'black';
       if (player.color !== expectedColor) {
         console.log("[socket] chess-move rejected - not your turn", matchId, player.color);
         return;
       }
 
-      // Drain the moving side's clock by the elapsed wall-clock since the
-      // turn began. This is the canonical clock — the legacy client also
-      // ticks locally but the server's value is authoritative and what
-      // gets broadcast back. If we drained below zero, settle as a
-      // timeout WITHOUT applying the move.
-      //
-      // CRITICAL: advance `lastTickAt` to `now` BEFORE any early return
-      // path that returns after the drain. If we drained the clock but
-      // then bailed (e.g. illegal move), leaving lastTickAt unchanged
-      // would double-charge the same wall-clock interval on the player's
-      // next attempt and could falsely time them out.
+      // Drain mover's clock first; if it hit zero, settle as timeout.
+      // lastTickAt is advanced even on early-return paths so the same
+      // elapsed window is never charged twice.
       const now = Date.now();
       const elapsed = Math.max(0, now - room.lastTickAt);
       if (player.color === 'white') {
@@ -1119,34 +1086,22 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Validate + apply via the shared engine. An illegal move is
-      // simply rejected — no broadcast, no clock charge beyond the drain
-      // (which already occurred and stays charged so a player can't
-      // probe legality for free). applyMove MUTATES room.game in-place
-      // so chess.js's internal move history is preserved across the
-      // whole game (required for threefold-repetition detection).
+      // applyMove mutates room.game in place so chess.js retains its
+      // history across the game (needed for threefold-repetition).
       const result = chessApplyMove(room.game, { from, to, promotion });
       if (!result) {
         console.log("[socket] chess-move rejected - illegal", matchId, from, to);
         return;
       }
 
-      // Stash the last move for reconnect snapshots, restart the clock
-      // for the opponent.
       room.lastMove = { from: result.applied.from, to: result.applied.to, san: result.applied.san };
       room.lastTickAt = now;
-
-      // Authorized + applied → mark gameplay activity. Doing this AFTER
-      // both the auth checks and the legality check means a forged or
-      // malformed event can never pollute the disconnect-safety-net set.
       markGameplayActivity(matchId);
 
       console.log(
         "[socket] chess-move", matchId, result.applied.from, result.applied.to, result.applied.san, "by", player.color
       );
 
-      // Broadcast the SERVER-COMPUTED state to BOTH players so the mover
-      // also rerenders from authoritative truth (no optimistic divergence).
       io.to(`match:${matchId}`).emit('opponent-move', {
         from: result.applied.from,
         to: result.applied.to,
@@ -1158,22 +1113,16 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         newTurn: result.applied.turn,
       });
 
-      // Terminal detection in priority order: checkmate → stalemate →
-      // threefold/fifty/insufficient. Timeout was already handled above
-      // before the move was applied.
       const terminal = chessDetectTerminal(room.game);
       if (terminal) {
         let winnerId: string | null = null;
         let loserId: string | null = null;
         if (terminal.reason === 'checkmate') {
-          // The side whose turn it is when checkmated lost — i.e. the
-          // mover's opponent. Mover wins.
           const winnerColor: 'white' | 'black' = player.color;
           const loserColor: 'white' | 'black' = winnerColor === 'white' ? 'black' : 'white';
           winnerId = Array.from(room.players.entries()).find(([, p]) => p.color === winnerColor)?.[0] ?? null;
           loserId = Array.from(room.players.entries()).find(([, p]) => p.color === loserColor)?.[0] ?? null;
         }
-        // Else: draw — winnerId/loserId both null.
 
         console.log("[socket] chess terminal", matchId, terminal.reason);
         storeGameResult(matchId, 'chess', winnerId, loserId, terminal.reason);
@@ -1226,13 +1175,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(data.matchId);
     });
 
-    // chess-timeout is now a CLIENT HINT only — the server clock is the
-    // single source of truth. We re-validate by draining the active
-    // player's clock against the canonical lastTickAt; only if the
-    // server agrees that the moving side has run out do we settle. A
-    // forged event (or one from a player whose own UI clock is wrong)
-    // is silently ignored — the next chess-move from the other side
-    // will catch any genuine timeout via the same drain check.
+    // chess-timeout is a hint only — the server clock is canonical.
     socket.on("chess-timeout", (data: { matchId: string; color: 'white' | 'black' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1246,17 +1189,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const player = room.players.get(socketInfo.playerId);
       if (!player) return;
 
-      // Defensive: only accept the timeout claim if the sender is
-      // claiming their OWN color. The client only ever emits its own
-      // color (handleTimeoutHint), so anything else is forged noise.
       if (data.color !== player.color) {
         console.log("[socket] chess-timeout rejected - color is not sender's");
         return;
       }
 
-      // Server-canonical drain. We only honour timeouts for the side
-      // that is actually on the clock, and only against the SERVER's
-      // clock — not whatever the client says.
       const turnColor: 'white' | 'black' = room.game.turn() === 'w' ? 'white' : 'black';
       if (data.color !== turnColor) {
         console.log("[socket] chess-timeout rejected - not the side on the clock");
@@ -1273,7 +1210,6 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Clock has truly drained. Commit the final values and settle.
       if (turnColor === 'white') room.whiteTime = 0;
       else room.blackTime = 0;
 
@@ -1282,7 +1218,6 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const winnerColor: 'white' | 'black' = turnColor === 'white' ? 'black' : 'white';
       const winnerId = Array.from(room.players.entries())
         .find(([, p]) => p.color === winnerColor)?.[0] ?? null;
-      // The loser is the side on the clock — NOT necessarily the sender.
       const loserId = Array.from(room.players.entries())
         .find(([, p]) => p.color === turnColor)?.[0] ?? null;
 
@@ -1299,14 +1234,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(data.matchId);
     });
 
-    // The legacy `game-end` event was a client-claimed terminal
-    // ("checkmate"/"draw"/"stalemate") and was the single biggest cheat
-    // vector in chess: a forged emit could steal the pot. It has been
-    // removed — natural terminals are now detected by the server inside
-    // `chess-move` via the shared engine. Resignation flows through the
-    // dedicated `chess-resign` handler. We intentionally do NOT register
-    // any `game-end` listener here so any client still sending one is a
-    // no-op.
+    // Legacy client-claimed `game-end` removed: terminals are detected
+    // server-side inside `chess-move`, resignation via `chess-resign`.
 
     socket.on("join-tetris-match", (data: { matchId: string; playerId: string }) => {
       const { matchId, playerId } = data;
