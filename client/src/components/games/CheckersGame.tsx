@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLanguage } from "@/context/LanguageContext";
 import { useGame } from "@/context/GameContext";
-import { CheckersEngine, GameState, Position, PieceColor, BOARD_SIZE_CONST, INITIAL_TIME_CONST } from './checkers/CheckersEngine';
+import {
+  CheckersEngine,
+  GameState,
+  Position,
+  PieceColor,
+  BOARD_SIZE_CONST,
+  INITIAL_TIME_CONST,
+} from './checkers/CheckersEngine';
 import { cn } from '@/lib/utils';
 
 type Result = "win" | "loss" | "draw";
@@ -10,7 +17,15 @@ interface CheckersGameProps {
   onFinish: (result: Result) => void;
 }
 
-interface MoveData {
+interface ServerSnapshot {
+  board: string;
+  currentTurn: PieceColor;
+  redTime: number;
+  blackTime: number;
+  pendingJumpAt: Position | null;
+}
+
+interface OpponentMoveData {
   from: Position;
   to: Position;
   captures: Position[];
@@ -18,12 +33,14 @@ interface MoveData {
   turnEnded: boolean;
   redTime: number;
   blackTime: number;
+  pendingJumpAt: Position | null;
+  board: string;
 }
 
 export function CheckersGame({ onFinish }: CheckersGameProps) {
   const { t } = useLanguage();
   const { state, socket } = useGame();
-  
+
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerColor, setPlayerColor] = useState<PieceColor | null>(null);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
@@ -31,8 +48,9 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
   const [resultMessage, setResultMessage] = useState('');
   const [redTime, setRedTime] = useState(INITIAL_TIME_CONST);
   const [blackTime, setBlackTime] = useState(INITIAL_TIME_CONST);
-  
+
   const engineRef = useRef<CheckersEngine | null>(null);
+  const playerColorRef = useRef<PieceColor | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameEndedRef = useRef(false);
   const onFinishCalledRef = useRef(false);
@@ -45,25 +63,28 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
 
   const handleStateChange = useCallback((newState: GameState) => {
     setGameState(newState);
-    
-    if (newState.gameOver && !gameEndedRef.current) {
-      gameEndedRef.current = true;
-      setGameEnded(true);
-      
-      const playerWins = newState.winner === playerColor;
-      setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
-      
-      if (timerRef.current) clearInterval(timerRef.current);
-      
-      if (socket && matchId) {
-        socket.emit('checkers-game-end', {
-          matchId,
-          winner: newState.winner,
-          playerId
-        });
-      }
+  }, []);
+
+  const ensureEngine = useCallback((): CheckersEngine => {
+    if (!engineRef.current) {
+      engineRef.current = new CheckersEngine(handleStateChange);
     }
-  }, [socket, playerColor, matchId, playerId, t]);
+    return engineRef.current;
+  }, [handleStateChange]);
+
+  const hydrate = useCallback(
+    (snapshot: ServerSnapshot) => {
+      const engine = ensureEngine();
+      engine.hydrateFromServer(snapshot);
+      setRedTime(snapshot.redTime);
+      setBlackTime(snapshot.blackTime);
+    },
+    [ensureEngine],
+  );
+
+  useEffect(() => {
+    playerColorRef.current = playerColor;
+  }, [playerColor]);
 
   useEffect(() => {
     if (!socket || !matchId || matchId === 'pending') return;
@@ -76,24 +97,21 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       setPlayerColor(data.color);
     };
 
-    const onGameStart = () => {
+    const onGameStart = (data?: { publicState?: ServerSnapshot }) => {
       console.log('[CheckersGame] game started');
       setWaitingForOpponent(false);
-      const engine = new CheckersEngine(handleStateChange);
-      engineRef.current = engine;
-      engine.start();
+      if (data?.publicState) hydrate(data.publicState);
     };
 
-    const onOpponentMove = (data: MoveData) => {
-      console.log('[CheckersGame] opponent move:', data);
-      if (engineRef.current) {
-        engineRef.current.applyOpponentMove(data.from, data.to, data.captures);
-        if (data.turnEnded) {
-          engineRef.current.switchTurn();
-          setRedTime(data.redTime);
-          setBlackTime(data.blackTime);
-        }
-      }
+    const onOpponentMove = (data: OpponentMoveData) => {
+      console.log('[CheckersGame] server move broadcast:', data);
+      hydrate({
+        board: data.board,
+        currentTurn: data.newTurn,
+        redTime: data.redTime,
+        blackTime: data.blackTime,
+        pendingJumpAt: data.pendingJumpAt,
+      });
     };
 
     const onOpponentTimeout = () => {
@@ -101,6 +119,15 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
         gameEndedRef.current = true;
         setGameEnded(true);
         setResultMessage(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
+        if (timerRef.current) clearInterval(timerRef.current);
+      }
+    };
+
+    const onOpponentResigned = () => {
+      if (!gameEndedRef.current) {
+        gameEndedRef.current = true;
+        setGameEnded(true);
+        setResultMessage(t('Opponent resigned - You win!', 'Opponent resigned - You win!'));
         if (timerRef.current) clearInterval(timerRef.current);
       }
     };
@@ -124,6 +151,11 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       if (timerRef.current) clearInterval(timerRef.current);
       const playerWins = data.winnerId === playerId;
       setResultMessage(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
+      if (engineRef.current) {
+        engineRef.current.setGameOver(playerWins
+          ? (playerColorRef.current ?? null)
+          : (playerColorRef.current === 'red' ? 'black' : 'red'));
+      }
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     };
 
@@ -131,6 +163,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
     socket.on('checkers-game-start', onGameStart);
     socket.on('opponent-checkers-move', onOpponentMove);
     socket.on('opponent-checkers-timeout', onOpponentTimeout);
+    socket.on('opponent-checkers-resigned', onOpponentResigned);
     socket.on('opponent-disconnected', onOpponentDisconnected);
     socket.on('game-result', onGameResult);
 
@@ -139,17 +172,17 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       socket.off('checkers-game-start', onGameStart);
       socket.off('opponent-checkers-move', onOpponentMove);
       socket.off('opponent-checkers-timeout', onOpponentTimeout);
+      socket.off('opponent-checkers-resigned', onOpponentResigned);
       socket.off('opponent-disconnected', onOpponentDisconnected);
       socket.off('game-result', onGameResult);
-      if (engineRef.current) {
-        engineRef.current.stop();
-      }
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
-  }, [socket, matchId, playerId, handleStateChange, onFinish, t]);
+  }, [socket, matchId, playerId, hydrate, onFinish, t]);
 
+  // Local countdown for the side-to-move. Server is canonical: every
+  // server move broadcast resets both clocks to the authoritative value.
   useEffect(() => {
     if (waitingForOpponent || gameEnded || !gameState) return;
 
@@ -180,12 +213,12 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
 
   const handleTimeout = useCallback((color: PieceColor) => {
     if (timerRef.current) clearInterval(timerRef.current);
-    
+
     if (color === playerColor) {
       gameEndedRef.current = true;
       setGameEnded(true);
       setResultMessage(t('Time is up - You lose!', 'Time is up - You lose!'));
-      
+
       if (socket && matchId) {
         socket.emit('checkers-timeout', { matchId, color: playerColor });
       }
@@ -197,30 +230,20 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
     if (gameState?.currentTurn !== playerColor) return;
 
     const piece = gameState?.board[row][col];
-    
+
     if (gameState?.selectedPiece) {
       const isValidMove = gameState.validMoves.some(m => m.to.row === row && m.to.col === col);
-      
+
       if (isValidMove) {
         const from = gameState.selectedPiece;
-        const move = gameState.validMoves.find(m => m.to.row === row && m.to.col === col);
-        
-        if (engineRef.current.makeMove({ row, col }, playerColor)) {
-          const newState = engineRef.current.getState();
-          const turnChanged = newState.continuingCapture === null;
-          
-          if (socket && matchId) {
-            socket.emit('checkers-move', {
-              matchId,
-              from,
-              to: { row, col },
-              captures: move?.captures || [],
-              newTurn: turnChanged ? newState.currentTurn : playerColor,
-              turnEnded: turnChanged,
-              redTime,
-              blackTime
-            });
-          }
+        // Server validates and broadcasts the canonical state — we do
+        // NOT mutate the local board optimistically.
+        if (socket && matchId) {
+          socket.emit('checkers-move', {
+            matchId,
+            from,
+            to: { row, col },
+          });
         }
       } else if (piece && piece.color === playerColor) {
         engineRef.current.selectPiece({ row, col }, playerColor);
@@ -230,7 +253,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
     } else if (piece && piece.color === playerColor) {
       engineRef.current.selectPiece({ row, col }, playerColor);
     }
-  }, [gameState, playerColor, socket, matchId, gameEnded, redTime, blackTime]);
+  }, [gameState, playerColor, socket, matchId, gameEnded]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -282,7 +305,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
         <div className="grid grid-cols-8 grid-rows-8 w-full h-full">
           {Array.from({ length: BOARD_SIZE_CONST }).map((_, rowIdx) => {
             const displayRow = playerColor === 'black' ? 7 - rowIdx : rowIdx;
-            
+
             return Array.from({ length: BOARD_SIZE_CONST }).map((_, colIdx) => {
               const displayCol = playerColor === 'black' ? 7 - colIdx : colIdx;
               const isLight = (displayRow + displayCol) % 2 === 0;
@@ -305,18 +328,18 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
                   {isValidMove && (
                     <div className={cn(
                       "absolute rounded-full transition-all z-10",
-                      isCapture 
-                        ? "w-full h-full border-4 border-red-500/60" 
+                      isCapture
+                        ? "w-full h-full border-4 border-red-500/60"
                         : "w-4 h-4 bg-emerald-500/50"
                     )} />
                   )}
-                  
+
                   {piece && (
                     <div className={cn(
                       "w-[80%] h-[80%] rounded-full transition-transform z-20",
                       "shadow-lg border-4",
-                      piece.color === 'red' 
-                        ? "bg-gradient-to-br from-red-500 to-red-700 border-red-400" 
+                      piece.color === 'red'
+                        ? "bg-gradient-to-br from-red-500 to-red-700 border-red-400"
                         : "bg-gradient-to-br from-zinc-700 to-zinc-900 border-zinc-500",
                       isSelected && "scale-105 shadow-xl"
                     )}>

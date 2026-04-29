@@ -22,6 +22,20 @@ import {
   type Tile as DominoesTile,
 } from "../shared/games/dominoes";
 import {
+  allLegalMoves as checkersAllLegalMoves,
+  applyMove as checkersApplyMove,
+  countPieces as checkersCountPieces,
+  findLegalMove as checkersFindLegalMove,
+  getJumpsFromSquare as checkersGetJumpsFromSquare,
+  initialBoard as checkersInitialBoard,
+  INITIAL_TIME_MS as CHECKERS_INITIAL_TIME_MS,
+  isCaptureMove as checkersIsCaptureMove,
+  serializeBoard as checkersSerializeBoard,
+  type Board as CheckersBoard,
+  type PieceColor as CheckersColor,
+  type Position as CheckersPosition,
+} from "../shared/games/checkers";
+import {
   applyMove as xiangqiApplyMove,
   detectPerpetualCheckLoser as xiangqiDetectPerpetualCheckLoser,
   findGeneral as xiangqiFindGeneral,
@@ -422,9 +436,53 @@ interface CheckersPlayerInfo {
 interface CheckersRoom {
   players: Map<string, CheckersPlayerInfo>;
   started: boolean;
+  // Server-authoritative board, turn, clocks, and the square of the
+  // piece that owes a continuation jump after a multi-jump (null when
+  // no continuation is pending — the most recent move ended the turn).
+  board: CheckersBoard;
+  currentTurn: CheckersColor;
+  redTime: number;
+  blackTime: number;
+  lastTickAt: number;
+  pendingJumpAt: CheckersPosition | null;
 }
 
 const checkersRooms = new Map<string, CheckersRoom>();
+
+function checkersOpponentId(room: CheckersRoom, playerId: string): string | null {
+  for (const id of room.players.keys()) {
+    if (id !== playerId) return id;
+  }
+  return null;
+}
+
+function checkersPublicState(room: CheckersRoom) {
+  const now = Date.now();
+  const elapsed = room.started ? Math.max(0, now - room.lastTickAt) : 0;
+  const redTime =
+    room.currentTurn === "red" ? Math.max(0, room.redTime - elapsed) : room.redTime;
+  const blackTime =
+    room.currentTurn === "black" ? Math.max(0, room.blackTime - elapsed) : room.blackTime;
+  return {
+    board: checkersSerializeBoard(room.board),
+    currentTurn: room.currentTurn,
+    redTime,
+    blackTime,
+    pendingJumpAt: room.pendingJumpAt,
+  };
+}
+
+function startCheckersGame(io: SocketIOServer, matchId: string, room: CheckersRoom): void {
+  room.board = checkersInitialBoard();
+  room.currentTurn = "red";
+  room.redTime = CHECKERS_INITIAL_TIME_MS;
+  room.blackTime = CHECKERS_INITIAL_TIME_MS;
+  room.lastTickAt = Date.now();
+  room.pendingJumpAt = null;
+  io.to(`checkers:${matchId}`).emit("checkers-game-start", {
+    publicState: checkersPublicState(room),
+  });
+}
 
 interface ShipPlacement {
   shipId: string;
@@ -766,7 +824,7 @@ export function markMatchFunded(matchId: string): void {
   const checkers = checkersRooms.get(matchId);
   if (checkers && checkers.players.size === 2 && !checkers.started) {
     checkers.started = true;
-    io.to(`checkers:${matchId}`).emit('checkers-game-start');
+    startCheckersGame(io, matchId, checkers);
     markGameStarted(matchId);
     console.log("[socket] checkers-game-start (post-funding)", matchId);
   }
@@ -1350,16 +1408,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       if (oldSocketId && oldSocketId !== socket.id) {
         socketToPlayer.delete(oldSocketId);
       }
-      
+
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
-      
+
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
         clearTimeout(pendingTimeout);
         pendingDisconnects.delete(playerId);
         console.log("[socket] player reconnected, cancelled forfeit:", playerId);
-        // Notify the surviving opponent so their disconnect banner clears.
         socket.to(`checkers:${matchId}`).emit('opponent-reconnected', { matchId });
       }
 
@@ -1367,7 +1424,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       if (!room) {
         room = {
           players: new Map(),
-          started: false
+          started: false,
+          board: checkersInitialBoard(),
+          currentTurn: 'red',
+          redTime: CHECKERS_INITIAL_TIME_MS,
+          blackTime: CHECKERS_INITIAL_TIME_MS,
+          lastTickAt: 0,
+          pendingJumpAt: null,
         };
         checkersRooms.set(matchId, room);
       }
@@ -1377,9 +1440,9 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         existingPlayer.socketId = socket.id;
         socket.emit('checkers-color-assigned', { color: existingPlayer.color });
         console.log("[socket] checkers reconnect, color preserved:", existingPlayer.color);
-        
+
         if (room.players.size === 2 && room.started) {
-          socket.emit('checkers-game-start');
+          socket.emit('checkers-game-start', { publicState: checkersPublicState(room) });
         }
         return;
       }
@@ -1392,7 +1455,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       const existingColors = Array.from(room.players.values()).map(p => p.color);
       const assignedColor: 'red' | 'black' = existingColors.includes('red') ? 'black' : 'red';
-      
+
       room.players.set(playerId, { socketId: socket.id, color: assignedColor });
 
       socket.emit('checkers-color-assigned', { color: assignedColor });
@@ -1401,7 +1464,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       if (room.players.size === 2 && !room.started) {
         if (fundedMatches.has(matchId)) {
           room.started = true;
-          io.to(`checkers:${matchId}`).emit('checkers-game-start');
+          startCheckersGame(io, matchId, room);
           markGameStarted(matchId);
           console.log("[socket] checkers-game-start", matchId);
         } else {
@@ -1414,11 +1477,6 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchId: string;
       from: { row: number; col: number };
       to: { row: number; col: number };
-      captures: { row: number; col: number }[];
-      newTurn: 'red' | 'black';
-      turnEnded: boolean;
-      redTime: number;
-      blackTime: number;
     }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1427,7 +1485,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       const room = checkersRooms.get(data.matchId);
-      if (!room) return;
+      if (!room || !room.started) return;
 
       const player = room.players.get(socketInfo.playerId);
       if (!player) {
@@ -1435,22 +1493,133 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      // Mark gameplay activity ONLY after socket/room/player auth has passed.
+      if (player.color !== room.currentTurn) {
+        console.log("[socket] checkers-move rejected - not your turn", player.color, "vs", room.currentTurn);
+        return;
+      }
+
+      const isValidPos = (p: unknown): p is CheckersPosition =>
+        !!p &&
+        typeof (p as CheckersPosition).row === 'number' &&
+        typeof (p as CheckersPosition).col === 'number' &&
+        Number.isInteger((p as CheckersPosition).row) &&
+        Number.isInteger((p as CheckersPosition).col) &&
+        (p as CheckersPosition).row >= 0 && (p as CheckersPosition).row <= 7 &&
+        (p as CheckersPosition).col >= 0 && (p as CheckersPosition).col <= 7;
+      if (!isValidPos(data.from) || !isValidPos(data.to)) {
+        console.log("[socket] checkers-move rejected - invalid coordinates");
+        return;
+      }
+
+      // If the mover owes a continuation jump, they must move the same
+      // piece — and the move must be a jump.
+      if (room.pendingJumpAt && (room.pendingJumpAt.row !== data.from.row || room.pendingJumpAt.col !== data.from.col)) {
+        console.log("[socket] checkers-move rejected - must continue multi-jump from", room.pendingJumpAt);
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      const remaining =
+        player.color === 'red' ? room.redTime - elapsed : room.blackTime - elapsed;
+      if (remaining <= 0) {
+        console.log("[socket] checkers-move rejected - clock drained, forfeit by timeout");
+        const winnerId = checkersOpponentId(room, socketInfo.playerId);
+        const loserId = socketInfo.playerId;
+        storeGameResult(data.matchId, 'checkers', winnerId, loserId, 'timeout');
+        io.to(`checkers:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId,
+          loserId,
+          reason: 'timeout',
+        });
+        checkersRooms.delete(data.matchId);
+        return;
+      }
+
+      // Validate against the engine. If the mover owes a continuation,
+      // restrict the legal set to jumps from that exact square.
+      let legal;
+      if (room.pendingJumpAt) {
+        const jumpsFromHere = checkersGetJumpsFromSquare(room.board, room.pendingJumpAt);
+        legal = jumpsFromHere.find((m) => m.to.row === data.to.row && m.to.col === data.to.col) ?? null;
+      } else {
+        legal = checkersFindLegalMove(room.board, player.color, data.from, data.to);
+      }
+      if (!legal) {
+        console.log("[socket] checkers-move rejected - illegal move", data.from, "→", data.to);
+        return;
+      }
+
+      const wasCapture = checkersIsCaptureMove(legal);
+      const { board: nextBoard } = checkersApplyMove(room.board, legal);
+      room.board = nextBoard;
+
+      if (player.color === 'red') {
+        room.redTime = Math.max(0, room.redTime - elapsed);
+      } else {
+        room.blackTime = Math.max(0, room.blackTime - elapsed);
+      }
+      room.lastTickAt = Date.now();
+
+      // Multi-jump continuation: only after a capture, only if the SAME
+      // landing piece has additional jumps available. Promotion does not
+      // gate this in the existing client behaviour; we mirror it.
+      let turnEnded = true;
+      if (wasCapture) {
+        const further = checkersGetJumpsFromSquare(room.board, legal.to);
+        if (further.length > 0) {
+          room.pendingJumpAt = legal.to;
+          turnEnded = false;
+        }
+      }
+      if (turnEnded) {
+        room.pendingJumpAt = null;
+        room.currentTurn = player.color === 'red' ? 'black' : 'red';
+      }
+
       markGameplayActivity(data.matchId);
 
-      console.log("[socket] checkers-move", data.matchId, data.from, data.to, "by", player.color, "turnEnded:", data.turnEnded);
-
-      socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-move', {
-        from: data.from,
-        to: data.to,
-        captures: data.captures,
-        newTurn: data.newTurn,
-        turnEnded: data.turnEnded,
-        redTime: data.redTime,
-        blackTime: data.blackTime
+      io.to(`checkers:${data.matchId}`).emit('opponent-checkers-move', {
+        from: legal.from,
+        to: legal.to,
+        captures: legal.captures,
+        newTurn: room.currentTurn,
+        turnEnded,
+        redTime: room.redTime,
+        blackTime: room.blackTime,
+        pendingJumpAt: room.pendingJumpAt,
+        board: checkersSerializeBoard(room.board),
       });
+
+      if (!turnEnded) return;
+
+      // Terminal: opponent has no pieces or no legal moves on its turn.
+      const opponentColor: CheckersColor = room.currentTurn;
+      const oppPieces = checkersCountPieces(room.board, opponentColor);
+      const oppMoves = oppPieces > 0 ? checkersAllLegalMoves(room.board, opponentColor) : [];
+      let terminalReason: string | null = null;
+      if (oppPieces === 0) terminalReason = 'no_pieces';
+      else if (oppMoves.length === 0) terminalReason = 'no_legal_moves';
+
+      if (terminalReason) {
+        const winnerId = Array.from(room.players.entries())
+          .find(([, p]) => p.color === player.color)?.[0] ?? null;
+        const loserId = Array.from(room.players.entries())
+          .find(([, p]) => p.color === opponentColor)?.[0] ?? null;
+        console.log("[socket] checkers terminal:", terminalReason, "winner:", player.color);
+        storeGameResult(data.matchId, 'checkers', winnerId, loserId, terminalReason);
+        io.to(`checkers:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId,
+          loserId,
+          reason: terminalReason,
+        });
+        checkersRooms.delete(data.matchId);
+      }
     });
 
+    // checkers-timeout is a hint only — server clock is canonical.
     socket.on("checkers-timeout", (data: { matchId: string; color: 'red' | 'black' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1459,7 +1628,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       const room = checkersRooms.get(data.matchId);
-      if (!room) return;
+      if (!room || !room.started) return;
 
       const player = room.players.get(socketInfo.playerId);
       if (!player || player.color !== data.color) {
@@ -1467,53 +1636,74 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
-      console.log("[socket] checkers-timeout", data.matchId, data.color);
-      
-      const winnerId = data.color === 'red' 
-        ? Array.from(room.players.entries()).find(([_, p]) => p.color === 'black')?.[0]
-        : Array.from(room.players.entries()).find(([_, p]) => p.color === 'red')?.[0];
+      if (room.currentTurn !== data.color) {
+        console.log("[socket] checkers-timeout rejected - not the side on the clock");
+        return;
+      }
+
+      const elapsed = Math.max(0, Date.now() - room.lastTickAt);
+      const remaining =
+        data.color === 'red' ? room.redTime - elapsed : room.blackTime - elapsed;
+      if (remaining > 0) {
+        console.log("[socket] checkers-timeout rejected - server clock disagrees", remaining);
+        return;
+      }
+
+      if (data.color === 'red') room.redTime = 0;
+      else room.blackTime = 0;
+
+      const winnerId = checkersOpponentId(room, socketInfo.playerId);
       const loserId = socketInfo.playerId;
-      
-      storeGameResult(data.matchId, 'checkers', winnerId || null, loserId, 'timeout');
-      
+
+      console.log("[socket] checkers-timeout (server-confirmed)", data.matchId, data.color);
+
+      storeGameResult(data.matchId, 'checkers', winnerId, loserId, 'timeout');
+
       socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-timeout');
-      
       io.to(`checkers:${data.matchId}`).emit('game-result', {
         matchId: data.matchId,
         winnerId,
         loserId,
-        reason: 'timeout'
+        reason: 'timeout',
       });
-      
+
       checkersRooms.delete(data.matchId);
     });
 
-    socket.on("checkers-game-end", (data: { matchId: string; winner: 'red' | 'black'; playerId: string }) => {
+    socket.on("checkers-resign", (data: { matchId: string; color: 'red' | 'black' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
-      if (!socketInfo || socketInfo.matchId !== data.matchId) {
-        console.log("[socket] checkers-game-end rejected - unauthorized");
-        return;
-      }
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
 
       const room = checkersRooms.get(data.matchId);
       if (!room) return;
 
-      console.log("[socket] checkers-game-end", data.matchId, data.winner);
-      
-      const winnerId = Array.from(room.players.entries()).find(([_, p]) => p.color === data.winner)?.[0];
-      const loserId = Array.from(room.players.entries()).find(([_, p]) => p.color !== data.winner)?.[0];
-      
-      storeGameResult(data.matchId, 'checkers', winnerId || null, loserId || null, 'game_complete');
-      
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] checkers-resign rejected - color mismatch");
+        return;
+      }
+
+      const winnerId = checkersOpponentId(room, socketInfo.playerId);
+      const loserId = socketInfo.playerId;
+
+      console.log("[socket] checkers-resign", data.matchId, data.color);
+
+      storeGameResult(data.matchId, 'checkers', winnerId, loserId, 'resignation');
+
+      socket.to(`checkers:${data.matchId}`).emit('opponent-checkers-resigned');
       io.to(`checkers:${data.matchId}`).emit('game-result', {
         matchId: data.matchId,
         winnerId,
         loserId,
-        reason: 'game_complete'
+        reason: 'resignation',
       });
-      
+
       checkersRooms.delete(data.matchId);
     });
+
+    // Legacy client-claimed `checkers-game-end` removed: terminals are
+    // detected server-side inside `checkers-move`; resignation flows
+    // through `checkers-resign`.
 
     socket.on("join-battleship-match", (data: { matchId: string; playerId: string }) => {
       const { matchId, playerId } = data;
