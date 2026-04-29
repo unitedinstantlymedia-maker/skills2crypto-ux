@@ -6,6 +6,7 @@
 
 import {
   applyMove,
+  deserializeBoard,
   initialBoard,
   isCaptureMove,
   isInCheck,
@@ -65,6 +66,26 @@ export class XiangqiEngine {
 
   start(): void {
     this.state = this.createInitialState();
+    this.notifyChange();
+  }
+
+  // Hydrate the engine from a server-authoritative snapshot. Used on
+  // game-start and on reconnect so the client always lines up with the
+  // server's board, current turn, and no-capture counter — without this,
+  // a mid-match refresh would leave the player viewing the initial
+  // position with red to move regardless of true game state.
+  hydrate(serializedBoard: string, currentTurn: Color, pliesSinceCapture: number): void {
+    const board = deserializeBoard(serializedBoard);
+    this.state = {
+      board,
+      currentTurn,
+      selectedSquare: null,
+      validMoves: [],
+      gameOver: false,
+      winner: null,
+      status: statusFor(board, currentTurn),
+      pliesSinceCapture,
+    };
     this.notifyChange();
   }
 

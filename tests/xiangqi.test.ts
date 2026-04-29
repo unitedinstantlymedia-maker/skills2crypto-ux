@@ -17,13 +17,13 @@ import {
   type Board,
   type Color,
   type Move,
+  type PieceType,
 } from "../shared/games/xiangqi";
 
-function placeOnly(pieces: { f: number; r: number; type: string; color: Color }[]): Board {
+function placeOnly(pieces: { f: number; r: number; type: PieceType; color: Color }[]): Board {
   const b = makeEmptyBoard();
   for (const p of pieces) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    b[p.f][p.r] = { type: p.type as any, color: p.color };
+    b[p.f][p.r] = { type: p.type, color: p.color };
   }
   return b;
 }

@@ -21,6 +21,7 @@ import {
   INITIAL_TIME_MS as XIANGQI_INITIAL_TIME_MS,
   isCaptureMove as xiangqiIsCaptureMove,
   isLegalMove as xiangqiIsLegalMove,
+  serializeBoard as xiangqiSerializeBoard,
   statusFor as xiangqiStatusFor,
   type Board as XiangqiBoard,
   type Color as XiangqiColor,
@@ -631,10 +632,16 @@ function xiangqiPublicState(room: XiangqiRoom) {
     room.currentTurn === "red" ? Math.max(0, room.redTime - elapsed) : room.redTime;
   const blackTime =
     room.currentTurn === "black" ? Math.max(0, room.blackTime - elapsed) : room.blackTime;
+  // Include a serialized snapshot of the authoritative board + the
+  // no-capture counter so a reconnecting client can hydrate its engine
+  // to the exact mid-game state. Without this, a refresh mid-match
+  // would leave the client viewing the initial position.
   return {
     currentTurn: room.currentTurn,
     redTime,
     blackTime,
+    board: xiangqiSerializeBoard(room.board),
+    pliesSinceCapture: room.pliesSinceCapture,
   };
 }
 
@@ -2198,8 +2205,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       markGameplayActivity(data.matchId);
 
-      // Always broadcast the move so opposing client mirrors the board.
-      io.to(`xiangqi:${data.matchId}`).emit('opponent-xiangqi-move', {
+      // Broadcast the move to the OPPONENT only — the moving client has
+      // already applied the move locally via its optimistic engine call.
+      // Echoing it back would cause a second engine advance from a stale
+      // `from` square, corrupting the board / turn / no-capture counter.
+      socket.to(`xiangqi:${data.matchId}`).emit('opponent-xiangqi-move', {
         from: data.from,
         to: data.to,
         // Server-authoritative values — clients overwrite their own

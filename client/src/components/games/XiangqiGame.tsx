@@ -91,15 +91,35 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
       setPlayerColor(data.color);
     };
 
-    const onGameStart = (data?: { publicState?: { redTime: number; blackTime: number; currentTurn: Color } }) => {
+    const onGameStart = (data?: {
+      publicState?: {
+        redTime: number;
+        blackTime: number;
+        currentTurn: Color;
+        board?: string;
+        pliesSinceCapture?: number;
+      };
+    }) => {
       console.log("[XiangqiGame] game started", data);
       setWaitingForOpponent(false);
       const engine = new XiangqiEngine(handleStateChange);
       engineRef.current = engine;
-      engine.start();
-      // Server includes the live (time-bled) clock on game-start so the
-      // reconnecting/late-joining client lines up with the authoritative
-      // timer immediately.
+      // Server includes the authoritative board snapshot + currentTurn +
+      // no-capture counter on every game-start. We always hydrate from
+      // it so reconnecting mid-match (refresh, transient disconnect,
+      // tab suspend) restores the true game state — board, whose turn
+      // it is, and the 60-ply draw counter — instead of resetting to
+      // the initial position. Falls back to a fresh start only if the
+      // server somehow omits the snapshot.
+      if (data?.publicState?.board) {
+        engine.hydrate(
+          data.publicState.board,
+          data.publicState.currentTurn,
+          data.publicState.pliesSinceCapture ?? 0,
+        );
+      } else {
+        engine.start();
+      }
       if (data?.publicState) {
         setRedTime(data.publicState.redTime);
         setBlackTime(data.publicState.blackTime);
