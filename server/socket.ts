@@ -495,9 +495,16 @@ function startDominoesGame(io: SocketIOServer, room: DominoesRoom): void {
   const deal = dominoesDealHands(seed);
   let p1Player: DominoesPlayerInfo | undefined;
   let p2Player: DominoesPlayerInfo | undefined;
-  for (const p of room.players.values()) {
-    if (p.role === "p1") p1Player = p;
-    else p2Player = p;
+  let p1Id = "";
+  let p2Id = "";
+  for (const [id, p] of room.players.entries()) {
+    if (p.role === "p1") {
+      p1Player = p;
+      p1Id = id;
+    } else {
+      p2Player = p;
+      p2Id = id;
+    }
   }
   if (!p1Player || !p2Player) return;
   p1Player.hand = deal.p1Hand;
@@ -505,6 +512,30 @@ function startDominoesGame(io: SocketIOServer, room: DominoesRoom): void {
   room.chain = [];
   room.leftEnd = null;
   room.rightEnd = null;
+
+  // Spec tie-break: when neither hand contains a double, the heaviest tile
+  // leads, and any further tie is broken by the LOWER (lexicographic) wallet
+  // address. The shared engine defaults this to "p1"; we override here so
+  // the in-room player IDs (= wallet addresses) drive the result.
+  const noDoubles =
+    !deal.p1Hand.some((t) => t.a === t.b) &&
+    !deal.p2Hand.some((t) => t.a === t.b);
+  const sumOf = (hand: typeof deal.p1Hand) =>
+    hand.reduce((m, t) => Math.max(m, t.a + t.b), -1);
+  const tied = noDoubles && sumOf(deal.p1Hand) === sumOf(deal.p2Hand);
+  if (tied && p1Id && p2Id && p2Id.toLowerCase() < p1Id.toLowerCase()) {
+    // p2 has the lower wallet address — they should lead. Swap the
+    // starter and re-derive the lead tile from p2's hand instead.
+    deal.starter = "p2";
+    deal.starterTile = (() => {
+      let best = deal.p2Hand[0];
+      for (const t of deal.p2Hand) {
+        if (t.a + t.b > best.a + best.b) best = t;
+      }
+      return best;
+    })();
+  }
+
   room.currentTurn = deal.starter;
   room.starterTile = deal.starterTile;
   room.p1Time = DOMINOES_INITIAL_TIME_MS;
@@ -1588,11 +1619,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         existingPlayer.socketId = socket.id;
         socket.emit('dominoes-role-assigned', { role: existingPlayer.role });
         if (room.dealt) {
-          // On reconnect, re-send this player's full game state.
+          // On reconnect, re-send this player's full game state. Pass
+          // starterTile only while the chain is still empty so the UI can
+          // re-arm the lead-tile restriction; otherwise it's irrelevant.
           socket.emit('dominoes-game-start', {
             role: existingPlayer.role,
             hand: existingPlayer.hand,
             publicState: dominoesPublicState(room),
+            starterTile: room.chain.length === 0 ? room.starterTile : null,
           });
         }
         console.log("[socket] dominoes reconnect, role preserved:", existingPlayer.role);
@@ -1629,6 +1663,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
     });
 
+    // NOTE: Dominoes deliberately has NO `dominoes-game-end` client event.
+    // Unlike checkers (which lets the client report a draw/resignation),
+    // every dominoes outcome — win-by-played-out, blocked-board, timeout,
+    // or disconnect-forfeit — is resolved server-side from the move/pass/
+    // timeout handlers below using `storeGameResult`. Result is then
+    // broadcast via the shared `game-result` event. Keeping the client
+    // out of the resolution loop prevents trivially-spoofable wins.
     socket.on("dominoes-move", (data: { matchId: string; tileA: number; tileB: number; end: DominoesChainEnd }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) return;
