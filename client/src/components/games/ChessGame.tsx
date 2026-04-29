@@ -6,6 +6,7 @@ import { PIECE_COMPONENTS } from './chess/ChessPieces';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Flag } from 'lucide-react';
+import { INITIAL_FEN, INITIAL_TIME_MS } from '@shared/games/chess';
 
 type Result = "win" | "loss" | "draw";
 
@@ -16,26 +17,28 @@ interface ChessGameProps {
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
-const INITIAL_TIME = 30 * 60 * 1000;
-
 export function ChessGame({ onFinish }: ChessGameProps) {
   const { t } = useLanguage();
   const { state, socket } = useGame();
-  
-  const [game, setGame] = useState(() => new Chess());
+
+  // The local Chess instance MIRRORS the server's authoritative position.
+  // We never trust it for finality; on every server message we replace it
+  // by `new Chess(serverFen)` so divergence is impossible. Local move
+  // attempts go directly to the server, which validates and rebroadcasts.
+  const [game, setGame] = useState(() => new Chess(INITIAL_FEN));
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [legalMoves, setLegalMoves] = useState<Square[]>([]);
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
-  const [whiteTime, setWhiteTime] = useState(INITIAL_TIME);
-  const [blackTime, setBlackTime] = useState(INITIAL_TIME);
+  const [whiteTime, setWhiteTime] = useState(INITIAL_TIME_MS);
+  const [blackTime, setBlackTime] = useState(INITIAL_TIME_MS);
   const [gameOver, setGameOver] = useState(false);
   const [gameResult, setGameResult] = useState<string>('');
   const [moveHistory, setMoveHistory] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPiece, setDragPiece] = useState<{ square: Square; x: number; y: number } | null>(null);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
-  
+
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef(game);
@@ -62,29 +65,51 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setPlayerColor(data.color);
     };
 
-    const onGameStart = (data: { fen: string; whiteTime: number; blackTime: number }) => {
+    // Server-authoritative game-start. Includes FEN, both clocks, side to
+    // move, and the last move (for reconnect mid-game). On a fresh start
+    // lastMove is null and FEN is the starting position.
+    const onGameStart = (data: {
+      fen: string;
+      whiteTime: number;
+      blackTime: number;
+      turn?: 'w' | 'b';
+      lastMove?: { from: string; to: string; san: string } | null;
+    }) => {
       console.log('[ChessGame] game started');
       setWaitingForOpponent(false);
       setGame(new Chess(data.fen));
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      if (data.lastMove) {
+        setLastMove({ from: data.lastMove.from as Square, to: data.lastMove.to as Square });
+      } else {
+        setLastMove(null);
+      }
     };
 
-    const onOpponentMove = (data: { from: string; to: string; fen: string; san: string; whiteTime: number; blackTime: number }) => {
-      console.log('[ChessGame] opponent move:', data.san);
+    // Authoritative move broadcast — sent to BOTH players, including the
+    // mover, so the local engine is always replaced by server truth.
+    const onOpponentMove = (data: {
+      from: string;
+      to: string;
+      fen: string;
+      san: string;
+      whiteTime: number;
+      blackTime: number;
+      newTurn?: 'w' | 'b';
+    }) => {
+      console.log('[ChessGame] server move:', data.san);
       const newGame = new Chess(data.fen);
       setGame(newGame);
       setLastMove({ from: data.from as Square, to: data.to as Square });
       setMoveHistory(prev => [...prev, data.san]);
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
-      
-      if (newGame.isCheckmate()) {
-        const winner = newGame.turn() === 'w' ? 'black' : 'white';
-        handleGameEnd('checkmate', winner);
-      } else if (newGame.isStalemate() || newGame.isDraw()) {
-        handleGameEnd('draw', 'draw');
-      }
+      // Clear any half-built selection so the new turn starts cleanly.
+      setSelectedSquare(null);
+      setLegalMoves([]);
     };
 
     const onOpponentResigned = () => {
@@ -94,10 +119,15 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       if (timerRef.current) clearInterval(timerRef.current);
     };
 
-    const onOpponentTimeout = () => {
-      console.log('[ChessGame] opponent timeout');
+    const onOpponentTimeout = (data: { color: 'white' | 'black' }) => {
+      console.log('[ChessGame] timeout:', data.color);
       setGameOver(true);
-      setGameResult(t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!'));
+      const youLost = data.color === playerColor;
+      setGameResult(
+        youLost
+          ? t('You ran out of time', 'You ran out of time')
+          : t('Opponent ran out of time - You win!', 'Opponent ran out of time - You win!')
+      );
       if (timerRef.current) clearInterval(timerRef.current);
     };
 
@@ -114,13 +144,13 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       console.log('[ChessGame] game-result received:', data);
       if (onFinishCalledRef.current) return;
       onFinishCalledRef.current = true;
-      
+
       setGameOver(true);
       if (timerRef.current) clearInterval(timerRef.current);
-      
+
       const playerWins = data.winnerId === playerId;
       const isDraw = !data.winnerId && !data.loserId;
-      
+
       if (isDraw) {
         setGameResult(t('Draw!', 'Draw!'));
         setTimeout(() => onFinish('draw'), 1500);
@@ -147,8 +177,14 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       socket.off('opponent-disconnected', onOpponentDisconnected);
       socket.off('game-result', onGameResult);
     };
-  }, [socket, matchId, playerId, onFinish, t]);
+  }, [socket, matchId, playerId, onFinish, t, playerColor]);
 
+  // Local clock display tick. We tick the local copy of the clock so the
+  // user sees seconds counting down between server messages, but the next
+  // `opponent-move` payload from the server overwrites whatever we have
+  // — the server's value wins. If the local copy hits zero we surface a
+  // hint to the server via `chess-timeout`; the server independently
+  // verifies and only settles when its own clock confirms.
   useEffect(() => {
     if (gameOver || waitingForOpponent) return;
 
@@ -157,7 +193,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       if (currentGame.turn() === 'w') {
         setWhiteTime(prev => {
           if (prev <= 1000) {
-            handleTimeout('white');
+            handleTimeoutHint('white');
             return 0;
           }
           return prev - 1000;
@@ -165,7 +201,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       } else {
         setBlackTime(prev => {
           if (prev <= 1000) {
-            handleTimeout('black');
+            handleTimeoutHint('black');
             return 0;
           }
           return prev - 1000;
@@ -178,100 +214,58 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     };
   }, [gameOver, waitingForOpponent]);
 
-  const handleGameEnd = useCallback((reason: string, winner: 'white' | 'black' | 'draw') => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setGameOver(true);
-    
-    if (winner === 'draw') {
-      setGameResult(t('Draw!', 'Draw!'));
-    } else {
-      const playerWins = winner === playerColor;
-      setGameResult(playerWins ? t('You win!', 'You win!') : t('You lose!', 'You lose!'));
-    }
-    
-    if (socket && matchId) {
-      socket.emit('game-end', {
-        matchId,
-        result: reason,
-        winner,
-        winnerId: winner === playerColor ? playerId : null,
-        loserId: winner !== playerColor && winner !== 'draw' ? playerId : null
-      });
-    }
-  }, [socket, playerColor, matchId, playerId, t]);
-
-  const handleTimeout = useCallback((color: 'white' | 'black') => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setGameOver(true);
-    
-    setGameResult(color === 'white' ? t('Black wins on time!', 'Black wins on time!') : t('White wins on time!', 'White wins on time!'));
-    
+  // Just a hint — the server is canonical. We never set local game-over
+  // here; that comes back via the `game-result` broadcast.
+  const handleTimeoutHint = useCallback((color: 'white' | 'black') => {
     if (color === playerColor && socket && matchId) {
       socket.emit('chess-timeout', { matchId, color });
     }
-  }, [socket, playerColor, t, matchId]);
+  }, [socket, playerColor, matchId]);
 
-  const checkGameEnd = useCallback(() => {
-    if (game.isCheckmate()) {
-      const winner = game.turn() === 'w' ? 'black' : 'white';
-      handleGameEnd('checkmate', winner);
-      return true;
-    }
-    if (game.isStalemate() || game.isDraw()) {
-      handleGameEnd('draw', 'draw');
-      return true;
-    }
-    return false;
-  }, [game, handleGameEnd]);
-
-  const makeMove = useCallback((from: Square, to: Square) => {
+  // Send the move intent to the server. We do NOT optimistically apply
+  // the move locally — the server's `opponent-move` echo is what updates
+  // the board. This keeps the client a thin renderer of server state.
+  const requestMove = useCallback((from: Square, to: Square) => {
     if (!isPlayerTurn || !playerColor) return false;
-    
+
+    // Cheap local legality check just to suppress UI noise; the server
+    // will reject anything that's actually illegal.
+    let legal = false;
     try {
-      const move = game.move({ from, to, promotion: 'q' });
-      if (move) {
-        const newGame = new Chess(game.fen());
-        setGame(newGame);
-        setLastMove({ from, to });
-        setMoveHistory(prev => [...prev, move.san]);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-
-        if (socket && matchId) {
-          socket.emit('chess-move', {
-            matchId,
-            from,
-            to,
-            promotion: 'q',
-            fen: game.fen(),
-            san: move.san,
-            whiteTime,
-            blackTime
-          });
-        }
-
-        checkGameEnd();
-        return true;
-      }
+      const probe = new Chess(game.fen());
+      const result = probe.move({ from, to, promotion: 'q' });
+      legal = !!result;
     } catch {
-      return false;
+      legal = false;
     }
-    return false;
-  }, [game, isPlayerTurn, playerColor, socket, matchId, whiteTime, blackTime, checkGameEnd]);
+    if (!legal) return false;
+
+    if (socket && matchId) {
+      socket.emit('chess-move', {
+        matchId,
+        from,
+        to,
+        promotion: 'q',
+      });
+    }
+    setSelectedSquare(null);
+    setLegalMoves([]);
+    return true;
+  }, [game, isPlayerTurn, playerColor, socket, matchId]);
 
   const handleSquareClick = useCallback((square: Square) => {
     if (gameOver || !isPlayerTurn || waitingForOpponent) return;
-    
+
     const piece = game.get(square);
-    
+
     const canSelectPiece = () => {
       if (!piece) return false;
       return piece.color === (playerColor === 'white' ? 'w' : 'b');
     };
-    
+
     if (selectedSquare) {
       if (legalMoves.includes(square)) {
-        makeMove(selectedSquare, square);
+        requestMove(selectedSquare, square);
       } else if (canSelectPiece()) {
         setSelectedSquare(square);
         const moves = game.moves({ square, verbose: true });
@@ -285,18 +279,18 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       const moves = game.moves({ square, verbose: true });
       setLegalMoves(moves.map(m => m.to as Square));
     }
-  }, [game, selectedSquare, legalMoves, makeMove, playerColor, gameOver, isPlayerTurn, waitingForOpponent]);
+  }, [game, selectedSquare, legalMoves, requestMove, playerColor, gameOver, isPlayerTurn, waitingForOpponent]);
 
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent, square: Square) => {
     if (gameOver || !isPlayerTurn || waitingForOpponent) return;
-    
+
     const piece = game.get(square);
     if (!piece || piece.color !== (playerColor === 'white' ? 'w' : 'b')) return;
 
     e.preventDefault();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    
+
     setIsDragging(true);
     setDragPiece({ square, x: clientX, y: clientY });
     setSelectedSquare(square);
@@ -306,10 +300,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
   const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
     if (!isDragging || !dragPiece) return;
-    
+
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    
+
     setDragPiece(prev => prev ? { ...prev, x: clientX, y: clientY } : null);
   }, [isDragging, dragPiece]);
 
@@ -323,28 +317,28 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     const rect = boardRef.current.getBoundingClientRect();
     const clientX = 'changedTouches' in e ? e.changedTouches[0].clientX : e.clientX;
     const clientY = 'changedTouches' in e ? e.changedTouches[0].clientY : e.clientY;
-    
+
     const squareSize = rect.width / 8;
     let file = Math.floor((clientX - rect.left) / squareSize);
     let rank = Math.floor((clientY - rect.top) / squareSize);
-    
+
     if (playerColor === 'black') {
       file = 7 - file;
       rank = 7 - rank;
     }
-    
+
     if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
       const targetSquare = `${FILES[file]}${RANKS[rank]}` as Square;
       if (legalMoves.includes(targetSquare)) {
-        makeMove(dragPiece.square, targetSquare);
+        requestMove(dragPiece.square, targetSquare);
       }
     }
-    
+
     setIsDragging(false);
     setDragPiece(null);
     setSelectedSquare(null);
     setLegalMoves([]);
-  }, [isDragging, dragPiece, legalMoves, makeMove, playerColor]);
+  }, [isDragging, dragPiece, legalMoves, requestMove, playerColor]);
 
   useEffect(() => {
     if (isDragging) {
@@ -352,7 +346,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       window.addEventListener('mouseup', handleDragEnd);
       window.addEventListener('touchmove', handleDragMove);
       window.addEventListener('touchend', handleDragEnd);
-      
+
       return () => {
         window.removeEventListener('mousemove', handleDragMove);
         window.removeEventListener('mouseup', handleDragEnd);
@@ -364,14 +358,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
   const handleResign = useCallback(() => {
     if (gameOver || !playerColor) return;
-    setGameOver(true);
-    setGameResult(t('You resigned', 'You resigned'));
-    if (timerRef.current) clearInterval(timerRef.current);
-    
     if (socket && matchId) {
       socket.emit('chess-resign', { matchId, color: playerColor });
     }
-  }, [gameOver, playerColor, socket, t, matchId]);
+  }, [gameOver, playerColor, socket, matchId]);
 
   const formatTime = (ms: number) => {
     const minutes = Math.floor(ms / 60000);
@@ -382,7 +372,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const renderSquare = (file: number, rank: number) => {
     const displayFile = playerColor === 'black' ? 7 - file : file;
     const displayRank = playerColor === 'black' ? 7 - rank : rank;
-    
+
     const square = `${FILES[displayFile]}${RANKS[displayRank]}` as Square;
     const piece = game.get(square);
     const isLight = (displayFile + displayRank) % 2 === 0;
@@ -419,18 +409,18 @@ export function ChessGame({ onFinish }: ChessGameProps) {
             {FILES[displayFile]}
           </span>
         )}
-        
+
         {isLegalMove && (
           <div className={cn(
             "absolute rounded-full transition-all",
             piece ? "w-full h-full border-4 border-emerald-500/50" : "w-3 h-3 bg-emerald-500/50"
           )} />
         )}
-        
+
         {PieceComponent && !isDragSource && (
           <div className="w-[85%] h-[85%] transition-transform hover:scale-105 drop-shadow-md">
-            <PieceComponent 
-              color={piece!.color === 'w' ? 'white' : 'black'} 
+            <PieceComponent
+              color={piece!.color === 'w' ? 'white' : 'black'}
               className="w-full h-full"
             />
           </div>
@@ -476,7 +466,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
         </div>
       </div>
 
-      <div 
+      <div
         ref={boardRef}
         className="w-full aspect-square rounded-lg overflow-hidden shadow-2xl border-4 border-stone-800"
         style={{ touchAction: 'none' }}
@@ -501,7 +491,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
             if (!piece) return null;
             const PieceComponent = PIECE_COMPONENTS[piece.type];
             return (
-              <PieceComponent 
+              <PieceComponent
                 color={piece.color === 'w' ? 'white' : 'black'}
                 className="w-full h-full drop-shadow-lg"
               />

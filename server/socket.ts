@@ -3,6 +3,16 @@ import type { Server as HttpServer } from "http";
 import { db } from "./db";
 import { matches } from "../shared/schema";
 import {
+  applyMove as chessApplyMove,
+  detectTerminal as chessDetectTerminal,
+  INITIAL_FEN as CHESS_INITIAL_FEN,
+  INITIAL_TIME_MS as CHESS_INITIAL_TIME_MS,
+  loadFen as chessLoadFen,
+  newGame as chessNewGame,
+  type Chess as ChessInstance,
+  type Color as ChessColor,
+} from "../shared/games/chess";
+import {
   blockedWinner as dominoesBlockedWinner,
   canPlayAt as dominoesCanPlayAt,
   dealHands as dominoesDealHands,
@@ -41,15 +51,14 @@ interface SocketOptions {
   allowedOrigins: string[];
 }
 
-interface ChessMove {
+// What the client now sends — only the move intent. Any FEN / SAN / clock
+// fields the client tries to attach are ignored: the server is the
+// single source of truth for state.
+interface ChessMoveInput {
   matchId: string;
   from: string;
   to: string;
   promotion?: string;
-  fen: string;
-  san: string;
-  whiteTime: number;
-  blackTime: number;
 }
 
 interface PlayerInfo {
@@ -59,9 +68,22 @@ interface PlayerInfo {
 
 interface MatchRoom {
   players: Map<string, PlayerInfo>;
-  fen: string;
+  // Server-authoritative chess.js instance.
+  game: ChessInstance;
+  // Per-side clock remaining in ms. The clock for whoever's turn it is
+  // is bled down by `now - lastTickAt` whenever a move arrives or a
+  // public-state snapshot is requested.
   whiteTime: number;
   blackTime: number;
+  // ms-epoch the active player's clock last started ticking — set on
+  // game-start and re-set after every applied move.
+  lastTickAt: number;
+  // Last applied move, kept so reconnecting clients can re-render the
+  // last-move highlight without re-running the whole move history.
+  lastMove: { from: string; to: string; san: string } | null;
+  // Has game-start been emitted at least once? Used by the funded-gate
+  // re-fire to avoid resetting the board on a late funding callback.
+  started: boolean;
 }
 
 const matchRooms = new Map<string, MatchRoom>();
@@ -640,6 +662,38 @@ function xiangqiPublicState(room: XiangqiRoom) {
   };
 }
 
+// Build the public-state payload broadcast by `game-start` and consumed
+// by reconnecting clients. Bleeds elapsed time off the active player's
+// clock so a snapshot read mid-turn returns the live remaining time.
+function chessPublicState(room: MatchRoom) {
+  const now = Date.now();
+  const elapsed = room.started ? Math.max(0, now - room.lastTickAt) : 0;
+  const turn: ChessColor = room.game.turn() as ChessColor;
+  const whiteTime = turn === "w" ? Math.max(0, room.whiteTime - elapsed) : room.whiteTime;
+  const blackTime = turn === "b" ? Math.max(0, room.blackTime - elapsed) : room.blackTime;
+  return {
+    fen: room.game.fen(),
+    whiteTime,
+    blackTime,
+    turn,
+    lastMove: room.lastMove,
+  };
+}
+
+// Initialise a fresh chess game on a room and stamp the start clock.
+// Idempotent for the case where post-funding fires after a join.
+function startChessGame(io: SocketIOServer, matchId: string, room: MatchRoom): void {
+  if (!room.started) {
+    room.game = chessNewGame();
+    room.whiteTime = CHESS_INITIAL_TIME_MS;
+    room.blackTime = CHESS_INITIAL_TIME_MS;
+    room.lastMove = null;
+    room.lastTickAt = Date.now();
+    room.started = true;
+  }
+  io.to(`match:${matchId}`).emit("game-start", chessPublicState(room));
+}
+
 function startXiangqiGame(io: SocketIOServer, matchId: string, room: XiangqiRoom): void {
   room.board = xiangqiInitialBoard();
   room.currentTurn = "red";
@@ -711,12 +765,8 @@ export function markMatchFunded(matchId: string): void {
   if (!io) return;
 
   const chess = matchRooms.get(matchId);
-  if (chess && chess.players.size === 2) {
-    io.to(`match:${matchId}`).emit('game-start', {
-      fen: chess.fen,
-      whiteTime: chess.whiteTime,
-      blackTime: chess.blackTime,
-    });
+  if (chess && chess.players.size === 2 && !chess.started) {
+    startChessGame(io, matchId, chess);
     markGameStarted(matchId);
     console.log("[socket] game-start (post-funding)", matchId);
   }
@@ -855,11 +905,19 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       let room = matchRooms.get(matchId);
       if (!room) {
+        // Build the room with an UNSTARTED chess.js engine. The engine is
+        // initialised for real (clocks stamped, board reset) inside
+        // startChessGame, which runs once both players have joined and the
+        // match is funded. Until then `room.started` stays false and the
+        // clock-drain logic in chessPublicState is a no-op.
         room = {
           players: new Map(),
-          fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-          whiteTime: 30 * 60 * 1000,
-          blackTime: 30 * 60 * 1000
+          game: chessNewGame(),
+          whiteTime: CHESS_INITIAL_TIME_MS,
+          blackTime: CHESS_INITIAL_TIME_MS,
+          lastTickAt: 0,
+          lastMove: null,
+          started: false,
         };
         matchRooms.set(matchId, room);
       }
@@ -869,13 +927,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         existingPlayer.socketId = socket.id;
         socket.emit('color-assigned', { color: existingPlayer.color });
         console.log("[socket] reconnect, color preserved:", existingPlayer.color);
-        
-        if (room.players.size === 2 && fundedMatches.has(matchId)) {
-          socket.emit('game-start', {
-            fen: room.fen,
-            whiteTime: room.whiteTime,
-            blackTime: room.blackTime
-          });
+
+        // Reconnect snapshot: send the authoritative public state so the
+        // client can render the live board, clocks, last-move highlight,
+        // and side-to-move without trusting any cached values.
+        if (room.players.size === 2 && fundedMatches.has(matchId) && room.started) {
+          socket.emit('game-start', chessPublicState(room));
         }
         return;
       }
@@ -896,11 +953,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       if (room.players.size === 2) {
         if (fundedMatches.has(matchId)) {
-          io.to(`match:${matchId}`).emit('game-start', {
-            fen: room.fen,
-            whiteTime: room.whiteTime,
-            blackTime: room.blackTime
-          });
+          startChessGame(io, matchId, room);
           markGameStarted(matchId);
           console.log("[socket] game-start", matchId);
         } else {
@@ -984,8 +1037,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       gameMovesRecorded.delete(matchId);
     });
 
-    socket.on("chess-move", (move: ChessMove) => {
-      const { matchId, from, to, promotion, fen, san, whiteTime, blackTime } = move;
+    // SERVER-AUTHORITATIVE chess-move handler. The client now sends only
+    // the move intent {from, to, promotion}; everything else (FEN, SAN,
+    // clocks, terminal detection) is computed server-side from the room's
+    // chess.js instance. Any FEN/SAN/clock fields the client tries to
+    // attach to the payload are ignored.
+    socket.on("chess-move", (move: ChessMoveInput) => {
+      const { matchId, from, to, promotion } = move ?? ({} as ChessMoveInput);
+      if (!matchId || !from || !to) return;
 
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== matchId) {
@@ -999,32 +1058,133 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         return;
       }
 
+      if (!room.started) {
+        console.log("[socket] chess-move rejected - game not started");
+        return;
+      }
+
       const player = room.players.get(socketInfo.playerId);
       if (!player) {
         console.log("[socket] chess-move rejected - player not in room");
         return;
       }
 
-      // Mark gameplay activity ONLY after socket/room/player auth has
-      // passed, so a forged event from an unauthorized socket can't
-      // pollute the disconnect-safety-net set.
+      // Turn check before doing anything else — only the side to move
+      // may submit a move. Prevents a player from submitting their
+      // opponent's move (e.g. via a forged event) and also stops them
+      // from spamming moves out of turn.
+      const expectedColor: 'white' | 'black' = room.game.turn() === 'w' ? 'white' : 'black';
+      if (player.color !== expectedColor) {
+        console.log("[socket] chess-move rejected - not your turn", matchId, player.color);
+        return;
+      }
+
+      // Drain the moving side's clock by the elapsed wall-clock since the
+      // turn began. This is the canonical clock — the legacy client also
+      // ticks locally but the server's value is authoritative and what
+      // gets broadcast back. If we drained below zero, settle as a
+      // timeout WITHOUT applying the move.
+      //
+      // CRITICAL: advance `lastTickAt` to `now` BEFORE any early return
+      // path that returns after the drain. If we drained the clock but
+      // then bailed (e.g. illegal move), leaving lastTickAt unchanged
+      // would double-charge the same wall-clock interval on the player's
+      // next attempt and could falsely time them out.
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      if (player.color === 'white') {
+        room.whiteTime = Math.max(0, room.whiteTime - elapsed);
+      } else {
+        room.blackTime = Math.max(0, room.blackTime - elapsed);
+      }
+      room.lastTickAt = now;
+      const drainedZero =
+        (player.color === 'white' && room.whiteTime <= 0) ||
+        (player.color === 'black' && room.blackTime <= 0);
+      if (drainedZero) {
+        const winnerColor: 'white' | 'black' = player.color === 'white' ? 'black' : 'white';
+        const winnerId = Array.from(room.players.entries())
+          .find(([, p]) => p.color === winnerColor)?.[0] ?? null;
+        const loserId = socketInfo.playerId;
+        console.log("[socket] chess-move triggered timeout for", player.color);
+        storeGameResult(matchId, 'chess', winnerId, loserId, 'timeout');
+        io.to(`match:${matchId}`).emit('opponent-timeout', { color: player.color });
+        io.to(`match:${matchId}`).emit('game-result', {
+          matchId,
+          winnerId,
+          loserId,
+          reason: 'timeout',
+        });
+        matchRooms.delete(matchId);
+        return;
+      }
+
+      // Validate + apply via the shared engine. An illegal move is
+      // simply rejected — no broadcast, no clock charge beyond the drain
+      // (which already occurred and stays charged so a player can't
+      // probe legality for free). applyMove MUTATES room.game in-place
+      // so chess.js's internal move history is preserved across the
+      // whole game (required for threefold-repetition detection).
+      const result = chessApplyMove(room.game, { from, to, promotion });
+      if (!result) {
+        console.log("[socket] chess-move rejected - illegal", matchId, from, to);
+        return;
+      }
+
+      // Stash the last move for reconnect snapshots, restart the clock
+      // for the opponent.
+      room.lastMove = { from: result.applied.from, to: result.applied.to, san: result.applied.san };
+      room.lastTickAt = now;
+
+      // Authorized + applied → mark gameplay activity. Doing this AFTER
+      // both the auth checks and the legality check means a forged or
+      // malformed event can never pollute the disconnect-safety-net set.
       markGameplayActivity(matchId);
 
-      console.log("[socket] chess-move", matchId, from, to, san, "by", player.color);
-      
-      room.fen = fen;
-      room.whiteTime = whiteTime;
-      room.blackTime = blackTime;
+      console.log(
+        "[socket] chess-move", matchId, result.applied.from, result.applied.to, result.applied.san, "by", player.color
+      );
 
-      socket.to(`match:${matchId}`).emit('opponent-move', {
-        from,
-        to,
-        promotion,
-        fen,
-        san,
-        whiteTime,
-        blackTime
+      // Broadcast the SERVER-COMPUTED state to BOTH players so the mover
+      // also rerenders from authoritative truth (no optimistic divergence).
+      io.to(`match:${matchId}`).emit('opponent-move', {
+        from: result.applied.from,
+        to: result.applied.to,
+        promotion: result.applied.promotion,
+        fen: result.applied.fen,
+        san: result.applied.san,
+        whiteTime: room.whiteTime,
+        blackTime: room.blackTime,
+        newTurn: result.applied.turn,
       });
+
+      // Terminal detection in priority order: checkmate → stalemate →
+      // threefold/fifty/insufficient. Timeout was already handled above
+      // before the move was applied.
+      const terminal = chessDetectTerminal(room.game);
+      if (terminal) {
+        let winnerId: string | null = null;
+        let loserId: string | null = null;
+        if (terminal.reason === 'checkmate') {
+          // The side whose turn it is when checkmated lost — i.e. the
+          // mover's opponent. Mover wins.
+          const winnerColor: 'white' | 'black' = player.color;
+          const loserColor: 'white' | 'black' = winnerColor === 'white' ? 'black' : 'white';
+          winnerId = Array.from(room.players.entries()).find(([, p]) => p.color === winnerColor)?.[0] ?? null;
+          loserId = Array.from(room.players.entries()).find(([, p]) => p.color === loserColor)?.[0] ?? null;
+        }
+        // Else: draw — winnerId/loserId both null.
+
+        console.log("[socket] chess terminal", matchId, terminal.reason);
+        storeGameResult(matchId, 'chess', winnerId, loserId, terminal.reason);
+        io.to(`match:${matchId}`).emit('game-result', {
+          matchId,
+          winnerId,
+          loserId,
+          reason: terminal.reason,
+        });
+        matchRooms.delete(matchId);
+      }
     });
 
     socket.on("chess-resign", (data: { matchId: string; color: 'white' | 'black' }) => {
@@ -1066,6 +1226,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       matchRooms.delete(data.matchId);
     });
 
+    // chess-timeout is now a CLIENT HINT only — the server clock is the
+    // single source of truth. We re-validate by draining the active
+    // player's clock against the canonical lastTickAt; only if the
+    // server agrees that the moving side has run out do we settle. A
+    // forged event (or one from a player whose own UI clock is wrong)
+    // is silently ignored — the next chess-move from the other side
+    // will catch any genuine timeout via the same drain check.
     socket.on("chess-timeout", (data: { matchId: string; color: 'white' | 'black' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1074,75 +1241,72 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       const room = matchRooms.get(data.matchId);
-      if (!room) return;
+      if (!room || !room.started) return;
 
       const player = room.players.get(socketInfo.playerId);
-      if (!player || player.color !== data.color) {
-        console.log("[socket] chess-timeout rejected - color mismatch");
+      if (!player) return;
+
+      // Defensive: only accept the timeout claim if the sender is
+      // claiming their OWN color. The client only ever emits its own
+      // color (handleTimeoutHint), so anything else is forged noise.
+      if (data.color !== player.color) {
+        console.log("[socket] chess-timeout rejected - color is not sender's");
         return;
       }
 
-      console.log("[socket] chess-timeout", data.matchId, data.color);
-      
-      const winnerId = data.color === 'white' 
-        ? Array.from(room.players.entries()).find(([_, p]) => p.color === 'black')?.[0]
-        : Array.from(room.players.entries()).find(([_, p]) => p.color === 'white')?.[0];
-      const loserId = socketInfo.playerId;
-      
-      storeGameResult(data.matchId, 'chess', winnerId || null, loserId, 'timeout');
-      
-      socket.to(`match:${data.matchId}`).emit('opponent-timeout', {
-        color: data.color
-      });
-      
+      // Server-canonical drain. We only honour timeouts for the side
+      // that is actually on the clock, and only against the SERVER's
+      // clock — not whatever the client says.
+      const turnColor: 'white' | 'black' = room.game.turn() === 'w' ? 'white' : 'black';
+      if (data.color !== turnColor) {
+        console.log("[socket] chess-timeout rejected - not the side on the clock");
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      const remaining = turnColor === 'white'
+        ? Math.max(0, room.whiteTime - elapsed)
+        : Math.max(0, room.blackTime - elapsed);
+      if (remaining > 0) {
+        console.log("[socket] chess-timeout rejected - server clock disagrees", remaining);
+        return;
+      }
+
+      // Clock has truly drained. Commit the final values and settle.
+      if (turnColor === 'white') room.whiteTime = 0;
+      else room.blackTime = 0;
+
+      console.log("[socket] chess-timeout (server-confirmed)", data.matchId, turnColor);
+
+      const winnerColor: 'white' | 'black' = turnColor === 'white' ? 'black' : 'white';
+      const winnerId = Array.from(room.players.entries())
+        .find(([, p]) => p.color === winnerColor)?.[0] ?? null;
+      // The loser is the side on the clock — NOT necessarily the sender.
+      const loserId = Array.from(room.players.entries())
+        .find(([, p]) => p.color === turnColor)?.[0] ?? null;
+
+      storeGameResult(data.matchId, 'chess', winnerId, loserId, 'timeout');
+
+      io.to(`match:${data.matchId}`).emit('opponent-timeout', { color: turnColor });
       io.to(`match:${data.matchId}`).emit('game-result', {
         matchId: data.matchId,
         winnerId,
         loserId,
-        reason: 'timeout'
+        reason: 'timeout',
       });
-      
+
       matchRooms.delete(data.matchId);
     });
 
-    socket.on("game-end", async (data: { matchId: string; result: string; winner: string; winnerId?: string; loserId?: string }) => {
-      const socketInfo = socketToPlayer.get(socket.id);
-      if (!socketInfo || socketInfo.matchId !== data.matchId) {
-        return;
-      }
-
-      console.log("[socket] game-end", data.matchId, data.result, data.winner);
-
-      const room = matchRooms.get(data.matchId);
-      let winnerId: string | null = null;
-      let loserId: string | null = null;
-
-      if (data.result === 'draw' || data.winner === 'draw') {
-        winnerId = null;
-        loserId = null;
-      } else if (room && data.winner) {
-        const winnerColor = data.winner as 'white' | 'black';
-        const loserColor = winnerColor === 'white' ? 'black' : 'white';
-        winnerId = Array.from(room.players.entries()).find(([_, p]) => p.color === winnerColor)?.[0] || null;
-        loserId = Array.from(room.players.entries()).find(([_, p]) => p.color === loserColor)?.[0] || null;
-      } else {
-        winnerId = data.winnerId || null;
-        loserId = data.loserId || null;
-      }
-
-      const stored = await storeGameResult(data.matchId, 'chess', winnerId, loserId, data.result);
-      if (!stored || !stored.isFirst) return;
-      
-      io.to(`match:${data.matchId}`).emit('match-ended', data);
-      io.to(`match:${data.matchId}`).emit('game-result', {
-        matchId: data.matchId,
-        winnerId,
-        loserId,
-        reason: data.result
-      });
-      
-      matchRooms.delete(data.matchId);
-    });
+    // The legacy `game-end` event was a client-claimed terminal
+    // ("checkmate"/"draw"/"stalemate") and was the single biggest cheat
+    // vector in chess: a forged emit could steal the pot. It has been
+    // removed — natural terminals are now detected by the server inside
+    // `chess-move` via the shared engine. Resignation flows through the
+    // dedicated `chess-resign` handler. We intentionally do NOT register
+    // any `game-end` listener here so any client still sending one is a
+    // no-op.
 
     socket.on("join-tetris-match", (data: { matchId: string; playerId: string }) => {
       const { matchId, playerId } = data;
