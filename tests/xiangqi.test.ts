@@ -304,12 +304,9 @@ describe("Xiangqi rules engine", () => {
     expect(detectPerpetualCheckLoser(history)).toBeNull();
   });
 
-  it("60-ply no-capture progression: counter advances correctly through quiet horse-shuffle moves", () => {
-    // Shuffle two horses back and forth between two squares with no capture
-    // and verify the no-capture ply counter would reach 60 ply with no
-    // capture flag triggered. Using the engine's isCaptureMove directly so
-    // this test stays at the engine level (server-side terminal detection
-    // is wired separately in server/socket.ts).
+  it("60-move (120-ply) no-capture progression: counter advances through quiet horse-shuffle moves", () => {
+    // Shuffle two horses back and forth with no capture across 120 plies
+    // (= 60 full moves), the spec's no-capture draw threshold.
     let board = initialBoard();
     let plies = 0;
     const horseShuffle: Move[] = [
@@ -318,12 +315,12 @@ describe("Xiangqi rules engine", () => {
       { from: { file: 2, rank: 2 }, to: { file: 1, rank: 0 } },
       { from: { file: 2, rank: 7 }, to: { file: 1, rank: 9 } },
     ];
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       const m = horseShuffle[i % horseShuffle.length];
       expect(isCaptureMove(board, m)).toBe(false);
       board = applyMove(board, m);
       plies += 1;
     }
-    expect(plies).toBe(60);
+    expect(plies).toBe(120);
   });
 });

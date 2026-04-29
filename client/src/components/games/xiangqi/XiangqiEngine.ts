@@ -27,7 +27,7 @@ export interface XiangqiClientState {
   pliesSinceCapture: number;
 }
 
-const NO_CAPTURE_DRAW_PLIES = 60;
+const NO_CAPTURE_DRAW_PLIES = 120;
 
 export class XiangqiEngine {
   private state: XiangqiClientState;

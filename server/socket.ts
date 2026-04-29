@@ -32,8 +32,8 @@ import {
   type Square as XiangqiSquare,
 } from "../shared/games/xiangqi";
 
-// Spec rule: 60 plies (30 full moves) without a capture ⇒ automatic draw.
-const XIANGQI_NO_CAPTURE_DRAW_PLIES = 60;
+// Spec rule: 60 full moves (= 120 plies) without a capture ⇒ automatic draw.
+const XIANGQI_NO_CAPTURE_DRAW_PLIES = 120;
 import { redis } from "./redis";
 
 interface SocketOptions {
