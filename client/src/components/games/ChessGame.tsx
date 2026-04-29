@@ -39,10 +39,15 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef(game);
   const onFinishCalledRef = useRef(false);
+  const playerColorRef = useRef<'white' | 'black' | null>(null);
 
   useEffect(() => {
     gameRef.current = game;
   }, [game]);
+
+  useEffect(() => {
+    playerColorRef.current = playerColor;
+  }, [playerColor]);
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
@@ -112,7 +117,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     const onOpponentTimeout = (data: { color: 'white' | 'black' }) => {
       console.log('[ChessGame] timeout:', data.color);
       setGameOver(true);
-      const youLost = data.color === playerColor;
+      const youLost = data.color === playerColorRef.current;
       setGameResult(
         youLost
           ? t('You ran out of time', 'You ran out of time')
@@ -167,7 +172,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       socket.off('opponent-disconnected', onOpponentDisconnected);
       socket.off('game-result', onGameResult);
     };
-  }, [socket, matchId, playerId, onFinish, t, playerColor]);
+  }, [socket, matchId, playerId, onFinish, t]);
 
   useEffect(() => {
     if (gameOver || waitingForOpponent) return;
