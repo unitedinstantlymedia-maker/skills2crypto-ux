@@ -8,6 +8,7 @@ import { TetrisGame } from "@/components/games/TetrisGame";
 import { CheckersGame } from "@/components/games/CheckersGame";
 import { BattleshipGame } from "@/components/games/BattleshipGame";
 import { DominoesGame } from "@/components/games/DominoesGame";
+import { XiangqiGame } from "@/components/games/XiangqiGame";
 import { WaitingRoom } from "@/components/games/WaitingRoom";
 import { ErrorBoundary } from "@/components/system/ErrorBoundary";
 import { OpponentStatusBanner } from "@/components/system/OpponentStatusBanner";
@@ -41,6 +42,8 @@ export default function Play() {
         return () => <BattleshipGame onFinish={handleFinish} />;
       case "dominoes":
         return () => <DominoesGame onFinish={handleFinish} />;
+      case "xiangqi":
+        return () => <XiangqiGame onFinish={handleFinish} />;
       default:
         return null;
     }

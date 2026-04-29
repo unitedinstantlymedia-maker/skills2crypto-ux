@@ -14,6 +14,21 @@ import {
   type PlayerRole as DominoesPlayerRole,
   type Tile as DominoesTile,
 } from "../shared/games/dominoes";
+import {
+  applyMove as xiangqiApplyMove,
+  findGeneral as xiangqiFindGeneral,
+  initialBoard as xiangqiInitialBoard,
+  INITIAL_TIME_MS as XIANGQI_INITIAL_TIME_MS,
+  isCaptureMove as xiangqiIsCaptureMove,
+  isLegalMove as xiangqiIsLegalMove,
+  statusFor as xiangqiStatusFor,
+  type Board as XiangqiBoard,
+  type Color as XiangqiColor,
+  type Square as XiangqiSquare,
+} from "../shared/games/xiangqi";
+
+// Spec rule: 60 plies (30 full moves) without a capture ⇒ automatic draw.
+const XIANGQI_NO_CAPTURE_DRAW_PLIES = 60;
 import { redis } from "./redis";
 
 interface SocketOptions {
@@ -575,6 +590,74 @@ function dominoesOpponentId(
   return null;
 }
 
+interface XiangqiPlayerInfo {
+  socketId: string;
+  color: XiangqiColor;
+}
+
+interface XiangqiRoom {
+  players: Map<string, XiangqiPlayerInfo>;
+  started: boolean;
+  // Server-authoritative board state. Used to validate every move's
+  // legality with the shared rules engine — clients cannot spoof moves.
+  board: XiangqiBoard;
+  // Server-authoritative turn — only the player whose colour equals
+  // `currentTurn` may submit a move. Updated atomically on each accepted
+  // move so a malicious client can't shove moves out of turn.
+  currentTurn: XiangqiColor;
+  // Server-authoritative clock. `lastTickAt` is the wall-clock instant
+  // when the active player's clock started running for the current turn.
+  // On each move/resign/timeout we deduct (Date.now() - lastTickAt) from
+  // the active side's remaining time before applying state changes.
+  redTime: number;
+  blackTime: number;
+  lastTickAt: number;
+  // Plies since the last capturing move. Resets to 0 on capture and
+  // settles the game as a draw if it reaches XIANGQI_NO_CAPTURE_DRAW_PLIES.
+  pliesSinceCapture: number;
+  // Tracks whether either side has offered a draw, so the opposite side's
+  // 'xiangqi-draw-accept' can be matched against an outstanding offer.
+  drawOfferedBy: XiangqiColor | null;
+}
+
+const xiangqiRooms = new Map<string, XiangqiRoom>();
+
+function xiangqiPublicState(room: XiangqiRoom) {
+  // Bleed elapsed time off the active player's clock for any consumer
+  // that reads state mid-turn (snapshots, reconnect payloads).
+  const now = Date.now();
+  const elapsed = room.started ? Math.max(0, now - room.lastTickAt) : 0;
+  const redTime =
+    room.currentTurn === "red" ? Math.max(0, room.redTime - elapsed) : room.redTime;
+  const blackTime =
+    room.currentTurn === "black" ? Math.max(0, room.blackTime - elapsed) : room.blackTime;
+  return {
+    currentTurn: room.currentTurn,
+    redTime,
+    blackTime,
+  };
+}
+
+function startXiangqiGame(io: SocketIOServer, matchId: string, room: XiangqiRoom): void {
+  room.board = xiangqiInitialBoard();
+  room.currentTurn = "red";
+  room.redTime = XIANGQI_INITIAL_TIME_MS;
+  room.blackTime = XIANGQI_INITIAL_TIME_MS;
+  room.lastTickAt = Date.now();
+  room.pliesSinceCapture = 0;
+  room.drawOfferedBy = null;
+  io.to(`xiangqi:${matchId}`).emit("xiangqi-game-start", {
+    publicState: xiangqiPublicState(room),
+  });
+}
+
+function xiangqiOpponentId(room: XiangqiRoom, playerId: string): string | null {
+  for (const id of room.players.keys()) {
+    if (id !== playerId) return id;
+  }
+  return null;
+}
+
 // Tracks matches whose on-chain escrow has been funded by both players
 // (i.e. the contract emitted MatchActive). Game-start events are gated on
 // this set so gameplay never begins before crypto is locked.
@@ -665,6 +748,14 @@ export function markMatchFunded(matchId: string): void {
     startDominoesGame(io, dominoes);
     markGameStarted(matchId);
     console.log("[socket] dominoes-game-start (post-funding)", matchId);
+  }
+
+  const xiangqi = xiangqiRooms.get(matchId);
+  if (xiangqi && xiangqi.players.size === 2 && !xiangqi.started) {
+    xiangqi.started = true;
+    startXiangqiGame(io, matchId, xiangqi);
+    markGameStarted(matchId);
+    console.log("[socket] xiangqi-game-start (post-funding)", matchId);
   }
 }
 
@@ -1916,6 +2007,386 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       dominoesRooms.delete(data.matchId);
     });
 
+    // ───────────────────────────── Xiangqi ─────────────────────────────
+    // Mirrors the Checkers shape: client-driven board state, server-
+    // authoritative socket auth + turn enforcement + clock validation.
+    // Wire payload for moves matches the spec contract:
+    //   { from, to, redTime, blackTime, newTurn } — broadcast as
+    //   `opponent-xiangqi-move`. Server overrides redTime/blackTime/newTurn
+    //   with its own authoritative values.
+
+    socket.on("join-xiangqi-match", (data: { matchId: string; playerId: string }) => {
+      const { matchId, playerId } = data;
+      socket.join(`xiangqi:${matchId}`);
+      console.log("[socket] join xiangqi match", matchId, socket.id, playerId);
+
+      const oldSocketId = playerToSocket.get(playerId);
+      if (oldSocketId && oldSocketId !== socket.id) {
+        socketToPlayer.delete(oldSocketId);
+      }
+
+      socketToPlayer.set(socket.id, { matchId, playerId });
+      playerToSocket.set(playerId, socket.id);
+
+      const pendingTimeout = pendingDisconnects.get(playerId);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+        pendingDisconnects.delete(playerId);
+        console.log("[socket] player reconnected, cancelled forfeit:", playerId);
+        socket.to(`xiangqi:${matchId}`).emit('opponent-reconnected', { matchId });
+      }
+
+      let room = xiangqiRooms.get(matchId);
+      if (!room) {
+        room = {
+          players: new Map(),
+          started: false,
+          board: xiangqiInitialBoard(),
+          currentTurn: 'red',
+          redTime: XIANGQI_INITIAL_TIME_MS,
+          blackTime: XIANGQI_INITIAL_TIME_MS,
+          lastTickAt: 0,
+          pliesSinceCapture: 0,
+          drawOfferedBy: null,
+        };
+        xiangqiRooms.set(matchId, room);
+      }
+
+      const existingPlayer = room.players.get(playerId);
+      if (existingPlayer) {
+        existingPlayer.socketId = socket.id;
+        socket.emit('xiangqi-color-assigned', { color: existingPlayer.color });
+        console.log("[socket] xiangqi reconnect, color preserved:", existingPlayer.color);
+
+        if (room.players.size === 2 && room.started) {
+          // Re-send a fresh game-start with the live (time-bled) public
+          // state so the reconnecting client lines up its own clock.
+          socket.emit('xiangqi-game-start', { publicState: xiangqiPublicState(room) });
+        }
+        return;
+      }
+
+      if (room.players.size >= 2) {
+        console.log("[socket] xiangqi match full, rejecting player", playerId);
+        socket.emit('match-full');
+        return;
+      }
+
+      const existingColors = Array.from(room.players.values()).map((p) => p.color);
+      const assignedColor: XiangqiColor = existingColors.includes('red') ? 'black' : 'red';
+
+      room.players.set(playerId, { socketId: socket.id, color: assignedColor });
+
+      socket.emit('xiangqi-color-assigned', { color: assignedColor });
+      console.log("[socket] xiangqi color assigned", matchId, playerId, assignedColor);
+
+      if (room.players.size === 2 && !room.started) {
+        if (fundedMatches.has(matchId)) {
+          room.started = true;
+          startXiangqiGame(io, matchId, room);
+          markGameStarted(matchId);
+          console.log("[socket] xiangqi-game-start", matchId);
+        } else {
+          console.log("[socket] xiangqi-game-start gated on funding", matchId);
+        }
+      }
+    });
+
+    socket.on("xiangqi-move", (data: {
+      matchId: string;
+      from: { file: number; rank: number };
+      to: { file: number; rank: number };
+      // The client also sends newTurn/redTime/blackTime per the locked
+      // wire spec, but the server ignores all three — its own values are
+      // authoritative and broadcast back. Keeping them in the payload
+      // shape so the spec contract is unchanged.
+      newTurn?: XiangqiColor;
+      redTime?: number;
+      blackTime?: number;
+    }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] xiangqi-move rejected - unauthorized");
+        return;
+      }
+
+      const room = xiangqiRooms.get(data.matchId);
+      if (!room || !room.started) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) {
+        console.log("[socket] xiangqi-move rejected - player not in room");
+        return;
+      }
+
+      // Server-authoritative turn enforcement: only the side whose turn
+      // it currently is may submit a move. Drops out-of-turn / replay /
+      // double-move attempts.
+      if (player.color !== room.currentTurn) {
+        console.log("[socket] xiangqi-move rejected - not your turn", player.color, "vs", room.currentTurn);
+        return;
+      }
+
+      // Validate move SHAPE before consulting the engine. The shared
+      // engine assumes integer file [0..8] / rank [0..9] coordinates.
+      const isValidSquare = (s: unknown): s is XiangqiSquare =>
+        !!s &&
+        typeof (s as XiangqiSquare).file === 'number' &&
+        typeof (s as XiangqiSquare).rank === 'number' &&
+        Number.isInteger((s as XiangqiSquare).file) &&
+        Number.isInteger((s as XiangqiSquare).rank) &&
+        (s as XiangqiSquare).file >= 0 && (s as XiangqiSquare).file <= 8 &&
+        (s as XiangqiSquare).rank >= 0 && (s as XiangqiSquare).rank <= 9;
+      if (!isValidSquare(data.from) || !isValidSquare(data.to)) {
+        console.log("[socket] xiangqi-move rejected - invalid coordinates");
+        return;
+      }
+
+      // Authoritative clock: bleed elapsed think-time off the active
+      // clock FIRST. If it has truly drained, the mover loses on time —
+      // forfeit and settle the match here rather than accepting the move.
+      const now = Date.now();
+      const elapsed = Math.max(0, now - room.lastTickAt);
+      const remaining =
+        player.color === 'red' ? room.redTime - elapsed : room.blackTime - elapsed;
+      if (remaining <= 0) {
+        console.log("[socket] xiangqi-move rejected - clock drained, forfeit by timeout");
+        const winnerId = xiangqiOpponentId(room, socketInfo.playerId);
+        const loserId = socketInfo.playerId;
+        storeGameResult(data.matchId, 'xiangqi', winnerId, loserId, 'timeout');
+        io.to(`xiangqi:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId,
+          loserId,
+          reason: 'timeout',
+        });
+        xiangqiRooms.delete(data.matchId);
+        return;
+      }
+
+      // Server-authoritative legality: run the shared rules engine
+      // against the server's board. Any illegal move (wrong piece,
+      // blocked path, self-check, palace/river violation, etc.) is
+      // dropped on the floor.
+      const move = { from: data.from, to: data.to };
+      if (!xiangqiIsLegalMove(room.board, player.color, move)) {
+        console.log("[socket] xiangqi-move rejected - illegal move", data.from, "→", data.to);
+        return;
+      }
+
+      // Apply the move to the server's authoritative board. Track the
+      // capture flag for the 60-ply no-capture draw counter.
+      const wasCapture = xiangqiIsCaptureMove(room.board, move);
+      room.board = xiangqiApplyMove(room.board, move);
+      room.pliesSinceCapture = wasCapture ? 0 : room.pliesSinceCapture + 1;
+
+      // Deduct the elapsed time we just consumed.
+      if (player.color === 'red') {
+        room.redTime = Math.max(0, room.redTime - elapsed);
+      } else {
+        room.blackTime = Math.max(0, room.blackTime - elapsed);
+      }
+
+      // Any move clears any outstanding draw offer — the spec is that a
+      // draw offer is implicitly declined the moment the offered side
+      // continues playing.
+      room.drawOfferedBy = null;
+
+      const opponentColor: XiangqiColor = player.color === 'red' ? 'black' : 'red';
+      room.currentTurn = opponentColor;
+      room.lastTickAt = Date.now();
+
+      markGameplayActivity(data.matchId);
+
+      // Always broadcast the move so opposing client mirrors the board.
+      io.to(`xiangqi:${data.matchId}`).emit('opponent-xiangqi-move', {
+        from: data.from,
+        to: data.to,
+        // Server-authoritative values — clients overwrite their own
+        // hints with these.
+        newTurn: room.currentTurn,
+        redTime: room.redTime,
+        blackTime: room.blackTime,
+      });
+
+      // ── Server-side terminal-state detection ──
+      // Order matters: general capture is checked first because once the
+      // opposing general is off the board, statusFor() can return
+      // misleading values. Then checkmate/stalemate via shared engine,
+      // finally the 60-ply no-capture draw rule.
+      const opponentGeneral = xiangqiFindGeneral(room.board, opponentColor);
+      let terminal: { reason: string; winner: XiangqiColor | null } | null = null;
+      if (!opponentGeneral) {
+        terminal = { reason: 'general_captured', winner: player.color };
+      } else {
+        const status = xiangqiStatusFor(room.board, opponentColor);
+        if (status === 'checkmate') {
+          terminal = { reason: 'checkmate', winner: player.color };
+        } else if (status === 'stalemate') {
+          // Asian-rules stalemate: side to move with no legal reply
+          // loses. So the mover wins, same as checkmate.
+          terminal = { reason: 'stalemate', winner: player.color };
+        } else if (room.pliesSinceCapture >= XIANGQI_NO_CAPTURE_DRAW_PLIES) {
+          terminal = { reason: 'draw', winner: null };
+        }
+      }
+
+      if (terminal) {
+        let winnerId: string | null = null;
+        let loserId: string | null = null;
+        if (terminal.winner) {
+          for (const [id, p] of room.players.entries()) {
+            if (p.color === terminal.winner) winnerId = id;
+            else loserId = id;
+          }
+        }
+        console.log("[socket] xiangqi terminal:", terminal.reason, "winner:", terminal.winner);
+        storeGameResult(data.matchId, 'xiangqi', winnerId, loserId, terminal.reason);
+        io.to(`xiangqi:${data.matchId}`).emit('game-result', {
+          matchId: data.matchId,
+          winnerId,
+          loserId,
+          reason: terminal.reason,
+        });
+        xiangqiRooms.delete(data.matchId);
+      }
+    });
+
+    socket.on("xiangqi-timeout", (data: { matchId: string; color: XiangqiColor }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) {
+        console.log("[socket] xiangqi-timeout rejected - unauthorized");
+        return;
+      }
+
+      const room = xiangqiRooms.get(data.matchId);
+      if (!room || !room.started) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] xiangqi-timeout rejected - color mismatch");
+        return;
+      }
+
+      // Authoritative clock gate: only honour the timeout if the player's
+      // remaining time has truly drained on the server clock. Otherwise a
+      // malicious client could declare a fake timeout against itself in
+      // some weird griefing scenario.
+      if (room.currentTurn !== data.color) {
+        console.log("[socket] xiangqi-timeout rejected - not active player");
+        return;
+      }
+      const elapsed = Math.max(0, Date.now() - room.lastTickAt);
+      const remaining =
+        data.color === 'red' ? room.redTime - elapsed : room.blackTime - elapsed;
+      if (remaining > 0) {
+        console.log("[socket] xiangqi-timeout rejected - clock not drained", remaining);
+        return;
+      }
+
+      const winnerId = xiangqiOpponentId(room, socketInfo.playerId);
+      const loserId = socketInfo.playerId;
+
+      console.log("[socket] xiangqi-timeout", data.matchId, data.color);
+
+      storeGameResult(data.matchId, 'xiangqi', winnerId, loserId, 'timeout');
+
+      socket.to(`xiangqi:${data.matchId}`).emit('opponent-xiangqi-timeout');
+      io.to(`xiangqi:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'timeout',
+      });
+
+      xiangqiRooms.delete(data.matchId);
+    });
+
+    // NOTE: There is deliberately no `xiangqi-game-end` client event. All
+    // natural game endings (checkmate, stalemate, general capture, 60-ply
+    // no-capture draw) are detected SERVER-SIDE inside `xiangqi-move`
+    // using the shared rules engine, so a malicious client can't forge a
+    // win. Resign / draw-agreement / disconnect / timeout each have their
+    // own narrowly-scoped handler below.
+
+    socket.on("xiangqi-resign", (data: { matchId: string; color: XiangqiColor }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = xiangqiRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player || player.color !== data.color) {
+        console.log("[socket] xiangqi-resign rejected - color mismatch");
+        return;
+      }
+
+      const winnerId = xiangqiOpponentId(room, socketInfo.playerId);
+      const loserId = socketInfo.playerId;
+
+      console.log("[socket] xiangqi-resign", data.matchId, data.color);
+
+      storeGameResult(data.matchId, 'xiangqi', winnerId, loserId, 'resign');
+
+      io.to(`xiangqi:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId,
+        loserId,
+        reason: 'resign',
+      });
+
+      xiangqiRooms.delete(data.matchId);
+    });
+
+    socket.on("xiangqi-draw-offer", (data: { matchId: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = xiangqiRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) return;
+
+      // Only one outstanding offer at a time; keep the latest offerer.
+      room.drawOfferedBy = player.color;
+      console.log("[socket] xiangqi-draw-offer", data.matchId, "by", player.color);
+      socket.to(`xiangqi:${data.matchId}`).emit('xiangqi-draw-offered', { from: player.color });
+    });
+
+    socket.on("xiangqi-draw-accept", (data: { matchId: string }) => {
+      const socketInfo = socketToPlayer.get(socket.id);
+      if (!socketInfo || socketInfo.matchId !== data.matchId) return;
+
+      const room = xiangqiRooms.get(data.matchId);
+      if (!room) return;
+
+      const player = room.players.get(socketInfo.playerId);
+      if (!player) return;
+
+      // Only the side that did NOT offer can accept, and there must be
+      // an outstanding offer. This blocks self-accept and replay attacks.
+      if (!room.drawOfferedBy || room.drawOfferedBy === player.color) {
+        console.log("[socket] xiangqi-draw-accept rejected - no valid offer");
+        return;
+      }
+
+      console.log("[socket] xiangqi-draw-accept", data.matchId, "by", player.color);
+
+      // Draw: both players logged with null winner/loser per the schema's
+      // existing draw convention used by dominoes blocked-board draws.
+      storeGameResult(data.matchId, 'xiangqi', null, null, 'draw_agreement');
+      io.to(`xiangqi:${data.matchId}`).emit('game-result', {
+        matchId: data.matchId,
+        winnerId: null,
+        loserId: null,
+        reason: 'draw_agreement',
+      });
+
+      xiangqiRooms.delete(data.matchId);
+    });
+
     socket.on("battleship-timeout", (data: { matchId: string; role: 'player1' | 'player2' }) => {
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) {
@@ -1959,6 +2430,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         io.to(`checkers:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`battleship:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`dominoes:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
+        io.to(`xiangqi:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
 
         const timeout = setTimeout(() => {
           const currentSocketId = playerToSocket.get(playerId);
@@ -1987,12 +2459,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               tetrisRooms.has(matchId) ||
               checkersRooms.has(matchId) ||
               battleshipRooms.has(matchId) ||
-              dominoesRooms.has(matchId);
+              dominoesRooms.has(matchId) ||
+              xiangqiRooms.has(matchId);
             matchRooms.delete(matchId);
             tetrisRooms.delete(matchId);
             checkersRooms.delete(matchId);
             battleshipRooms.delete(matchId);
             dominoesRooms.delete(matchId);
+            xiangqiRooms.delete(matchId);
             // Also clear funded/started bookkeeping so these sets do not
             // grow unbounded over the process lifetime when matches are
             // abandoned before play.
@@ -2006,6 +2480,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               io.to(`checkers:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
               io.to(`battleship:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
               io.to(`dominoes:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
+              io.to(`xiangqi:${matchId}`).emit("match-cancelled", { matchId, reason: "never_started" });
             }
             return;
           }
@@ -2100,6 +2575,25 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
                 });
               }
               dominoesRooms.delete(matchId);
+            }
+          }
+
+          const xiangqiRoom = xiangqiRooms.get(matchId);
+          if (xiangqiRoom && xiangqiRoom.started) {
+            const player = xiangqiRoom.players.get(playerId);
+            if (player) {
+              const winnerId = xiangqiOpponentId(xiangqiRoom, playerId);
+              if (winnerId) {
+                storeGameResult(matchId, 'xiangqi', winnerId, playerId, 'disconnect');
+                io.to(`xiangqi:${matchId}`).emit('opponent-disconnected', { matchId, forfeit: true });
+                io.to(`xiangqi:${matchId}`).emit('game-result', {
+                  matchId,
+                  winnerId,
+                  loserId: playerId,
+                  reason: 'disconnect',
+                });
+              }
+              xiangqiRooms.delete(matchId);
             }
           }
         }, 30000);
