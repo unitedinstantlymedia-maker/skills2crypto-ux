@@ -25,6 +25,15 @@ import {
   recordMatchmakingCooldownRejection,
 } from "./security/abuseCounters";
 import { isOraclePaused, setPause, getPauseStatus, type PauseScope } from "./security/oraclePause";
+import {
+  touchUser,
+  getUserStatus,
+  getUser,
+  setUserStatus,
+  checkDepositBanForWallets,
+} from "./users/userStatus";
+import { requireAdminWallet } from "./security/adminAuth";
+import { UserStatusEnum } from "../shared/schema";
 import { getOpsAlertStatus } from "./security/opsAlert";
 import { getReconciliationStatus } from "./security/reconciliation";
 import { getNetworkFees } from "./security/networkFees";
@@ -148,6 +157,10 @@ export async function registerRoutes(
       })),
     });
     if (result.ok) {
+      // Anti-cheat L1 (Task #46): record this wallet as having
+      // interacted with the system. Fire-and-forget — a DB blip must
+      // not break the success path of captcha verification.
+      if (result.wallet) touchUser(result.wallet).catch(() => {});
       return res.status(200).json({ ok: true });
     }
     // If this failure tipped the wallet into cooldown, surface that so
@@ -320,6 +333,33 @@ export async function registerRoutes(
       }
     }
 
+    // Anti-cheat L1 (Task #46) — soft-ban gate.
+    //   - 'banned'       → explicit rejection so the client surfaces
+    //                      a "your account has been suspended" toast.
+    //   - 'shadowbanned' → return the normal `waiting` shape WITHOUT
+    //                      enqueueing the player. UI shows the regular
+    //                      "Searching..." spinner and the player just
+    //                      never gets matched. No error, no signal,
+    //                      no log line on the client side.
+    //   - 'active'       → unchanged.
+    const status = await getUserStatus(cleanWallet);
+    if (status === "banned") {
+      console.warn(`[find-match] hard-banned wallet rejected: ${cleanWallet}`);
+      return res.status(403).json({
+        error: "banned",
+        message: "Your account has been suspended. Contact support if you believe this is a mistake.",
+      });
+    }
+    if (status === "shadowbanned") {
+      // Touch the user so lastSeenAt still updates (admin can see
+      // they're still trying to queue) and return the same waiting
+      // shape findOrCreateMatch would have, with no queue side-effect.
+      touchUser(cleanWallet).catch(() => {});
+      return res.status(200).json({ status: "waiting" });
+    }
+    // Honest user — track first/last sighting.
+    touchUser(cleanWallet).catch(() => {});
+
     try {
       const result = await findOrCreateMatch({
         game,
@@ -339,6 +379,73 @@ export async function registerRoutes(
     } catch (err) {
       console.error("find-match failed:", err);
       return res.status(500).json({ error: "matchmaking_failed" });
+    }
+  });
+
+  // ============================================================
+  // Anti-cheat L1 — Admin user-status endpoints (Task #46).
+  // ============================================================
+  // Internal-only; gated by ADMIN_WALLET_ALLOWLIST + per-request EVM
+  // signature. There is no public UI yet — the admin dashboard is a
+  // Level 2 task. See server/security/adminAuth.ts for the signature
+  // contract.
+
+  app.get("/api/admin/users/:wallet", requireAdminWallet, async (req, res) => {
+    const wallet = String(req.params.wallet || "").trim();
+    if (!wallet) return res.status(400).json({ error: "wallet required" });
+    const u = await getUser(wallet);
+    if (!u) {
+      // Honest "this wallet has never been seen" — distinct from
+      // "this wallet is active" because the admin tooling cares.
+      return res.status(404).json({ error: "user_not_found" });
+    }
+    return res.status(200).json({ user: u });
+  });
+
+  app.post("/api/admin/users/:wallet/status", requireAdminWallet, async (req, res) => {
+    const wallet = String(req.params.wallet || "").trim();
+    if (!wallet) return res.status(400).json({ error: "wallet required" });
+    const { status, reason } = (req.body ?? {}) as { status?: string; reason?: string };
+    const parsed = UserStatusEnum.safeParse(status);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "bad_status",
+        message: "status must be 'active' | 'shadowbanned' | 'banned'.",
+      });
+    }
+    try {
+      const updated = await setUserStatus({
+        wallet,
+        status: parsed.data,
+        reason: typeof reason === "string" && reason.length > 0 ? reason.slice(0, 200) : null,
+        by: req.adminAuth?.wallet || "admin",
+      });
+      // If we just hard-banned a wallet, kick any of their live
+      // sockets so an in-flight match can't continue under a banned
+      // account. Lookup keys playerId by wallet address (matchmaking
+      // flow uses wallet AS playerId).
+      if (parsed.data === "banned") {
+        try {
+          // Use the dedicated wallet→socket map exported from
+          // server/socket.ts. The matchmaking flow stores wallet AS
+          // playerId, so playerToSocket is the authoritative index;
+          // a previous version of this code looked at a `socket.data`
+          // field that was never set, so live bans never disconnected.
+          const { disconnectWalletSockets } = await import("./socket");
+          const killed = disconnectWalletSockets(wallet);
+          if (killed > 0) {
+            console.warn(
+              `[admin] hard-ban on ${wallet} kicked ${killed} live socket(s)`,
+            );
+          }
+        } catch (e: any) {
+          console.warn(`[admin] socket kick on ban failed: ${e?.message || e}`);
+        }
+      }
+      return res.status(200).json({ user: updated });
+    } catch (e: any) {
+      console.error(`[admin] setUserStatus failed:`, e?.message || e);
+      return res.status(500).json({ error: "set_status_failed", message: e?.message || String(e) });
     }
   });
 
@@ -959,6 +1066,19 @@ export async function registerRoutes(
         if (!gate.ok) {
           return res.status(gate.status).json(gate.body);
         }
+        // Soft-ban gate (Task #46). If either participant has been
+        // hard-banned since matchmaking, refuse the deposit auth so the
+        // honest opponent doesn't put real money behind a match the
+        // banned account can no longer settle from.
+        const banGate = await checkDepositBanForWallets([
+          String(matchData.addr1 || ""),
+          String(matchData.addr2 || ""),
+        ]);
+        if (!banGate.ok) {
+          return res.status(banGate.status).json(banGate.body);
+        }
+        touchUser(String(matchData.addr1 || "")).catch(() => {});
+        touchUser(String(matchData.addr2 || "")).catch(() => {});
       }
 
       const asset = String(matchData.asset);
@@ -1099,6 +1219,15 @@ export async function registerRoutes(
         if (!gate.ok) {
           return res.status(gate.status).json(gate.body);
         }
+        const banGate = await checkDepositBanForWallets([
+          String(matchData.addr1 || ""),
+          String(matchData.addr2 || ""),
+        ]);
+        if (!banGate.ok) {
+          return res.status(banGate.status).json(banGate.body);
+        }
+        touchUser(String(matchData.addr1 || "")).catch(() => {});
+        touchUser(String(matchData.addr2 || "")).catch(() => {});
       }
       if (String(matchData.asset) !== "USDT") {
         return res.status(400).json({ error: `Asset '${matchData.asset}' is not USDT (Tron)` });
@@ -1712,6 +1841,12 @@ export async function registerRoutes(
       if (!captchaGate.ok) {
         return res.status(captchaGate.status).json(captchaGate.body);
       }
+      const banGate = await checkDepositBanForWallets([player1, player2]);
+      if (!banGate.ok) {
+        return res.status(banGate.status).json(banGate.body);
+      }
+      touchUser(player1).catch(() => {});
+      touchUser(player2).catch(() => {});
 
       // Defense-in-depth backstop for TON.
       //

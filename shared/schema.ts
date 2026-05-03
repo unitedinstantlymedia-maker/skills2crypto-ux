@@ -55,6 +55,41 @@ export const matchMoves = pgTable(
 export type MatchMove = typeof matchMoves.$inferSelect;
 export type InsertMatchMove = typeof matchMoves.$inferInsert;
 
+// Anti-cheat L1 — soft-ban infrastructure (Task #46).
+//
+// Every wallet that interacts with the system gets a row here. The
+// `status` column is the central authority for matchmaking gating:
+//   - 'active'        → normal play
+//   - 'shadowbanned'  → matchmaker silently never pairs them (UI shows
+//                       a normal "Searching..." spinner)
+//   - 'banned'        → explicit rejection at every entry point and
+//                       any open sockets are forcibly disconnected
+//
+// Wallet is the primary key because every other table in the schema
+// (matches.player1Id, matchMoves.actorId, etc.) already keys players
+// by raw wallet address — there's no separate user-id namespace.
+export const users = pgTable(
+  "users",
+  {
+    wallet: varchar("wallet").primaryKey(),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    banReason: varchar("ban_reason", { length: 200 }),
+    bannedAt: bigint("banned_at", { mode: "number" }),
+    bannedBy: varchar("banned_by", { length: 200 }),
+    firstSeenAt: bigint("first_seen_at", { mode: "number" }).notNull(),
+    lastSeenAt: bigint("last_seen_at", { mode: "number" }).notNull(),
+    notes: jsonb("notes"),
+  },
+  (t) => ({
+    statusIdx: index("users_status_idx").on(t.status),
+  }),
+);
+
+export const UserStatusEnum = z.enum(["active", "shadowbanned", "banned"]);
+export type UserStatus = z.infer<typeof UserStatusEnum>;
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
 export const ChallengeStatusEnum = z.enum(["pending", "accepted", "expired", "cancelled", "completed"]);
 export type ChallengeStatus = z.infer<typeof ChallengeStatusEnum>;
 

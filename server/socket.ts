@@ -105,6 +105,56 @@ interface MatchRoom {
 const matchRooms = new Map<string, MatchRoom>();
 const socketToPlayer = new Map<string, { matchId: string; playerId: string; gameType?: string }>();
 const playerToSocket = new Map<string, string>(); // playerId -> socketId (for reconnect tracking)
+
+let _ioRefForAdmin: SocketIOServer | null = null;
+
+// Anti-cheat L1 (Task #46) — disconnect every live socket owned by
+// `wallet` so an admin hard-ban takes effect immediately on in-flight
+// matches. Matchmaking flow stores the wallet AS playerId, so the
+// existing playerToSocket map is the authoritative wallet→socket
+// index. We also try a case-folded EVM lookup because callers
+// (admin endpoint) may pass any casing. Returns the count of sockets
+// kicked.
+export function disconnectWalletSockets(wallet: string): number {
+  if (!_ioRefForAdmin) return 0;
+  const variants = new Set<string>();
+  const w = (wallet || "").trim();
+  if (!w) return 0;
+  variants.add(w);
+  if (/^0x[0-9a-fA-F]{40}$/.test(w)) {
+    variants.add(w.toLowerCase());
+  }
+  // Also scan the live map: a socket joined under a different casing
+  // would otherwise be missed. The map is small (one entry per active
+  // player) so the linear scan is cheap.
+  const targetSockets = new Set<string>();
+  for (const v of variants) {
+    const s = playerToSocket.get(v);
+    if (s) targetSockets.add(s);
+  }
+  if (/^0x[0-9a-fA-F]{40}$/.test(w)) {
+    const wLower = w.toLowerCase();
+    for (const [pid, sid] of playerToSocket.entries()) {
+      if (/^0x[0-9a-fA-F]{40}$/.test(pid) && pid.toLowerCase() === wLower) {
+        targetSockets.add(sid);
+      }
+    }
+  }
+  let killed = 0;
+  for (const sid of targetSockets) {
+    const sock = _ioRefForAdmin.sockets.sockets.get(sid);
+    if (sock) {
+      try {
+        sock.emit("force-disconnect", { reason: "banned" });
+      } catch {
+        /* swallow */
+      }
+      sock.disconnect(true);
+      killed++;
+    }
+  }
+  return killed;
+}
 const pendingDisconnects = new Map<string, ReturnType<typeof setTimeout>>(); // playerId -> timeout
 
 interface GameResult {
@@ -480,6 +530,15 @@ async function storeGameResult(
       // never notices.
       setMatchmakingCooldown(player1Id).catch(() => {});
       setMatchmakingCooldown(player2Id).catch(() => {});
+
+      // Anti-cheat L1 (Task #46): refresh users.lastSeenAt for both
+      // participants. Settlement is the last guaranteed touchpoint, so
+      // even players who skipped earlier touchUser sites (e.g. challenge
+      // accept that bypassed find-match) end up with a current row.
+      void import("./users/userStatus").then((m) => {
+        m.touchUser(player1Id).catch(() => {});
+        m.touchUser(player2Id).catch(() => {});
+      });
 
       settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
         console.error("[socket] on-chain settlement failed:", matchId, err?.message || err);
@@ -1294,6 +1353,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     }
   });
   ioRef = io;
+  _ioRefForAdmin = io;
 
   // Per-IP socket connection cap. The handshake-IP resolver mirrors
   // Express trust-proxy=1 (rightmost X-Forwarded-For entry is what the
