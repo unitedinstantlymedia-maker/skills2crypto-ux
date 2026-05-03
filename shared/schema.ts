@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, varchar, real, bigint, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, varchar, real, bigint, integer, jsonb, index, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -35,7 +35,7 @@ export type Match = typeof matches.$inferSelect;
 export const matchMoves = pgTable(
   "match_moves",
   {
-    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id").primaryKey().defaultRandom(),
     matchId: varchar("match_id").notNull(),
     gameType: varchar("game_type", { length: 20 }).notNull(),
     ply: integer("ply").notNull(),

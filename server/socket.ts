@@ -3,6 +3,7 @@ import type { Server as HttpServer } from "http";
 import { db } from "./db";
 import { matches, matchMoves } from "../shared/schema";
 import { issueMatchToken } from "./security/matchToken";
+import { eq } from "drizzle-orm";
 import {
   applyMove as chessApplyMove,
   detectTerminal as chessDetectTerminal,
@@ -183,6 +184,87 @@ function recordMatchMove(
 // Exposed for tests; never call from the socket hot path.
 export function _resetMatchMoveLogStateForTests(): void {
   moveLogState.clear();
+}
+
+// Verify a join attempt's claimed `playerId` against the match's
+// canonical participant set, then mint and emit the per-(matchId,
+// playerId) HMAC token used to authenticate REST move-history fetches.
+//
+// Why this matters: `playerId` arrives over the socket as a
+// client-supplied string. Without verification, an attacker who
+// knows a match's id and a participant's wallet address could
+// connect, claim that wallet as their `playerId`, and the server
+// would happily mint a token granting them read access to that
+// participant's private move log. We anchor identity in the
+// match metadata (Redis-first, Postgres fallback for matches whose
+// Redis hash has rotated out) and emit the token only when the
+// claimed wallet is one of the two real addr1/addr2 participants.
+//
+// Runs asynchronously so it never stalls the socket join hot path —
+// reconnection cancellation, room assembly, color/role assignment,
+// and game-start gating all proceed synchronously as before.
+function verifyAndIssueMatchToken(
+  socket: Socket,
+  matchId: string,
+  playerId: string,
+): void {
+  void (async () => {
+    try {
+      let addr1: string | null = null;
+      let addr2: string | null = null;
+      try {
+        const md = await redis.hgetall(`match:${matchId}`);
+        if (md && (md.addr1 || md.player1Id)) {
+          addr1 = String(md.addr1 || md.player1Id);
+          addr2 = String(md.addr2 || md.player2Id);
+        }
+      } catch (err: any) {
+        console.warn("[matchToken] redis lookup failed:", err?.message || err);
+      }
+      if (!addr1 || !addr2) {
+        try {
+          const rows = await db
+            .select({
+              player1Id: matches.player1Id,
+              player2Id: matches.player2Id,
+            })
+            .from(matches)
+            .where(eq(matches.matchId, matchId))
+            .limit(1);
+          if (rows.length > 0) {
+            addr1 = rows[0].player1Id;
+            addr2 = rows[0].player2Id;
+          }
+        } catch (err: any) {
+          console.warn("[matchToken] db lookup failed:", err?.message || err);
+        }
+      }
+      if (!addr1 || !addr2) {
+        // No canonical participant set yet (e.g. matchmaking hash
+        // has not landed). Without a trusted reference we MUST NOT
+        // issue a token — better to deny later REST reads than to
+        // hand out unverifiable credentials.
+        console.warn(
+          "[matchToken] no participant record for match — skipping token",
+          matchId,
+        );
+        return;
+      }
+      if (playerId !== addr1 && playerId !== addr2) {
+        console.warn(
+          "[matchToken] join playerId does not match canonical participants — denying token",
+          { matchId, playerId },
+        );
+        return;
+      }
+      socket.emit("match-token", {
+        matchId,
+        token: issueMatchToken(matchId, playerId),
+      });
+    } catch (err: any) {
+      console.error("[matchToken] unexpected failure:", err?.message || err);
+    }
+  })();
 }
 
 // Test seams: seed in-memory game rooms into a "ready to receive a
@@ -1172,12 +1254,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -1564,12 +1646,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -1841,12 +1923,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2163,12 +2245,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2424,12 +2506,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2795,12 +2877,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
 
-      // Issue a per-(matchId, playerId) HMAC token. The client uses this
-      // as the Bearer credential when fetching durable move history via
-      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
-      // re-authenticate the wallet on its own, so we mint proof here at
-      // the moment the player has demonstrated socket-level membership.
-      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
+      // Verify the claimed playerId against the match's canonical
+      // participant set, then mint and emit the per-(matchId,
+      // playerId) HMAC token used to authenticate REST move-history
+      // fetches. See verifyAndIssueMatchToken for the full rationale —
+      // critical that this NOT trust the client-supplied playerId.
+      verifyAndIssueMatchToken(socket, matchId, playerId);
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {

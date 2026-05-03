@@ -81,6 +81,7 @@ vi.mock("../server/db", () => ({
 }));
 
 const redisStore = new Map<string, string>();
+const redisHashes = new Map<string, Record<string, string>>();
 vi.mock("../server/redis", () => ({
   redis: {
     set: async (
@@ -94,9 +95,20 @@ vi.mock("../server/redis", () => ({
     },
     get: async (key: string): Promise<string | null> => redisStore.get(key) ?? null,
     del: async (key: string): Promise<number> => (redisStore.delete(key) ? 1 : 0),
-    hgetall: async (): Promise<Record<string, string>> => ({}),
-    hset: async (): Promise<number> => 0,
-    hget: async (): Promise<string | null> => null,
+    hgetall: async (key: string): Promise<Record<string, string>> =>
+      redisHashes.get(key) ?? {},
+    hset: async (key: string, field: any, value?: any): Promise<number> => {
+      const h = redisHashes.get(key) ?? {};
+      if (typeof field === "object" && field !== null) {
+        Object.assign(h, field);
+      } else {
+        h[String(field)] = String(value);
+      }
+      redisHashes.set(key, h);
+      return 1;
+    },
+    hget: async (key: string, field: string): Promise<string | null> =>
+      redisHashes.get(key)?.[field] ?? null,
     expire: async (): Promise<number> => 0,
     incr: async (): Promise<number> => 1,
     ping: async (): Promise<string> => "PONG",
@@ -180,6 +192,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   redisStore.clear();
+  redisHashes.clear();
   matchParticipants.clear();
   reset();
   _resetMatchMoveLogStateForTests();
@@ -503,6 +516,62 @@ describe("match_moves audit log", () => {
     } finally {
       a.disconnect();
       b.disconnect();
+    }
+  });
+
+  it("denies match-token to a socket that joins with a spoofed playerId (impersonation guard)", async () => {
+    // Seed a canonical participant set into the match metadata. Anyone
+    // who connects and claims a `playerId` not in {alice, bob} must NOT
+    // receive a match-token even though the join handler still wires
+    // them into the room (room legitimacy is enforced separately by
+    // the existing color-assignment / match-full logic).
+    const matchId = `mv-impersonate-${Math.random().toString(36).slice(2, 10)}`;
+    redisHashes.set(`match:${matchId}`, {
+      addr1: "alice-real-wallet",
+      addr2: "bob-real-wallet",
+      stake: "1",
+      asset: "TON",
+    });
+
+    const attacker = await connectClient();
+    try {
+      let receivedToken: { matchId: string; token: string } | null = null;
+      attacker.on("match-token", (p) => {
+        receivedToken = p;
+      });
+      attacker.emit("join-match", { matchId, playerId: "alice-real-wallet-IMPOSTER" });
+      // Give the async verifyAndIssueMatchToken plenty of time to run.
+      await sleep(200);
+      expect(receivedToken).toBeNull();
+    } finally {
+      attacker.disconnect();
+    }
+  });
+
+  it("issues a match-token to a socket that joins with the canonical playerId", async () => {
+    // Positive control for the impersonation guard above: the SAME
+    // verification path must let a legitimate participant through.
+    const matchId = `mv-legit-${Math.random().toString(36).slice(2, 10)}`;
+    redisHashes.set(`match:${matchId}`, {
+      addr1: "alice-real-wallet",
+      addr2: "bob-real-wallet",
+      stake: "1",
+      asset: "TON",
+    });
+
+    const player = await connectClient();
+    try {
+      const tokenP = waitFor<{ matchId: string; token: string }>(
+        player,
+        "match-token",
+        2000,
+      );
+      player.emit("join-match", { matchId, playerId: "alice-real-wallet" });
+      const payload = await tokenP;
+      expect(payload.matchId).toBe(matchId);
+      expect(payload.token).toBe(issueMatchToken(matchId, "alice-real-wallet"));
+    } finally {
+      player.disconnect();
     }
   });
 
