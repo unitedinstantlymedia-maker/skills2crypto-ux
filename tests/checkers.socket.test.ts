@@ -501,6 +501,60 @@ describe("checkers socket integration — server authority", () => {
     }
   });
 
+  it("natural terminal: a move that leaves opponent with no legal moves settles game-result with no_legal_moves", async () => {
+    const { matchId, red, black, redId, blackId } = await startMatch();
+    try {
+      // Seed a position where black is fully blocked after red's move.
+      // Black man at the (0,7) corner can only move diagonally to
+      // (1,6). Put a red man at (1,6) (blocks simple move and is the
+      // jump target) and another red at (2,5) (blocks the jump
+      // landing square). Black has no simple move and no legal jump.
+      const board = Array.from({ length: 8 }, () =>
+        Array.from({ length: 8 }, () => null),
+      ) as ReturnType<typeof initialBoard>;
+      board[0][7] = { color: "black", type: "man" };
+      board[1][6] = { color: "red", type: "man" };
+      board[2][5] = { color: "red", type: "man" };
+      board[5][2] = { color: "red", type: "man" };
+      const seeded = __setCheckersBoardForTest(matchId, board, "red");
+      expect(seeded).toBe(true);
+
+      const wResult = waitFor<{ winnerId: string; loserId: string; reason: string }>(
+        red,
+        "game-result",
+        2000,
+      );
+      const bResult = waitFor<{ winnerId: string; loserId: string; reason: string }>(
+        black,
+        "game-result",
+        2000,
+      );
+      const wCount = countEvents(red, "game-result", 800);
+      const bCount = countEvents(black, "game-result", 800);
+
+      // Red plays a quiet move on the other side of the board (5,2 → 4,1).
+      // After red moves it becomes black's turn — and black's only piece
+      // at (0,7) is blocked by the red king at (1,6), so black has no
+      // legal moves → terminal reason 'no_legal_moves'.
+      red.emit("checkers-move", {
+        matchId,
+        from: { row: 5, col: 2 },
+        to: { row: 4, col: 1 },
+      });
+
+      const [rp, bp, wn, bn] = await Promise.all([wResult, bResult, wCount, bCount]);
+      expect(rp.reason).toBe("no_legal_moves");
+      expect(bp.reason).toBe("no_legal_moves");
+      expect(rp.winnerId).toBe(redId);
+      expect(rp.loserId).toBe(blackId);
+      expect(wn).toBe(1);
+      expect(bn).toBe(1);
+    } finally {
+      red.disconnect();
+      black.disconnect();
+    }
+  });
+
   it("rejects a checkers-resign with the wrong color", async () => {
     const { matchId, red, black } = await startMatch();
     try {
