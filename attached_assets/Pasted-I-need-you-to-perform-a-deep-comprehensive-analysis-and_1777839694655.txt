@@ -1,0 +1,48 @@
+I need you to perform a deep, comprehensive analysis and create a detailed technical plan for a major new feature: Tournaments. Do NOT write any code yet. I only want the analysis and the plan.
+
+This feature must live alongside my existing 1-on-1 matchmaking, challenge, and history systems without breaking anything. Use my current platform architecture as the foundation.
+
+Here is the full vision:
+
+1. Tournament Schedule & Registration:
+
+A weekly calendar where each day is dedicated to one game (Monday=Chess, Tuesday=Tetris, etc.).
+
+Players can register for any upcoming tournament at any time by paying a fixed entry fee (e.g., 10 USDT on Tron TRC-20). The funds go directly into a new, separate, non-custodial smart contract.
+
+Players are identified solely by their wallet address. No usernames, no emails.
+
+2. Prize Pool & Economy:
+
+All tournaments use only USDT on the Tron (TRC-20) network.
+
+The platform takes a 7% commission.
+
+The remaining prize pool is split among the TOP 10 players. The split I want is: 1st=50%, 2nd=20%, 3rd=10%, 4th=6%, 5th=4%, 6th=3%, 7th=2.5%, 8th=2%, 9th=1.5%, 10th=1%. These percentages must be configurable.
+
+The smart contract must be non-custodial. The oracle only signs the final results to trigger the automatic distribution.
+
+3. Tournament Engine (Game Logic):
+
+On the scheduled day, the tournament starts automatically. Players receive a PWA push notification 15 minutes before.
+
+The tournament must use a Swiss-system for the initial rounds to fairly match players of similar skill, then switch to a single-elimination playoff for the top players to decide the final winner.
+
+Matches use the EXISTING 1-on-1 game logic and escrow. The tournament engine is a meta-layer that creates these matches, tracks wins/losses, and advances players.
+
+4. User Interface:
+
+A golden 'TOURNAMENTS' button already exists on the main page, linking to /tournaments.
+
+The /tournaments page must show the weekly calendar, a live countdown, the number of registered players, and the growing prize pool.
+
+For a returning registered player, it must show a personalized banner: "Welcome back! Your Chess tournament starts in 2 hours."
+
+5. Testing with Bots:
+
+To verify the tournament system works, I will need a way to simulate players (bots) that can register, pay (on testnet), and be automatically matched.
+
+Please include a strategy for creating these test bots and simulating a full tournament with hundreds of players.
+
+Your Task:
+Analyze this entire concept against my current architecture. Consider the smart contracts, the server-side engine, the database, the frontend, and the testing strategy. Identify potential challenges and propose a step-by-step implementation plan. I want to see your full architectural proposal before we proceed.
