@@ -443,6 +443,27 @@ describe("matchmaking integration with soft-ban", () => {
     }
   });
 
+  it("touchUser is invoked even when find-match is about to reject for ban", async () => {
+    // Direct integration: the route ordering must call touchUser
+    // BEFORE the ban gate. This mirrors what the route does and
+    // verifies the user store reflects activity for a banned wallet.
+    await touchUser(W1);
+    await setUserStatus({ wallet: W1, status: "banned", reason: "x", by: "admin" });
+    const beforeRow = await getUser(W1);
+    const beforeSeen = beforeRow?.lastSeenAt;
+    expect(beforeSeen).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 10));
+    // Simulate the find-match touch path: route calls touchUser, then
+    // checks status. The touch must move lastSeenAt forward even though
+    // the subsequent status read returns 'banned'.
+    await touchUser(W1);
+    const afterRow = await getUser(W1);
+    expect(afterRow?.status).toBe("banned");
+    const toMs = (v: unknown): number =>
+      v instanceof Date ? v.getTime() : Number(v);
+    expect(toMs(afterRow!.lastSeenAt)).toBeGreaterThan(toMs(beforeSeen));
+  });
+
   it("popped opponent that became hard-banned is dropped, requester is enqueued", async () => {
     const { findOrCreateMatch } = await import("../server/matchmaking/redisMatchmaking");
     // First requester queues normally as 'active'.

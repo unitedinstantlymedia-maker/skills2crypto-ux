@@ -1411,10 +1411,20 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
         let playerId: string | null = null;
         if (event.startsWith("join-")) {
-          const data = packet?.[1];
-          const claimed = (data && (data as any).playerId) || null;
-          if (typeof claimed === "string" && claimed.length > 0) {
-            playerId = claimed;
+          // Typed extraction of the claimed playerId from the packet
+          // payload — every join-* handler in this file documents
+          // its data shape as `{ playerId: string, ... }`. We
+          // narrow defensively (object-shaped, string field) instead
+          // of casting to `any`.
+          const data: unknown = packet?.[1];
+          if (
+            typeof data === "object" &&
+            data !== null &&
+            "playerId" in data &&
+            typeof (data as { playerId?: unknown }).playerId === "string"
+          ) {
+            const claimed = (data as { playerId: string }).playerId;
+            if (claimed.length > 0) playerId = claimed;
           }
         }
         if (!playerId) {

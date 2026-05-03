@@ -156,11 +156,13 @@ export async function registerRoutes(
         x: Number(s.x),
       })),
     });
+    // Anti-cheat L1 (Task #46): record this wallet as having
+    // interacted with the system regardless of pass/fail. Failed
+    // captcha attempts are themselves anti-cheat signal — the admin
+    // wants to see them reflected in lastSeenAt. Fire-and-forget so a
+    // DB blip can't break the verification path.
+    if (result.wallet) touchUser(result.wallet).catch(() => {});
     if (result.ok) {
-      // Anti-cheat L1 (Task #46): record this wallet as having
-      // interacted with the system. Fire-and-forget — a DB blip must
-      // not break the success path of captcha verification.
-      if (result.wallet) touchUser(result.wallet).catch(() => {});
       return res.status(200).json({ ok: true });
     }
     // If this failure tipped the wallet into cooldown, surface that so
@@ -342,6 +344,12 @@ export async function registerRoutes(
     //                      to an honest user's "waiting" so the UI
     //                      cannot tell shadowban from "queue is empty".
     //   - 'active'       → unchanged.
+    // Anti-cheat L1 (Task #46): record this wallet as having interacted
+    // with the system BEFORE the ban gate fires. A banned wallet still
+    // hitting matchmaking is itself activity admins want to see in
+    // lastSeenAt (it tells them the suspended user is still trying).
+    touchUser(cleanWallet).catch(() => {});
+
     const status = await getUserStatus(cleanWallet);
     if (status === "banned") {
       console.warn(`[find-match] hard-banned wallet rejected: ${cleanWallet}`);
@@ -350,10 +358,6 @@ export async function registerRoutes(
         message: "Your account has been suspended. Contact support if you believe this is a mistake.",
       });
     }
-    // Honest OR shadowbanned user — track first/last sighting. The
-    // matcher itself enforces the shadowban semantics; touching here
-    // ensures the admin can still see the wallet is alive in users.
-    touchUser(cleanWallet).catch(() => {});
 
     try {
       const result = await findOrCreateMatch({
