@@ -58,6 +58,11 @@ import {
 // Spec rule: 60 full moves (= 120 plies) without a capture ⇒ automatic draw.
 const XIANGQI_NO_CAPTURE_DRAW_PLIES = 120;
 import { redis } from "./redis";
+import {
+  acquireSocketSlot,
+  releaseSocketSlot,
+  setMatchmakingCooldown,
+} from "./security/socketLimits";
 
 interface SocketOptions {
   isProd: boolean;
@@ -456,6 +461,14 @@ async function storeGameResult(
         timestamp,
       });
       console.log("[socket] match saved to database:", matchId);
+
+      // Anti-cheat L1: stamp a per-wallet matchmaking cooldown on both
+      // players so a bot cannot re-queue the instant a match resolves.
+      // The TTL is short (default 10s) — long enough to break trivial
+      // automation, short enough that a human clicking "Play Again"
+      // never notices.
+      setMatchmakingCooldown(player1Id).catch(() => {});
+      setMatchmakingCooldown(player2Id).catch(() => {});
 
       settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
         console.error("[socket] on-chain settlement failed:", matchId, err?.message || err);
@@ -1226,6 +1239,23 @@ const SHIP_CONFIGS: { id: string; name: string; size: number }[] = [
   { id: 'destroyer', name: 'Destroyer', size: 2 },
 ];
 
+// Resolve the real client IP for a Socket.io handshake. Express has
+// `trust proxy` set to 1 in server/index.ts, but Socket.io does NOT
+// inherit that — we have to walk X-Forwarded-For ourselves. Take the
+// LEFTMOST entry (first hop = real client) when present, else fall
+// back to the raw socket address.
+function resolveSocketClientIp(socket: Socket): string {
+  const xff = socket.handshake.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  } else if (Array.isArray(xff) && xff.length > 0) {
+    const first = String(xff[0]).split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return socket.handshake.address || "unknown";
+}
+
 export function setupSocket(httpServer: HttpServer, opts: SocketOptions): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io",
@@ -1237,6 +1267,33 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     }
   });
   ioRef = io;
+
+  // Per-IP socket connection cap. We resolve the client IP from the
+  // X-Forwarded-For chain (Express has `trust proxy` set to 1, so the
+  // leftmost entry is the real client; Socket.io does NOT honour that
+  // setting on its own). Falls back to the raw handshake address when
+  // there's no proxy header.
+  io.use(async (socket, next) => {
+    const ip = resolveSocketClientIp(socket);
+    (socket as any).data = (socket as any).data || {};
+    (socket as any).data.clientIp = ip;
+    const slot = await acquireSocketSlot(ip);
+    if (!slot.ok) {
+      console.warn(
+        `[socket] rejected handshake — ip=${ip} concurrent=${slot.current} cap=${slot.max}`
+      );
+      const err = new Error("too_many_connections");
+      (err as any).data = {
+        code: "too_many_connections",
+        message:
+          "Too many concurrent connections from your network. Close extra tabs and try again.",
+        max: slot.max,
+      };
+      return next(err);
+    }
+    (socket as any).data.slotAcquired = true;
+    next();
+  });
 
   io.on("connection", (socket) => {
     console.log("[socket] connected", socket.id);
@@ -3274,6 +3331,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     socket.on("disconnect", () => {
       console.log("[socket] disconnected", socket.id);
+      // Release the per-IP slot first thing so a client that opens and
+      // closes connections in a tight loop never gets permanently capped.
+      const data = (socket as any).data || {};
+      if (data.slotAcquired && data.clientIp) {
+        releaseSocketSlot(data.clientIp).catch(() => {});
+      }
       const socketInfo = socketToPlayer.get(socket.id);
 
       if (socketInfo) {

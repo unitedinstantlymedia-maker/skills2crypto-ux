@@ -12,6 +12,7 @@ import { redis } from "./redis";
 import { nanoid } from "nanoid";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { rlTight, rlMedium, rlLoose } from "./security/rateLimit";
+import { getMatchmakingCooldownRemainingMs } from "./security/socketLimits";
 import { isOraclePaused, setPause, getPauseStatus, type PauseScope } from "./security/oraclePause";
 import { getOpsAlertStatus } from "./security/opsAlert";
 import { getReconciliationStatus } from "./security/reconciliation";
@@ -83,6 +84,27 @@ export async function registerRoutes(
     const numericStake = Number(stake);
     if (!Number.isFinite(numericStake) || numericStake <= 0) {
       return res.status(400).json({ error: "invalid stake" });
+    }
+
+    // Anti-cheat L1: per-wallet matchmaking cooldown. Short TTL stamped
+    // on both players when their previous match settled (see
+    // server/socket.ts → storeGameResult). Reject re-queue attempts
+    // while the cooldown is active so trivial bots that re-queue the
+    // instant a match ends never reach matchmaking.
+    if (typeof walletAddress === "string" && walletAddress.length > 0) {
+      const remainingMs = await getMatchmakingCooldownRemainingMs(walletAddress);
+      if (remainingMs > 0) {
+        const remainingSec = Math.max(1, Math.ceil(remainingMs / 1000));
+        console.warn(
+          `[find-match] cooldown rejected wallet=${walletAddress} remainingMs=${remainingMs}`
+        );
+        return res.status(429).json({
+          error: "matchmaking_cooldown",
+          message: `Please wait ${remainingSec} second${remainingSec === 1 ? "" : "s"} before searching for another match.`,
+          retryAfterMs: remainingMs,
+          retryAfterSec: remainingSec,
+        });
+      }
     }
 
     // Wallet shape validation via shared/walletShape.ts (same validator
