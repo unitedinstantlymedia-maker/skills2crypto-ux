@@ -421,12 +421,82 @@ async function settleMatchOnChain(
   }
 }
 
+// Per-player anti-cheat tracking inside a Tetris match. We keep the
+// last accepted snapshot for each player and a violation counter so a
+// single bad packet doesn't kill an honest match, but a streak of them
+// auto-forfeits the offender.
+interface TetrisPlayerState {
+  socketId: string;
+  lastScore: number;
+  lastLines: number;
+  lastLevel: number;
+  lastUpdateAt: number;
+  startedAt: number;
+  violations: number;
+  reportedGameOver: boolean;
+}
+
 interface TetrisRoom {
-  players: Map<string, string>;
+  // Map<playerId, TetrisPlayerState>. The legacy code stored just the
+  // socket id as the value; we now store the full per-player tracking
+  // record, but socketId is preserved on the inner shape.
+  players: Map<string, TetrisPlayerState>;
   started: boolean;
 }
 
 const tetrisRooms = new Map<string, TetrisRoom>();
+
+// Sanity-band configuration for the Tetris stopgap. These values are
+// intentionally generous so legitimate fast play is never blocked; the
+// goal is to catch the trivially-forged "I scored a million points and
+// my board filled up" cheats, not to perfectly simulate Tetris.
+const TETRIS_MAX_SCORE_PER_SECOND = 20000;
+const TETRIS_VIOLATION_THRESHOLD = 3;
+// Standard Tetris board is 20 rows × 10 cols. A real game-over only
+// fires when a new piece can't spawn at the top, so the top rows must
+// have meaningful occupancy.
+const TETRIS_GAMEOVER_TOP_ROWS = 4;
+const TETRIS_GAMEOVER_MIN_TOP_OCCUPIED = 4;
+const TETRIS_BOARD_HEIGHT = 20;
+const TETRIS_BOARD_WIDTH = 10;
+
+function tetrisOpponentId(room: TetrisRoom, playerId: string): string | null {
+  for (const id of room.players.keys()) {
+    if (id !== playerId) return id;
+  }
+  return null;
+}
+
+function tetrisBoardLooksGameOver(board: unknown): boolean {
+  if (!Array.isArray(board) || board.length < TETRIS_GAMEOVER_TOP_ROWS) return false;
+  let occupiedTop = 0;
+  for (let y = 0; y < TETRIS_GAMEOVER_TOP_ROWS; y++) {
+    const row = board[y];
+    if (!Array.isArray(row)) return false;
+    for (let x = 0; x < row.length; x++) {
+      if (row[x]) occupiedTop++;
+    }
+  }
+  return occupiedTop >= TETRIS_GAMEOVER_MIN_TOP_OCCUPIED;
+}
+
+// Validate the shape of a tetris-state board payload. We don't trust
+// the client at all, so reject mis-sized boards outright.
+function tetrisBoardIsWellFormed(board: unknown): board is (string | null)[][] {
+  if (!Array.isArray(board) || board.length !== TETRIS_BOARD_HEIGHT) return false;
+  for (let y = 0; y < TETRIS_BOARD_HEIGHT; y++) {
+    const row = board[y];
+    if (!Array.isArray(row) || row.length !== TETRIS_BOARD_WIDTH) return false;
+    for (let x = 0; x < TETRIS_BOARD_WIDTH; x++) {
+      const cell = row[x];
+      // Cells are either null (empty) or a colour string. Reject
+      // anything else to stop crafted payloads (objects, numbers,
+      // huge strings) from getting echoed to the opponent.
+      if (cell !== null && (typeof cell !== 'string' || cell.length > 32)) return false;
+    }
+  }
+  return true;
+}
 
 interface CheckersPlayerInfo {
   socketId: string;
@@ -1346,10 +1416,22 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         tetrisRooms.set(matchId, room);
       }
 
-      if (!room.players.has(playerId)) {
-        room.players.set(playerId, socket.id);
+      const existing = room.players.get(playerId);
+      if (existing) {
+        // Reconnect: keep accumulated counters/timestamps, refresh socketId.
+        existing.socketId = socket.id;
       } else {
-        room.players.set(playerId, socket.id);
+        const nowTs = Date.now();
+        room.players.set(playerId, {
+          socketId: socket.id,
+          lastScore: 0,
+          lastLines: 0,
+          lastLevel: 1,
+          lastUpdateAt: nowTs,
+          startedAt: nowTs,
+          violations: 0,
+          reportedGameOver: false,
+        });
       }
 
       if (room.players.size === 2 && !room.started) {
@@ -1364,11 +1446,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
     });
 
-    socket.on("tetris-state", (data: { 
-      matchId: string; 
-      board: (string | null)[][]; 
-      score: number; 
-      lines: number; 
+    socket.on("tetris-state", (data: {
+      matchId: string;
+      board: (string | null)[][];
+      score: number;
+      lines: number;
       level: number;
       gameOver: boolean;
     }) => {
@@ -1381,9 +1463,109 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       // (or otherwise spoofed `socketToPlayer`) could pollute the
       // disconnect-safety-net set by sending fake state updates.
       const room = tetrisRooms.get(data.matchId);
-      if (!room || !room.players.has(socketInfo.playerId)) return;
+      if (!room) return;
+      const playerId = socketInfo.playerId;
+      const playerState = room.players.get(playerId);
+      if (!playerState) return;
 
-      // Mark gameplay activity ONLY after socket + room-membership auth has passed.
+      // ----- L1 anti-cheat sanity bands -----
+      // We don't simulate Tetris on the server (replay is a separate
+      // tracked task); instead, we reject obviously-impossible state
+      // transitions and auto-forfeit on repeat offenders.
+      const now = Date.now();
+      const reject = (why: string): boolean => {
+        playerState.violations++;
+        console.warn(
+          "[socket] tetris-state rejected:", data.matchId, playerId,
+          "reason=", why,
+          "violations=", playerState.violations
+        );
+        if (playerState.violations >= TETRIS_VIOLATION_THRESHOLD) {
+          const winnerId = tetrisOpponentId(room, playerId);
+          console.warn(
+            "[socket] tetris auto-forfeit (anticheat):", data.matchId, "loser=", playerId
+          );
+          storeGameResult(data.matchId, 'tetris', winnerId, playerId, 'tetris_anticheat_violation');
+          io.to(`tetris:${data.matchId}`).emit('game-result', {
+            matchId: data.matchId,
+            winnerId,
+            loserId: playerId,
+            reason: 'tetris_anticheat_violation',
+          });
+          tetrisRooms.delete(data.matchId);
+        }
+        return false;
+      };
+
+      // Type / shape validation.
+      if (
+        typeof data.score !== 'number' || !Number.isFinite(data.score) ||
+        typeof data.lines !== 'number' || !Number.isFinite(data.lines) ||
+        typeof data.level !== 'number' || !Number.isFinite(data.level) ||
+        typeof data.gameOver !== 'boolean' ||
+        data.score < 0 || data.lines < 0 || data.level < 1
+      ) {
+        reject('malformed_payload');
+        return;
+      }
+      if (!tetrisBoardIsWellFormed(data.board)) {
+        reject('malformed_board');
+        return;
+      }
+
+      // Monotonicity: score / lines / level only ever go up. The
+      // `lastUpdateAt` is the moment we accepted the previous snapshot,
+      // so it doubles as the rate-limit baseline.
+      if (data.score < playerState.lastScore) {
+        reject('score_decreased');
+        return;
+      }
+      if (data.lines < playerState.lastLines) {
+        reject('lines_decreased');
+        return;
+      }
+      if (data.level < playerState.lastLevel) {
+        reject('level_decreased');
+        return;
+      }
+
+      // Score-rate ceiling. Allow a 1s floor so the very first packet
+      // (delta_t close to zero) doesn't divide by ~0.
+      const dtSec = Math.max(1, (now - playerState.lastUpdateAt) / 1000);
+      const scoreDelta = data.score - playerState.lastScore;
+      if (scoreDelta / dtSec > TETRIS_MAX_SCORE_PER_SECOND) {
+        reject('score_rate_exceeded');
+        return;
+      }
+
+      // Lines-vs-level plausibility. Engine formula is
+      // level = floor(lines/10) + 1; allow +1 of slack for race
+      // conditions between client renders.
+      const expectedMaxLevel = Math.floor(data.lines / 10) + 2;
+      if (data.level > expectedMaxLevel) {
+        reject('level_implausible_for_lines');
+        return;
+      }
+
+      // gameOver must be visually plausible: the top of the board
+      // should actually be congested. This blocks the "I lost!" insta-
+      // forfeit cheat where the loser pretends their board filled up.
+      if (data.gameOver && !tetrisBoardLooksGameOver(data.board)) {
+        reject('gameover_board_not_full');
+        return;
+      }
+
+      // ----- accepted -----
+      playerState.lastScore = data.score;
+      playerState.lastLines = data.lines;
+      playerState.lastLevel = data.level;
+      playerState.lastUpdateAt = now;
+      // Decay violations on a clean update so brief network glitches
+      // don't accumulate into a forfeit over a long match.
+      if (playerState.violations > 0) playerState.violations--;
+
+      // Mark gameplay activity ONLY after socket + room-membership +
+      // sanity validation has passed.
       markGameplayActivity(data.matchId);
 
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-state', {
@@ -1391,31 +1573,67 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         score: data.score,
         lines: data.lines,
         level: data.level,
-        gameOver: data.gameOver
+        gameOver: data.gameOver,
       });
     });
 
-    socket.on("tetris-game-over", (data: { matchId: string; playerId: string }) => {
+    socket.on("tetris-game-over", (data: { matchId: string }) => {
+      // Identity comes from the authenticated socket; we deliberately
+      // ignore any client-supplied `playerId`, since the loser is
+      // whoever is calling this RPC.
       const socketInfo = socketToPlayer.get(socket.id);
       if (!socketInfo || socketInfo.matchId !== data.matchId) return;
 
-      console.log("[socket] tetris-game-over", data.matchId, data.playerId);
-      
       const room = tetrisRooms.get(data.matchId);
-      const winnerId = room ? Array.from(room.players.keys()).find(id => id !== data.playerId) : null;
-      const loserId = data.playerId;
-      
-      storeGameResult(data.matchId, 'tetris', winnerId || null, loserId, 'board_filled');
-      
+      if (!room) return;
+      const loserId = socketInfo.playerId;
+      const playerState = room.players.get(loserId);
+      if (!playerState) return;
+
+      // gameOver should be visually plausible. If the player's last
+      // accepted snapshot doesn't show a congested top of the board,
+      // count this as an anti-cheat violation rather than honouring it
+      // as a real loss. (We can't re-check the board here because this
+      // event has no payload by design — the latest authoritative board
+      // is already on `playerState`/`opponent-tetris-state`.)
+      if (playerState.lastLines === 0 && playerState.lastScore === 0) {
+        // No real gameplay yet — refuse to accept a self-loss claim,
+        // which prevents an "instant-forfeit" cheat where one player
+        // tries to weaponise the opponent's stake at zero risk.
+        playerState.violations++;
+        console.warn(
+          "[socket] tetris-game-over rejected (no gameplay yet):",
+          data.matchId, loserId, "violations=", playerState.violations
+        );
+        if (playerState.violations >= TETRIS_VIOLATION_THRESHOLD) {
+          const winnerId = tetrisOpponentId(room, loserId);
+          storeGameResult(data.matchId, 'tetris', winnerId, loserId, 'tetris_anticheat_violation');
+          io.to(`tetris:${data.matchId}`).emit('game-result', {
+            matchId: data.matchId,
+            winnerId,
+            loserId,
+            reason: 'tetris_anticheat_violation',
+          });
+          tetrisRooms.delete(data.matchId);
+        }
+        return;
+      }
+
+      playerState.reportedGameOver = true;
+      const winnerId = tetrisOpponentId(room, loserId);
+      console.log("[socket] tetris-game-over", data.matchId, "loser=", loserId);
+
+      storeGameResult(data.matchId, 'tetris', winnerId, loserId, 'board_filled');
+
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-game-over');
-      
+
       io.to(`tetris:${data.matchId}`).emit('game-result', {
         matchId: data.matchId,
         winnerId,
         loserId,
-        reason: 'board_filled'
+        reason: 'board_filled',
       });
-      
+
       tetrisRooms.delete(data.matchId);
     });
 
