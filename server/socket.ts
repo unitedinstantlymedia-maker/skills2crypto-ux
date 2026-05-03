@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { db } from "./db";
 import { matches, matchMoves } from "../shared/schema";
+import { issueMatchToken } from "./security/matchToken";
 import {
   applyMove as chessApplyMove,
   detectTerminal as chessDetectTerminal,
@@ -182,6 +183,60 @@ function recordMatchMove(
 // Exposed for tests; never call from the socket hot path.
 export function _resetMatchMoveLogStateForTests(): void {
   moveLogState.clear();
+}
+
+// Test seams: seed in-memory game rooms into a "ready to receive a
+// move" state so the per-game move-handler wiring (and its
+// `recordMatchMove` call) can be exercised without standing up the
+// full placement / deal / clock-tick prelude. Production code paths
+// never touch these — they're only invoked from tests/match-moves.test.ts.
+export function __seedBattleshipRoomForTest(
+  matchId: string,
+  attackerId: string,
+  defenderId: string,
+): void {
+  const room = battleshipRooms.get(matchId);
+  if (!room) throw new Error(`battleship room not found: ${matchId}`);
+  const attacker = room.players.get(attackerId);
+  const defender = room.players.get(defenderId);
+  if (!attacker || !defender) {
+    throw new Error("seed requires both players already joined");
+  }
+  // Single one-cell ship for the defender so the attacker can land a
+  // legal cell at (0, 0) and miss everywhere else. Sufficient to drive
+  // one battleship-attack through the move-recording path.
+  defender.ships = [
+    { id: 'destroyer', name: 'Destroyer', size: 1, cells: [{ row: 9, col: 9 }], hits: 0, sunk: false },
+  ];
+  defender.ready = true;
+  attacker.ships = [
+    { id: 'destroyer', name: 'Destroyer', size: 1, cells: [{ row: 0, col: 0 }], hits: 0, sunk: false },
+  ];
+  attacker.ready = true;
+  room.battlePhase = true;
+  room.currentTurn = attacker.role;
+}
+
+export function __seedDominoesRoomForTest(
+  matchId: string,
+  starterId: string,
+  starterTile: { a: number; b: number },
+): void {
+  const room = dominoesRooms.get(matchId);
+  if (!room) throw new Error(`dominoes room not found: ${matchId}`);
+  const starter = room.players.get(starterId);
+  if (!starter) throw new Error("seed requires starter joined");
+  // Hand the starter a single playable tile == starterTile so the
+  // first dominoes-move is unambiguously legal. The opponent's hand
+  // can stay empty for this test — we never poll their move.
+  starter.hand = [{ a: starterTile.a, b: starterTile.b }];
+  room.dealt = true;
+  room.chain = [];
+  room.leftEnd = null;
+  room.rightEnd = null;
+  room.currentTurn = starter.role;
+  room.starterTile = starterTile;
+  room.lastTickAt = Date.now();
 }
 
 async function storeGameResult(
@@ -1116,6 +1171,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -1501,6 +1563,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -1771,6 +1840,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2086,6 +2162,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
       
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2340,6 +2423,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {
@@ -2704,6 +2794,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       socketToPlayer.set(socket.id, { matchId, playerId });
       playerToSocket.set(playerId, socket.id);
+
+      // Issue a per-(matchId, playerId) HMAC token. The client uses this
+      // as the Bearer credential when fetching durable move history via
+      // `GET /api/matches/:matchId/moves` — the REST endpoint can't
+      // re-authenticate the wallet on its own, so we mint proof here at
+      // the moment the player has demonstrated socket-level membership.
+      socket.emit('match-token', { matchId, token: issueMatchToken(matchId, playerId) });
 
       const pendingTimeout = pendingDisconnects.get(playerId);
       if (pendingTimeout) {

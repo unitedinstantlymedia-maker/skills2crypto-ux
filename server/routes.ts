@@ -1,12 +1,13 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
-import { eq, or, desc, asc, and } from "drizzle-orm";
+import { eq, or, desc, asc, and, gt } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
 import { checkSystemAddress, getSystemAddressesStatus } from "./security/systemAddresses";
 import type { Game, Asset } from "./core/types";
 import { db } from "./db";
 import { matches, matchMoves, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
+import { verifyMatchToken } from "./security/matchToken";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
 import { randomBytes, timingSafeEqual } from "crypto";
@@ -660,20 +661,48 @@ export async function registerRoutes(
   // Anti-cheat L1 — durable move history (Task #43).
   //
   // Returns the chronological list of server-validated moves for a match,
-  // gated to the two real participants. Identity is asserted via the
-  // `walletAddress` query param (the same wallet the player used to enter
-  // the match). We resolve the participant set from Redis first (live and
-  // recently-finished matches) and fall back to the `matches` row in
-  // Postgres so historical lookups still work after the Redis hash TTLs.
+  // gated to the two real participants. Identity is proven by an HMAC
+  // bearer token issued at socket-join time (`server/security/matchToken.ts`):
+  // a raw `walletAddress` query param is NOT trusted on its own, since
+  // an attacker who scraped a participant address from the chain could
+  // otherwise read the private move log.
+  //
+  // Pagination uses a cursor-style `afterPly` parameter plus a bounded
+  // page size; the client (or a forensic operator) can iterate through
+  // arbitrarily long histories without the server silently truncating.
   app.get("/api/matches/:matchId/moves", rlLoose, async (req, res) => {
     const { matchId } = req.params;
     const walletAddress = typeof req.query.walletAddress === "string"
       ? req.query.walletAddress
       : "";
+    const authHeader = String(req.headers.authorization || "");
+    const bearer = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : "";
 
     if (!matchId || !walletAddress) {
       return res.status(400).json({ error: "matchId and walletAddress required" });
     }
+    if (!bearer) {
+      return res.status(401).json({ error: "missing_bearer_token" });
+    }
+    if (!verifyMatchToken(matchId, walletAddress, bearer)) {
+      return res.status(401).json({ error: "invalid_match_token" });
+    }
+
+    // Pagination: bounded page size, no silent truncation. Default page
+    // is generous (1000) but the client can request up to PAGE_MAX_SIZE
+    // and continue with `afterPly` to walk the full history.
+    const PAGE_MAX_SIZE = 5000;
+    const PAGE_DEFAULT_SIZE = 1000;
+    const rawLimit = Number(req.query.limit);
+    const pageLimit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.floor(rawLimit), PAGE_MAX_SIZE)
+      : PAGE_DEFAULT_SIZE;
+    const rawAfter = Number(req.query.afterPly);
+    const afterPly = Number.isFinite(rawAfter) && rawAfter > 0
+      ? Math.floor(rawAfter)
+      : 0;
 
     let player1Id: string | null = null;
     let player2Id: string | null = null;
@@ -710,6 +739,10 @@ export async function registerRoutes(
       return res.status(404).json({ error: "match_not_found" });
     }
 
+    // Belt-and-braces: the token already proves caller controls a
+    // wallet that joined this match, but we still cross-check that the
+    // wallet is actually one of the two stored participants in case
+    // tokens leaked from a stale or aborted match somehow show up here.
     if (walletAddress !== player1Id && walletAddress !== player2Id) {
       return res.status(403).json({ error: "not_a_participant" });
     }
@@ -717,12 +750,18 @@ export async function registerRoutes(
     try {
       const rows = await db.select()
         .from(matchMoves)
-        .where(eq(matchMoves.matchId, matchId))
+        .where(
+          afterPly > 0
+            ? and(eq(matchMoves.matchId, matchId), gt(matchMoves.ply, afterPly))
+            : eq(matchMoves.matchId, matchId),
+        )
         .orderBy(asc(matchMoves.ply))
-        .limit(5000);
+        .limit(pageLimit + 1);
+      const hasMore = rows.length > pageLimit;
+      const page = hasMore ? rows.slice(0, pageLimit) : rows;
       return res.status(200).json({
         matchId,
-        moves: rows.map((r) => ({
+        moves: page.map((r) => ({
           ply: r.ply,
           gameType: r.gameType,
           actorId: r.actorId,
@@ -730,6 +769,8 @@ export async function registerRoutes(
           serverTimestampMs: r.serverTimestampMs,
           msSinceLastMove: r.msSinceLastMove,
         })),
+        hasMore,
+        nextAfterPly: hasMore ? page[page.length - 1].ply : null,
       });
     } catch (err: any) {
       console.error("[moves] fetch failed:", err?.message || err);
