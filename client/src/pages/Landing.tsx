@@ -60,7 +60,7 @@ export default function Landing() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.5 }}
-        className="flex flex-col gap-4 w-full max-w-lg mx-auto px-4"
+        className="flex flex-col gap-4 w-full max-w-xl mx-auto px-4"
       >
         <div className="flex items-center justify-center gap-3 w-full">
           <Link href="/games" className="flex-1 min-w-0">
