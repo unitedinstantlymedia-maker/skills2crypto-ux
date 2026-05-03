@@ -16,7 +16,7 @@ import { getMatchmakingCooldownRemainingMs } from "./security/socketLimits";
 import {
   generateChallenge,
   verifyChallenge,
-  checkDepositCaptcha,
+  checkDepositCaptchaForWallets,
   isWalletCaptchaVerified,
   getCaptchaCooldownRemainingMs,
 } from "./security/captcha";
@@ -921,33 +921,31 @@ export async function registerRoutes(
    * pull the same auth (cached in Redis) for a given match.
    */
   app.post("/api/oracle/match-auth", rlMedium, async (req, res) => {
-    const { matchId, walletAddress } = req.body ?? {};
+    const { matchId } = req.body ?? {};
 
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
-    }
-
-    // Anti-cheat L1: deposit-initiation captcha gate. The wallet that's
-    // about to spend money must have proven humanity once. We check the
-    // caller's own wallet (one of addr1/addr2) so each player is gated
-    // independently. Missing wallet ⇒ block — the client must send it
-    // (legacy clients without this field are blocked by design).
-    if (typeof walletAddress === "string" && walletAddress) {
-      const gate = await checkDepositCaptcha(walletAddress);
-      if (!gate.ok) {
-        return res.status(gate.status).json(gate.body);
-      }
-    } else {
-      return res.status(412).json({
-        error: "captcha_required",
-        message: "Please complete the slider verification before depositing.",
-      });
     }
 
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
       if (!matchData || !matchData.stake || !matchData.asset) {
         return res.status(404).json({ error: "Match not found" });
+      }
+
+      // Anti-cheat L1 deposit gate. We read the depositor wallets from
+      // TRUSTED match data (addr1/addr2) instead of the request body so
+      // a scripted client can't bypass the gate by submitting some
+      // unrelated already-verified wallet. Both players must be
+      // captcha-verified before either can fetch the deposit auth.
+      if (matchData.addr1 || matchData.addr2) {
+        const gate = await checkDepositCaptchaForWallets([
+          String(matchData.addr1 || ""),
+          String(matchData.addr2 || ""),
+        ]);
+        if (!gate.ok) {
+          return res.status(gate.status).json(gate.body);
+        }
       }
 
       const asset = String(matchData.asset);
@@ -1067,28 +1065,27 @@ export async function registerRoutes(
    * consistent nonces during the deposit window.
    */
   app.post("/api/tron/deposit-auth", rlMedium, async (req, res) => {
-    const { matchId, walletAddress } = req.body ?? {};
+    const { matchId } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
-    }
-
-    // Anti-cheat L1 deposit gate (see oracle/match-auth for rationale).
-    if (typeof walletAddress === "string" && walletAddress) {
-      const gate = await checkDepositCaptcha(walletAddress);
-      if (!gate.ok) {
-        return res.status(gate.status).json(gate.body);
-      }
-    } else {
-      return res.status(412).json({
-        error: "captcha_required",
-        message: "Please complete the slider verification before depositing.",
-      });
     }
 
     try {
       const matchData = await redis.hgetall(`match:${matchId}`);
       if (!matchData || !matchData.stake || !matchData.asset) {
         return res.status(404).json({ error: "Match not found" });
+      }
+
+      // Anti-cheat L1 deposit gate, bound to TRUSTED match data
+      // (addr1/addr2) so it can't be spoofed via the request body.
+      if (matchData.addr1 || matchData.addr2) {
+        const gate = await checkDepositCaptchaForWallets([
+          String(matchData.addr1 || ""),
+          String(matchData.addr2 || ""),
+        ]);
+        if (!gate.ok) {
+          return res.status(gate.status).json(gate.body);
+        }
       }
       if (String(matchData.asset) !== "USDT") {
         return res.status(400).json({ error: `Asset '${matchData.asset}' is not USDT (Tron)` });
@@ -1664,22 +1661,9 @@ export async function registerRoutes(
    * first Deposit message. We just return the BOC the player must send.
    */
   app.post("/api/ton/deposit-info", rlMedium, async (req, res) => {
-    const { matchId, walletAddress } = req.body ?? {};
+    const { matchId } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
-    }
-
-    // Anti-cheat L1 deposit gate (see oracle/match-auth for rationale).
-    if (typeof walletAddress === "string" && walletAddress) {
-      const gate = await checkDepositCaptcha(walletAddress);
-      if (!gate.ok) {
-        return res.status(gate.status).json(gate.body);
-      }
-    } else {
-      return res.status(412).json({
-        error: "captcha_required",
-        message: "Please complete the slider verification before depositing.",
-      });
     }
     // Off-chain pause kill-switch: TON has no oracle signature on the
     // deposit (the contract auto-creates the match on the first
@@ -1708,6 +1692,13 @@ export async function registerRoutes(
 
       const player1 = String(matchData.addr1);
       const player2 = String(matchData.addr2);
+
+      // Anti-cheat L1 deposit gate, bound to TRUSTED match data
+      // (addr1/addr2) so it can't be spoofed via the request body.
+      const captchaGate = await checkDepositCaptchaForWallets([player1, player2]);
+      if (!captchaGate.ok) {
+        return res.status(captchaGate.status).json(captchaGate.body);
+      }
 
       // Defense-in-depth backstop for TON.
       //

@@ -75,6 +75,7 @@ import {
   isWalletCaptchaVerified,
   getCaptchaCooldownRemainingMs,
   checkDepositCaptcha,
+  checkDepositCaptchaForWallets,
   __testInternals,
 } from "../server/security/captcha";
 
@@ -323,6 +324,41 @@ describe("deposit gate", () => {
     const r = await checkDepositCaptcha("");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.body.error).toBe("captcha_required");
+  });
+
+  // Regression test for the spoofing bypass flagged in code review:
+  // the deposit-initiation routes derive the depositor wallets from
+  // TRUSTED match data (addr1/addr2), not from req.body.walletAddress.
+  // So if a scripted client tries to "use" some other already-verified
+  // wallet to slip past the gate while the actual match players are
+  // unverified, the gate must still refuse.
+  it("can't be spoofed by passing some unrelated verified wallet", async () => {
+    const verified = "0x" + "b".repeat(40);
+    const unverified1 = "0x" + "c".repeat(40);
+    const unverified2 = "0x" + "d".repeat(40);
+    // Verify `verified` for real.
+    const c = await generateChallenge({ wallet: verified, seed: 13 });
+    const stored = JSON.parse(
+      (await getStoredChallenge(c.challengeId)) as string
+    );
+    const r = await verifyChallenge({
+      challengeId: c.challengeId,
+      slotX: stored.gapX,
+      motionSamples: humanSamples(stored.gapX),
+    });
+    expect(r.ok).toBe(true);
+    // Sanity: `verified` would pass on its own.
+    expect((await checkDepositCaptchaForWallets([verified])).ok).toBe(true);
+    // The route passes the TRUSTED wallets (addr1, addr2) — the spoofed
+    // verified wallet is NOT one of them, so the gate must block.
+    const spoofed = await checkDepositCaptchaForWallets([unverified1, unverified2]);
+    expect(spoofed.ok).toBe(false);
+    if (!spoofed.ok) expect(spoofed.body.error).toBe("captcha_required");
+    // One verified + one unverified — still blocked, since BOTH players
+    // must prove humanity before either can fund.
+    const mixed = await checkDepositCaptchaForWallets([verified, unverified1]);
+    expect(mixed.ok).toBe(false);
+    if (!mixed.ok) expect(mixed.body.error).toBe("captcha_required");
   });
 
   it("treats checksummed and lowercased addresses as the same wallet", async () => {

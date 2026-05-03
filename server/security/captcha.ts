@@ -277,16 +277,20 @@ function checkMotionSanity(
   if (deltas.length < 2) {
     return { ok: false, reason: "motion_too_few_samples" };
   }
-  // Real drags wobble — at least one consecutive pair must differ
-  // beyond a tiny epsilon.
+  // Real drags wobble AND slow down somewhere along the way (humans
+  // never accelerate monotonically over a 200 ms drag — they ease in
+  // and ease out around the gap). We require BOTH:
+  //   (a) at least one consecutive velocity pair that differs beyond a
+  //       tiny epsilon (rules out perfectly-constant scripted motion);
+  //   (b) at least one strict slowdown (deltas[i] < deltas[i-1]) so
+  //       monotonically-accelerating bots are also rejected.
   let varied = false;
+  let slowedDown = false;
   for (let i = 1; i < deltas.length; i++) {
-    if (Math.abs(deltas[i] - deltas[i - 1]) > 1e-3) {
-      varied = true;
-      break;
-    }
+    if (Math.abs(deltas[i] - deltas[i - 1]) > 1e-3) varied = true;
+    if (deltas[i] < deltas[i - 1] - 1e-3) slowedDown = true;
   }
-  if (!varied) {
+  if (!varied || !slowedDown) {
     return { ok: false, reason: "motion_perfectly_linear" };
   }
   return { ok: true };
@@ -426,7 +430,21 @@ export type DepositGateResult = DepositGateOk | DepositGateBlocked;
 export async function checkDepositCaptcha(
   wallet: string
 ): Promise<DepositGateResult> {
-  if (!wallet) {
+  return checkDepositCaptchaForWallets([wallet]);
+}
+
+// Match-bound gate. Pass the depositor wallets read from TRUSTED match
+// data (not from the request body) so a scripted client can't bypass
+// the gate by submitting some unrelated verified wallet's address. ALL
+// supplied wallets must be captcha-verified; if ANY is in failure
+// cooldown, the call is refused with 429.
+export async function checkDepositCaptchaForWallets(
+  wallets: string[]
+): Promise<DepositGateResult> {
+  const ws = (wallets || []).filter(
+    (w): w is string => typeof w === "string" && w.length > 0
+  );
+  if (ws.length === 0) {
     return {
       ok: false,
       status: 412,
@@ -437,30 +455,38 @@ export async function checkDepositCaptcha(
       },
     };
   }
-  const cooldownMs = await getCaptchaCooldownRemainingMs(wallet);
-  if (cooldownMs > 0) {
-    return {
-      ok: false,
-      status: 429,
-      body: {
-        error: "captcha_cooldown",
-        message: "Too many tries — please wait and try again.",
-        retryAfterMs: cooldownMs,
-        retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
-      },
-    };
+  // Cooldown takes precedence so a banned wallet always sees the cooldown
+  // message, never a bare "verify yourself" prompt.
+  for (const w of ws) {
+    const cooldownMs = await getCaptchaCooldownRemainingMs(w);
+    if (cooldownMs > 0) {
+      return {
+        ok: false,
+        status: 429,
+        body: {
+          error: "captcha_cooldown",
+          message: "Too many tries — please wait and try again.",
+          retryAfterMs: cooldownMs,
+          retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
+        },
+      };
+    }
   }
-  const verified = await isWalletCaptchaVerified(wallet);
-  if (verified) return { ok: true };
-  return {
-    ok: false,
-    status: 412,
-    body: {
-      error: "captcha_required",
-      message:
-        "Please complete the slider verification before depositing.",
-    },
-  };
+  for (const w of ws) {
+    const verified = await isWalletCaptchaVerified(w);
+    if (!verified) {
+      return {
+        ok: false,
+        status: 412,
+        body: {
+          error: "captcha_required",
+          message:
+            "Please complete the slider verification before depositing.",
+        },
+      };
+    }
+  }
+  return { ok: true };
 }
 
 // Test-only — not routed through any module index.
