@@ -60,12 +60,12 @@ export default function Landing() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.5 }}
-        className="flex flex-col gap-4 w-full max-w-md mx-auto px-4"
+        className="flex flex-col gap-4 w-full max-w-lg mx-auto px-4"
       >
         <div className="flex items-center justify-center gap-3 w-full">
           <Link href="/games" className="flex-1 min-w-0">
             <Button
-              className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
+              className="w-full h-14 px-6 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
               data-testid="button-play-now"
             >
               {t('Play Now', 'Play Now')}
@@ -75,7 +75,7 @@ export default function Landing() {
           <Link href="/tournaments" className="flex-1 min-w-0">
             <Button
               data-testid="button-tournaments"
-              className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest hover:brightness-110"
+              className="w-full h-14 px-6 text-lg font-display font-bold uppercase tracking-widest hover:brightness-110"
               style={{
                 backgroundColor: "#FFE14F",
                 color: "#1a1100",
