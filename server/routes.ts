@@ -333,14 +333,14 @@ export async function registerRoutes(
       }
     }
 
-    // Anti-cheat L1 (Task #46) — soft-ban gate.
-    //   - 'banned'       → explicit rejection so the client surfaces
-    //                      a "your account has been suspended" toast.
-    //   - 'shadowbanned' → return the normal `waiting` shape WITHOUT
-    //                      enqueueing the player. UI shows the regular
-    //                      "Searching..." spinner and the player just
-    //                      never gets matched. No error, no signal,
-    //                      no log line on the client side.
+    // Anti-cheat L1 (Task #46) — HTTP-layer ban gate.
+    //   - 'banned'       → explicit rejection so the client surfaces a
+    //                      "your account has been suspended" toast.
+    //   - 'shadowbanned' → fall through to findOrCreateMatch, which
+    //                      enqueues the requester normally and never
+    //                      pairs them. The HTTP response is identical
+    //                      to an honest user's "waiting" so the UI
+    //                      cannot tell shadowban from "queue is empty".
     //   - 'active'       → unchanged.
     const status = await getUserStatus(cleanWallet);
     if (status === "banned") {
@@ -350,14 +350,9 @@ export async function registerRoutes(
         message: "Your account has been suspended. Contact support if you believe this is a mistake.",
       });
     }
-    if (status === "shadowbanned") {
-      // Touch the user so lastSeenAt still updates (admin can see
-      // they're still trying to queue) and return the same waiting
-      // shape findOrCreateMatch would have, with no queue side-effect.
-      touchUser(cleanWallet).catch(() => {});
-      return res.status(200).json({ status: "waiting" });
-    }
-    // Honest user — track first/last sighting.
+    // Honest OR shadowbanned user — track first/last sighting. The
+    // matcher itself enforces the shadowban semantics; touching here
+    // ensures the admin can still see the wallet is alive in users.
     touchUser(cleanWallet).catch(() => {});
 
     try {

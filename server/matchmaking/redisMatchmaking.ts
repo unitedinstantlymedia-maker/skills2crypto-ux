@@ -2,6 +2,7 @@ import { redis } from "../redis";
 import { nanoid } from "nanoid";
 import type { Game, Asset, MatchFound } from "../core/types";
 import { walletAddressesEqual } from "../security/systemAddresses";
+import { getUserStatus } from "../users/userStatus";
 
 type FindMatchArgs = {
   game: Game;
@@ -32,6 +33,35 @@ export async function findOrCreateMatch(
   const key = queueKey(game, asset, stake);
   const myMember = encodeQueueMember(socketId, walletAddress);
 
+  // Anti-cheat L1 (Task #46) — shadowban honoring at the matcher.
+  //
+  // The HTTP layer (find-match in server/routes.ts) already converts
+  // `banned` into a 403, so a banned wallet should never reach here.
+  // Shadowban, by contrast, is the matcher's responsibility: the user
+  // MUST appear to queue normally (so they can't probe whether they
+  // were banned by comparing to honest behaviour) but MUST never be
+  // paired. Strategy:
+  //   1. If the requester is shadowbanned, enqueue them and return
+  //      waiting WITHOUT popping an opponent. This keeps them in the
+  //      queue indefinitely and prevents them from ever pulling an
+  //      honest player out of the queue.
+  //   2. If we pop an opponent and discover that opponent is
+  //      shadowbanned, push them back and enqueue the requester (also
+  //      returning waiting). The shadowbanned opponent will be re-popped
+  //      and re-rejected by the next honest requester forever.
+  // We re-check status server-side at the moment of pairing (instead of
+  // trusting the queue) so a wallet shadowbanned WHILE already queued
+  // is still skipped.
+  const requesterStatus = await getUserStatus(walletAddress);
+  if (requesterStatus === "shadowbanned") {
+    // Re-add the requester so the queue length reflects what an honest
+    // user would see. zadd is idempotent on member equality, so a
+    // shadowbanned user spamming find-match doesn't multiply rows.
+    await redis.zadd(key, { score: Date.now(), member: myMember });
+    await redis.expire(key, 60 * 5);
+    return { status: "waiting" };
+  }
+
   const popped = await redis.zpopmin(key);
   let opponentRaw: string | null = null;
 
@@ -59,6 +89,31 @@ export async function findOrCreateMatch(
       await redis.zadd(key, { score: Date.now(), member: opponentRaw });
       await redis.expire(key, 60 * 5);
       opponentRaw = null;
+    }
+
+    // Shadowban / banned opponent gate. We check status at pop-time
+    // because the popped opponent could have been queued long before
+    // their ban took effect (matchmaker side; HTTP-layer ban gate
+    // wouldn't have caught a stale queue entry).
+    if (opponentRaw && opponent.walletAddress) {
+      const oppStatus = await getUserStatus(opponent.walletAddress);
+      if (oppStatus === "shadowbanned") {
+        // Push the shadowbanned opponent back so they stay perpetually
+        // queued, and queue the requester for the NEXT honest opponent.
+        await redis.zadd(key, { score: Date.now(), member: opponentRaw });
+        await redis.zadd(key, { score: Date.now(), member: myMember });
+        await redis.expire(key, 60 * 5);
+        return { status: "waiting" };
+      }
+      if (oppStatus === "banned") {
+        // Drop the banned member from the queue entirely (do not push
+        // back) and queue the requester. A banned player should never
+        // sit in matchmaking — the HTTP gate prevents new entries, but
+        // pre-existing entries get cleaned out lazily here.
+        await redis.zadd(key, { score: Date.now(), member: myMember });
+        await redis.expire(key, 60 * 5);
+        return { status: "waiting" };
+      }
     }
 
     if (opponentRaw) {

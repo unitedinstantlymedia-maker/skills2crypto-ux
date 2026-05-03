@@ -88,8 +88,12 @@ vi.mock("drizzle-orm", async () => {
   };
 });
 
-// In-memory Upstash mock — same shape as captcha.test.ts.
+// In-memory Upstash mock — strings + sorted sets + hashes, enough for
+// the matchmaking integration tests. Backs both the userStatus admin-
+// auth nonce store and the redisMatchmaking queue store.
 const redisStore = new Map<string, { value: string; expiresAt?: number }>();
+const zsetStore = new Map<string, Array<{ score: number; member: string }>>();
+const hashStore = new Map<string, Record<string, string>>();
 function getEntry(key: string) {
   const e = redisStore.get(key);
   if (!e) return undefined;
@@ -119,6 +123,31 @@ vi.mock("../server/redis", () => ({
     get: async (key: string) => getEntry(key)?.value ?? null,
     del: async (key: string) => (redisStore.delete(key) ? 1 : 0),
     ping: async () => "PONG",
+    // Sorted-set ops used by redisMatchmaking.
+    zadd: async (key: string, entry: { score: number; member: string }) => {
+      const arr = zsetStore.get(key) ?? [];
+      // Idempotent on member equality, like real Upstash.
+      const filtered = arr.filter((e) => e.member !== entry.member);
+      filtered.push({ score: entry.score, member: entry.member });
+      filtered.sort((a, b) => a.score - b.score);
+      zsetStore.set(key, filtered);
+      return 1;
+    },
+    zpopmin: async (key: string) => {
+      const arr = zsetStore.get(key);
+      if (!arr || arr.length === 0) return [];
+      const head = arr.shift()!;
+      // Upstash returns [[member, score]] — match that shape so the
+      // production decoder works unchanged.
+      return [[head.member, head.score]];
+    },
+    expire: async (_key: string, _ttl: number) => 1,
+    // Hash op used to persist match metadata after pairing.
+    hset: async (key: string, fields: Record<string, string>) => {
+      const cur = hashStore.get(key) ?? {};
+      hashStore.set(key, { ...cur, ...fields });
+      return Object.keys(fields).length;
+    },
   },
 }));
 
@@ -146,6 +175,8 @@ const NOT_ADMIN_WALLET = new ethers.Wallet(NOT_ADMIN_PK).address.toLowerCase();
 beforeEach(() => {
   userStore.clear();
   redisStore.clear();
+  zsetStore.clear();
+  hashStore.clear();
   invalidateUserStatusCache();
   delete process.env.ADMIN_WALLET_ALLOWLIST;
 });
@@ -342,6 +373,101 @@ async function signAdminRequest(opts: {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Matchmaking integration — findOrCreateMatch must:
+//   - return waiting and enqueue (not pair) when the requester is shadowbanned
+//   - drop a popped opponent that was shadowbanned and re-enqueue them so they
+//     remain perpetually queued
+//   - drop a popped opponent that has been hard-banned (no re-enqueue)
+//   - pair two active wallets normally
+// ---------------------------------------------------------------------------
+describe("matchmaking integration with soft-ban", () => {
+  it("requester shadowbanned → returns waiting and is enqueued (no pairing)", async () => {
+    const { findOrCreateMatch } = await import("../server/matchmaking/redisMatchmaking");
+    await setUserStatus({ wallet: W1, status: "shadowbanned", reason: null, by: "admin" });
+
+    const r1 = await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-1",
+      walletAddress: W1,
+    });
+    expect(r1.status).toBe("waiting");
+    // Requester sits in the sorted-set queue (zadd was called) but
+    // never paired — the queue must contain exactly the shadowbanned
+    // requester so an indifferent observer cannot tell.
+    const zsetKeys = Array.from(zsetStore.keys()).filter((k) =>
+      k.startsWith("queue:"),
+    );
+    expect(zsetKeys.length).toBe(1);
+    const queue = zsetStore.get(zsetKeys[0])!;
+    expect(queue.length).toBe(1);
+    expect(queue[0].member.startsWith("sock-1")).toBe(true);
+
+    // An honest opponent now arrives — must NOT be paired with the
+    // shadowbanned wallet sitting at the head of the queue.
+    const r2 = await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-2",
+      walletAddress: W2,
+    });
+    expect(r2.status).toBe("waiting");
+  });
+
+  it("two active wallets pair normally and produce a matched result", async () => {
+    const { findOrCreateMatch } = await import("../server/matchmaking/redisMatchmaking");
+    const r1 = await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-A",
+      walletAddress: W1,
+    });
+    expect(r1.status).toBe("waiting");
+
+    const r2 = await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-B",
+      walletAddress: W2,
+    });
+    expect(r2.status).toBe("matched");
+    if (r2.status === "matched") {
+      expect(r2.players).toContain("sock-A");
+      expect(r2.players).toContain("sock-B");
+    }
+  });
+
+  it("popped opponent that became hard-banned is dropped, requester is enqueued", async () => {
+    const { findOrCreateMatch } = await import("../server/matchmaking/redisMatchmaking");
+    // First requester queues normally as 'active'.
+    await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-X",
+      walletAddress: W1,
+    });
+    // Then they become hard-banned WHILE in queue.
+    await setUserStatus({ wallet: W1, status: "banned", reason: "after queueing", by: "admin" });
+
+    // Honest opponent arrives — the popped W1 entry must be dropped
+    // and the honest opponent enqueued (waiting), NEVER paired.
+    const r = await findOrCreateMatch({
+      game: "chess",
+      asset: "BNB",
+      stake: 0.01,
+      socketId: "sock-Y",
+      walletAddress: W2,
+    });
+    expect(r.status).toBe("waiting");
+  });
+});
 
 describe("requireAdminWallet", () => {
   it("returns 503 admin_disabled when ADMIN_WALLET_ALLOWLIST is empty", async () => {

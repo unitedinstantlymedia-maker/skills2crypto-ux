@@ -1387,6 +1387,60 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
   io.on("connection", (socket) => {
     console.log("[socket] connected", socket.id);
 
+    // Anti-cheat L1 (Task #46) — per-event hard-ban gate.
+    //
+    // socket.use() runs once per inbound packet, BEFORE the matching
+    // socket.on() handler. We resolve the player wallet for this
+    // socket (either from socketToPlayer for events that follow a
+    // join-* handler, or from packet[1].playerId for the join events
+    // themselves), look up the user status (60-second in-process
+    // cache so this isn't a DB hit per move), and short-circuit
+    // hard-banned wallets with a single `banned` emission. The
+    // packet never reaches the per-game handler so an in-flight
+    // match cannot be advanced under a banned account.
+    //
+    // Status read fail-OPEN: a DB blip must NOT block honest play.
+    // Bans are advisory anti-cheat, not auth.
+    socket.use(async (packet, next) => {
+      try {
+        const event = typeof packet?.[0] === "string" ? packet[0] : "";
+        if (!event) return next();
+        // Skip the framework's reserved events to avoid touching the
+        // user store on every ping/disconnect.
+        if (event === "disconnect" || event === "disconnecting") return next();
+
+        let playerId: string | null = null;
+        if (event.startsWith("join-")) {
+          const data = packet?.[1];
+          const claimed = (data && (data as any).playerId) || null;
+          if (typeof claimed === "string" && claimed.length > 0) {
+            playerId = claimed;
+          }
+        }
+        if (!playerId) {
+          const info = socketToPlayer.get(socket.id);
+          if (info?.playerId) playerId = info.playerId;
+        }
+        if (!playerId) return next();
+
+        const { getUserStatus } = await import("./users/userStatus");
+        const status = await getUserStatus(playerId);
+        if (status === "banned") {
+          // Tell the client exactly once; subsequent dropped packets
+          // would just spam the same toast. Emit a `banned` event so
+          // the client can route the user to the suspension UI.
+          socket.emit("banned", { event, reason: "banned" });
+          // Drop the packet — do NOT call next.
+          return;
+        }
+      } catch (e: any) {
+        // Fail-open on any unexpected failure in the gate so a code
+        // bug here doesn't take down all gameplay.
+        console.warn("[socket] hard-ban gate failed (allowing packet):", e?.message || e);
+      }
+      next();
+    });
+
     socket.on("join-match", (data: { matchId: string; playerId: string }) => {
       const { matchId, playerId } = data;
       socket.join(`match:${matchId}`);
