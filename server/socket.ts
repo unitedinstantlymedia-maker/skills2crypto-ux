@@ -1295,11 +1295,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
   });
   ioRef = io;
 
-  // Per-IP socket connection cap. We resolve the client IP from the
-  // X-Forwarded-For chain (Express has `trust proxy` set to 1, so the
-  // leftmost entry is the real client; Socket.io does NOT honour that
-  // setting on its own). Falls back to the raw handshake address when
-  // there's no proxy header.
+  // Per-IP socket connection cap. The handshake-IP resolver mirrors
+  // Express trust-proxy=1 (rightmost X-Forwarded-For entry is what the
+  // single trusted reverse proxy wrote based on the TCP peer; everything
+  // to its left is client-supplied and spoofable). See
+  // `resolveSocketClientIp` above for the full rationale.
   io.use(async (socket, next) => {
     const ip = resolveSocketClientIp(socket);
     socketLimiterState.set(socket, { clientIp: ip, slotAcquired: false });
