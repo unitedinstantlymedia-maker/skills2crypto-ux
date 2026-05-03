@@ -39,7 +39,11 @@ vi.mock("../server/oracle.evm", () => ({}));
 vi.mock("../server/oracle.tron", () => ({}));
 vi.mock("../server/oracle.ton", () => ({}));
 
-import { setupSocket, markMatchFunded } from "../server/socket";
+import {
+  setupSocket,
+  markMatchFunded,
+  __setCheckersBoardForTest,
+} from "../server/socket";
 import { io as ClientIO, type Socket as ClientSocket } from "socket.io-client";
 import {
   deserializeBoard,
@@ -444,6 +448,53 @@ describe("checkers socket integration — server authority", () => {
         playerId: "anyone",
       });
       await Promise.all([noResult, noResultB]);
+    } finally {
+      red.disconnect();
+      black.disconnect();
+    }
+  });
+
+  it("natural terminal: a capture that empties the opponent settles game-result with no_pieces", async () => {
+    const { matchId, red, black, redId, blackId } = await startMatch();
+    try {
+      // Seed a near-terminal position: one red man at (3,4) with a
+      // jump over the only black piece at (2,3) to (1,2). After the
+      // jump, black has zero pieces → terminal reason 'no_pieces'.
+      const board = Array.from({ length: 8 }, () =>
+        Array.from({ length: 8 }, () => null),
+      ) as ReturnType<typeof initialBoard>;
+      board[3][4] = { color: "red", type: "man" };
+      board[2][3] = { color: "black", type: "man" };
+      const seeded = __setCheckersBoardForTest(matchId, board, "red");
+      expect(seeded).toBe(true);
+
+      const wResult = waitFor<{ winnerId: string; loserId: string; reason: string }>(
+        red,
+        "game-result",
+        2000,
+      );
+      const bResult = waitFor<{ winnerId: string; loserId: string; reason: string }>(
+        black,
+        "game-result",
+        2000,
+      );
+      const wCount = countEvents(red, "game-result", 800);
+      const bCount = countEvents(black, "game-result", 800);
+
+      red.emit("checkers-move", {
+        matchId,
+        from: { row: 3, col: 4 },
+        to: { row: 1, col: 2 },
+      });
+
+      const [rp, bp, wn, bn] = await Promise.all([wResult, bResult, wCount, bCount]);
+      expect(rp.reason).toBe("no_pieces");
+      expect(bp.reason).toBe("no_pieces");
+      expect(rp.winnerId).toBe(redId);
+      expect(rp.loserId).toBe(blackId);
+      // Exactly one game-result per side — no duplicate settlement.
+      expect(wn).toBe(1);
+      expect(bn).toBe(1);
     } finally {
       red.disconnect();
       black.disconnect();

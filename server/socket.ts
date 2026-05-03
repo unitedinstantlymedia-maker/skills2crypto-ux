@@ -472,6 +472,26 @@ function checkersPublicState(room: CheckersRoom) {
   };
 }
 
+// Test-only: seed an existing CheckersRoom to a custom position. Used
+// by integration tests to drive the room to a near-terminal state
+// without playing dozens of legal moves. Not safe for production use;
+// guarded by a NODE_ENV check on call.
+export function __setCheckersBoardForTest(
+  matchId: string,
+  board: CheckersBoard,
+  currentTurn: CheckersColor,
+  pendingJumpAt: CheckersPosition | null = null,
+): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  const room = checkersRooms.get(matchId);
+  if (!room) return false;
+  room.board = board;
+  room.currentTurn = currentTurn;
+  room.pendingJumpAt = pendingJumpAt;
+  room.lastTickAt = Date.now();
+  return true;
+}
+
 function startCheckersGame(io: SocketIOServer, matchId: string, room: CheckersRoom): void {
   room.board = checkersInitialBoard();
   room.currentTurn = "red";
