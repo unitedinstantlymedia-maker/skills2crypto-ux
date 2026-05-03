@@ -62,7 +62,7 @@ export default function Landing() {
         transition={{ delay: 0.2, duration: 0.5 }}
         className="flex flex-col gap-4 w-full max-w-xs mx-auto"
       >
-        <div className="flex items-center justify-center gap-3 w-full">
+        <div className="flex items-center justify-center gap-3 w-screen max-w-md mx-auto px-4">
           <Link href="/games" className="flex-1 min-w-0">
             <Button
               className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
