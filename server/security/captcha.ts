@@ -379,6 +379,19 @@ async function recordFailure(wallet: string): Promise<void> {
 
 // --- gate helpers (used by /api/captcha/* and the deposit endpoints) ---
 
+// Sentinel thrown by verified/cooldown checks when Redis is unreachable.
+// `checkDepositCaptchaForWallets` translates this into a typed 503
+// `captcha_unavailable` response so the deposit gate fails CLOSED rather
+// than letting unverified wallets through during a Redis outage. The
+// non-gating callers (e.g. the /api/captcha/challenge "already-verified"
+// fast-path) catch this and degrade gracefully.
+export class CaptchaBackendUnavailableError extends Error {
+  constructor(message = "captcha backend unavailable") {
+    super(message);
+    this.name = "CaptchaBackendUnavailableError";
+  }
+}
+
 export async function isWalletCaptchaVerified(wallet: string): Promise<boolean> {
   if (!wallet) return false;
   try {
@@ -386,9 +399,14 @@ export async function isWalletCaptchaVerified(wallet: string): Promise<boolean> 
     return Boolean(v);
   } catch (e: any) {
     console.warn(`[captcha] verified-check failed: ${e?.message || e}`);
-    // Fail OPEN — a Redis blip should not block paying users from
-    // funding their match. The slider gate is anti-cheat, not auth.
-    return true;
+    // Fail CLOSED for the deposit gate — letting unverified wallets
+    // through during a Redis blip is exactly the bypass we're trying to
+    // prevent. Callers who want the soft "already-verified" fast-path
+    // (the challenge endpoint) catch this and treat it as "not yet
+    // verified, issue a fresh challenge anyway".
+    throw new CaptchaBackendUnavailableError(
+      `captcha verified-check failed: ${e?.message || e}`
+    );
   }
 }
 
@@ -401,11 +419,16 @@ export async function getCaptchaCooldownRemainingMs(
     if (typeof pttl === "number" && pttl > 0) return pttl;
     return 0;
   } catch {
+    // pttl may not be supported on all Upstash plans — fall back to a
+    // plain GET, but still surface a hard failure to the gate so it can
+    // refuse the deposit (fail closed).
     try {
       const v = await redis.get(cooldownKey(wallet));
       return v ? getCaptchaFailCooldownMs() : 0;
-    } catch {
-      return 0;
+    } catch (e: any) {
+      throw new CaptchaBackendUnavailableError(
+        `captcha cooldown-check failed: ${e?.message || e}`
+      );
     }
   }
 }
@@ -417,9 +440,9 @@ export interface DepositGateOk {
 }
 export interface DepositGateBlocked {
   ok: false;
-  status: 412 | 429;
+  status: 412 | 429 | 503;
   body: {
-    error: "captcha_required" | "captcha_cooldown";
+    error: "captcha_required" | "captcha_cooldown" | "captcha_unavailable";
     message: string;
     retryAfterMs?: number;
     retryAfterSec?: number;
@@ -455,38 +478,60 @@ export async function checkDepositCaptchaForWallets(
       },
     };
   }
-  // Cooldown takes precedence so a banned wallet always sees the cooldown
-  // message, never a bare "verify yourself" prompt.
-  for (const w of ws) {
-    const cooldownMs = await getCaptchaCooldownRemainingMs(w);
-    if (cooldownMs > 0) {
-      return {
-        ok: false,
-        status: 429,
-        body: {
-          error: "captcha_cooldown",
-          message: "Too many tries — please wait and try again.",
-          retryAfterMs: cooldownMs,
-          retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
-        },
-      };
+  try {
+    // Cooldown takes precedence so a banned wallet always sees the cooldown
+    // message, never a bare "verify yourself" prompt.
+    for (const w of ws) {
+      const cooldownMs = await getCaptchaCooldownRemainingMs(w);
+      if (cooldownMs > 0) {
+        return {
+          ok: false,
+          status: 429,
+          body: {
+            error: "captcha_cooldown",
+            message: "Too many tries — please wait and try again.",
+            retryAfterMs: cooldownMs,
+            retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
+          },
+        };
+      }
     }
-  }
-  for (const w of ws) {
-    const verified = await isWalletCaptchaVerified(w);
-    if (!verified) {
+    for (const w of ws) {
+      const verified = await isWalletCaptchaVerified(w);
+      if (!verified) {
+        return {
+          ok: false,
+          status: 412,
+          body: {
+            error: "captcha_required",
+            message:
+              "Please complete the slider verification before depositing.",
+          },
+        };
+      }
+    }
+    return { ok: true };
+  } catch (e: any) {
+    if (e instanceof CaptchaBackendUnavailableError) {
+      // Fail CLOSED. Returning 503 with Retry-After advice tells the
+      // client to back off briefly rather than treating the deposit as
+      // permanently blocked. This is the intended defense against the
+      // "Redis flake → unverified wallet bypasses gate" attack.
+      console.warn(`[captcha] deposit gate failing closed: ${e.message}`);
       return {
         ok: false,
-        status: 412,
+        status: 503,
         body: {
-          error: "captcha_required",
+          error: "captcha_unavailable",
           message:
-            "Please complete the slider verification before depositing.",
+            "Verification service is temporarily unavailable. Please try again shortly.",
+          retryAfterMs: 5_000,
+          retryAfterSec: 5,
         },
       };
     }
+    throw e;
   }
-  return { ok: true };
 }
 
 // Test-only — not routed through any module index.

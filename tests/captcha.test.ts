@@ -361,6 +361,34 @@ describe("deposit gate", () => {
     if (!mixed.ok) expect(mixed.body.error).toBe("captcha_required");
   });
 
+  // Fail-CLOSED behaviour: a Redis read failure during deposit gating
+  // must NOT let the deposit through (that would be the exact bypass
+  // captcha is designed to prevent). The gate returns a typed 503
+  // captcha_unavailable so the client backs off briefly.
+  it("fails CLOSED on Redis read errors with a 503 captcha_unavailable", async () => {
+    const { redis } = await import("../server/redis");
+    const realGet = redis.get.bind(redis);
+    const realPttl = (redis as any).pttl.bind(redis);
+    (redis as any).get = async () => {
+      throw new Error("redis offline");
+    };
+    (redis as any).pttl = async () => {
+      throw new Error("redis offline");
+    };
+    try {
+      const r = await checkDepositCaptchaForWallets(["0x" + "e".repeat(40)]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.status).toBe(503);
+        expect(r.body.error).toBe("captcha_unavailable");
+        expect(r.body.retryAfterSec).toBeGreaterThan(0);
+      }
+    } finally {
+      (redis as any).get = realGet;
+      (redis as any).pttl = realPttl;
+    }
+  });
+
   it("treats checksummed and lowercased addresses as the same wallet", async () => {
     const checksummed = "0xAaAaaaAaAAaAaaaaAaaaaaaAaAaaAaAaaAAaaaAa";
     const c = await generateChallenge({ wallet: checksummed, seed: 88 });

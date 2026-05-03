@@ -84,17 +84,30 @@ export async function registerRoutes(
     if (!walletAddress || typeof walletAddress !== "string") {
       return res.status(400).json({ error: "walletAddress required" });
     }
-    const cooldownMs = await getCaptchaCooldownRemainingMs(walletAddress);
-    if (cooldownMs > 0) {
-      return res.status(429).json({
-        error: "captcha_cooldown",
-        message: "Too many tries — please wait and try again.",
-        retryAfterMs: cooldownMs,
-        retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
-      });
-    }
-    if (await isWalletCaptchaVerified(walletAddress)) {
-      return res.status(200).json({ alreadyVerified: true });
+    // Soft fast-path. Cooldown / already-verified checks are best-effort
+    // here — if Redis is flaky we just fall through to issuing a fresh
+    // challenge rather than 503-ing the user out of the lobby. The
+    // ACTUAL gate (deposit endpoints) fails closed via
+    // checkDepositCaptchaForWallets, so doing the soft path here can't
+    // grant access on its own.
+    try {
+      const cooldownMs = await getCaptchaCooldownRemainingMs(walletAddress);
+      if (cooldownMs > 0) {
+        return res.status(429).json({
+          error: "captcha_cooldown",
+          message: "Too many tries — please wait and try again.",
+          retryAfterMs: cooldownMs,
+          retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
+        });
+      }
+      if (await isWalletCaptchaVerified(walletAddress)) {
+        return res.status(200).json({ alreadyVerified: true });
+      }
+    } catch (err: any) {
+      console.warn(
+        "[captcha/challenge] soft fast-path failed, issuing fresh challenge:",
+        err?.message || err
+      );
     }
     try {
       const challenge = await generateChallenge({ wallet: walletAddress });
