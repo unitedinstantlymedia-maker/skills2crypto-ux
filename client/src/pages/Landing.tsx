@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Trophy } from "lucide-react";
 import { motion } from "framer-motion";
 import { useLanguage } from "@/context/LanguageContext";
 import { LanguageSelector } from "@/components/ui/LanguageSelector";
@@ -62,11 +63,42 @@ export default function Landing() {
         transition={{ delay: 0.2, duration: 0.5 }}
         className="flex flex-col gap-4 w-full max-w-xs"
       >
-        <Link href="/games">
-          <Button className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow">
-            {t('Play Now', 'Play Now')}
-          </Button>
-        </Link>
+        <div className="flex gap-3 w-full">
+          <Link href="/games" className="flex-1">
+            <Button
+              className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
+              data-testid="button-play-now"
+            >
+              {t('Play Now', 'Play Now')}
+            </Button>
+          </Link>
+
+          <Link href="/tournaments" className="flex-1">
+            <div className="flex flex-col items-center">
+              <Trophy
+                className="w-5 h-5 mb-1"
+                style={{
+                  color: "#FFC53D",
+                  filter:
+                    "drop-shadow(0 0 6px rgba(255,197,61,0.85)) drop-shadow(0 0 12px rgba(255,170,40,0.45))",
+                }}
+              />
+              <Button
+                data-testid="button-tournaments"
+                className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-transparent text-[#FFC53D] hover:bg-[#FFC53D]/10"
+                style={{
+                  border: "1px solid rgba(255,197,61,0.7)",
+                  boxShadow:
+                    "0 0 10px rgba(255,197,61,0.45), inset 0 0 8px rgba(255,197,61,0.15)",
+                  textShadow:
+                    "0 0 8px rgba(255,197,61,0.85), 0 0 16px rgba(255,170,40,0.4)",
+                }}
+              >
+                {t('Tournaments', 'Tournaments')}
+              </Button>
+            </div>
+          </Link>
+        </div>
 
         <div className="flex justify-center items-center gap-6 mt-6">
           <div className="flex flex-col items-center gap-1" title="USDT">

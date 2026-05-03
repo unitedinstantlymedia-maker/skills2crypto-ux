@@ -16,6 +16,7 @@ import Play from "@/pages/Play";
 import Result from "@/pages/Result";
 import Wallet from "@/pages/Wallet";
 import History from "@/pages/History";
+import Tournaments from "@/pages/Tournaments";
 import Challenge from "@/pages/Challenge";
 import NotFound from "@/pages/not-found";
 
@@ -33,6 +34,7 @@ function Router() {
         <Route path="/result" component={Result} />
         <Route path="/wallet" component={Wallet} />
         <Route path="/history" component={History} />
+        <Route path="/tournaments" component={Tournaments} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
