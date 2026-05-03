@@ -1552,7 +1552,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       const wasCapture = checkersIsCaptureMove(legal);
-      const { board: nextBoard } = checkersApplyMove(room.board, legal);
+      const { board: nextBoard, promoted } = checkersApplyMove(room.board, legal);
       room.board = nextBoard;
 
       if (player.color === 'red') {
@@ -1563,10 +1563,10 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       room.lastTickAt = Date.now();
 
       // Multi-jump continuation: only after a capture, only if the SAME
-      // landing piece has additional jumps available. Promotion does not
-      // gate this in the existing client behaviour; we mirror it.
+      // landing piece has additional jumps available. Standard American
+      // checkers rule: a man promoted to king during a jump must stop.
       let turnEnded = true;
-      if (wasCapture) {
+      if (wasCapture && !promoted) {
         const further = checkersGetJumpsFromSquare(room.board, legal.to);
         if (further.length > 0) {
           room.pendingJumpAt = legal.to;

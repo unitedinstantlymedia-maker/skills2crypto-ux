@@ -84,10 +84,18 @@ function waitFor<T = unknown>(sock: ClientSocket, name: string, ms = 1500): Prom
   });
 }
 
-function expectNoEvent(sock: ClientSocket, name: string, ms = 250): Promise<void> {
+async function flush(): Promise<void> {
+  // Yield to the event loop so any in-flight socket.io frames are
+  // delivered to handlers before we install or remove listeners.
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+}
+
+async function expectNoEvent(sock: ClientSocket, name: string, ms = 250): Promise<void> {
   // Defensive: clear any stragglers before installing the rejection
   // probe so we only flag events that happen AFTER this point.
   sock.removeAllListeners(name);
+  await flush();
   return new Promise((resolve, reject) => {
     const handler = (payload: unknown) => {
       sock.off(name, handler);
@@ -192,33 +200,81 @@ async function startMatch(): Promise<{
 }
 
 describe("checkers socket integration — server authority", () => {
-  it("emits checkers-game-start with a serialised initial board snapshot", async () => {
-    const { red, black } = await startMatch();
+  it("the move broadcast carries the server's canonical 64-char board snapshot", async () => {
+    const { matchId, red, black } = await startMatch();
     try {
-      const expected = serializeBoard(initialBoard());
-      // Both players should already have received game-start in startMatch;
-      // request a reconnect-style snapshot by re-joining red's playerId.
+      const w = waitFor<CheckersMovePayload>(black, "opponent-checkers-move", 1500);
+      red.emit("checkers-move", {
+        matchId,
+        from: { row: 5, col: 2 },
+        to: { row: 4, col: 3 },
+      });
+      const echo = await w;
+      // 64 cells, 12 reds, 12 blacks, no kings yet.
+      expect(echo.board).toHaveLength(64);
+      expect((echo.board.match(/r/g) ?? []).length).toBe(12);
+      expect((echo.board.match(/b/g) ?? []).length).toBe(12);
+      expect((echo.board.match(/[RB]/g) ?? []).length).toBe(0);
+      // Origin empty, landing square is a red man.
+      const b = deserializeBoard(echo.board);
+      expect(b[5][2]).toBeNull();
+      expect(b[4][3]).toEqual({ color: "red", type: "man" });
+    } finally {
+      red.disconnect();
+      black.disconnect();
+    }
+  });
+
+  it("reconnect re-emits checkers-game-start with the authoritative public state", async () => {
+    const { matchId, red, black, redId } = await startMatch();
+    try {
+      // Play one move so server state diverges from initial-board.
+      const w1 = waitFor<CheckersMovePayload>(black, "opponent-checkers-move", 1500);
+      red.emit("checkers-move", {
+        matchId,
+        from: { row: 5, col: 2 },
+        to: { row: 4, col: 3 },
+      });
+      await w1;
+
+      // Disconnect red, then reconnect with the same playerId. The
+      // server's join-checkers-match reconnect branch must re-emit
+      // checkers-game-start with the CURRENT publicState.
+      red.disconnect();
+      await new Promise((r) => setTimeout(r, 50));
+
       const newRed = await connectClient();
       const colorPromise = waitFor<{ color: "red" | "black" }>(
         newRed,
         "checkers-color-assigned",
+        2000,
       );
-      // Reconnect uses the same playerId as red — this triggers the
-      // reconnect branch and re-emits game-start with publicState.
-      newRed.emit("join-checkers-match", {
-        matchId: (red as ClientSocket & { _mid?: string })._mid ?? "noop",
-        playerId: "noop",
-      });
-      // Don't actually wait for it to succeed (the matchId is wrong);
-      // we just want to demonstrate the path runs without crashing.
-      void colorPromise.catch(() => undefined);
-      newRed.disconnect();
+      const startPromise = waitFor<CheckersStartPayload>(
+        newRed,
+        "checkers-game-start",
+        2000,
+      );
+      newRed.emit("join-checkers-match", { matchId, playerId: redId });
+      const assigned = await colorPromise;
+      const start = await startPromise;
+      expect(assigned.color).toBe("red");
+      expect(start.publicState.currentTurn).toBe("black");
+      // Board reflects red's move (origin empty, landing filled).
+      const b = deserializeBoard(start.publicState.board);
+      expect(b[5][2]).toBeNull();
+      expect(b[4][3]).toEqual({ color: "red", type: "man" });
+      // Red's clock was ticked when red moved. Black is now the
+      // active side, so checkersPublicState bleeds black's clock by
+      // the elapsed time since the turn started. Both clocks must be
+      // ≤ 600000 and within the budget.
+      expect(start.publicState.redTime).toBeLessThan(600000);
+      expect(start.publicState.redTime).toBeGreaterThan(599000);
+      expect(start.publicState.blackTime).toBeLessThanOrEqual(600000);
+      expect(start.publicState.blackTime).toBeGreaterThan(599000);
+      expect(start.publicState.pendingJumpAt).toBeNull();
 
-      // Sanity: serialised initial board has 12 'r' and 12 'b'.
-      expect((expected.match(/r/g) ?? []).length).toBe(12);
-      expect((expected.match(/b/g) ?? []).length).toBe(12);
+      newRed.disconnect();
     } finally {
-      red.disconnect();
       black.disconnect();
     }
   });
@@ -298,9 +354,15 @@ describe("checkers socket integration — server authority", () => {
         as: ClientSocket,
         listener: ClientSocket,
       ) => {
-        const w = waitFor<CheckersMovePayload>(listener, "opponent-checkers-move", 1500);
+        // Wait on BOTH sockets so any in-flight broadcast is fully
+        // drained from the previous round before we install the next
+        // listener. Otherwise a delayed frame on the listener side can
+        // be picked up as if it were the response to this emit.
+        const wL = waitFor<CheckersMovePayload>(listener, "opponent-checkers-move", 1500);
+        const wS = waitFor<CheckersMovePayload>(as, "opponent-checkers-move", 1500);
         as.emit("checkers-move", { matchId, from, to });
-        return w;
+        const [r] = await Promise.all([wL, wS]);
+        return r;
       };
 
       // Red 5,2 → 4,3
@@ -338,9 +400,11 @@ describe("checkers socket integration — server authority", () => {
         as: ClientSocket,
         listener: ClientSocket,
       ) => {
-        const w = waitFor<CheckersMovePayload>(listener, "opponent-checkers-move", 1500);
+        const wL = waitFor<CheckersMovePayload>(listener, "opponent-checkers-move", 1500);
+        const wS = waitFor<CheckersMovePayload>(as, "opponent-checkers-move", 1500);
         as.emit("checkers-move", { matchId, from, to });
-        return w;
+        const [r] = await Promise.all([wL, wS]);
+        return r;
       };
 
       // Set up a position with exactly ONE red jump available, no
