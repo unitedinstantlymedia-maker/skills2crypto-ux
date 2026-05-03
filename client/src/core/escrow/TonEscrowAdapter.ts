@@ -56,14 +56,20 @@ interface TonSettleAuth {
   escrowAddress: string;
 }
 
-async function fetchDepositInfo(matchId: string): Promise<TonDepositInfo> {
+async function fetchDepositInfo(matchId: string, walletAddress: string): Promise<TonDepositInfo> {
   const r = await fetch(apiUrl("/api/ton/deposit-info"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ matchId }),
+    // walletAddress is required by the anti-cheat L1 captcha gate.
+    body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data?.error || `deposit-info HTTP ${r.status}`);
+  if (!r.ok) {
+    const err: any = new Error(data?.error || `deposit-info HTTP ${r.status}`);
+    err.status = r.status;
+    err.body = data;
+    throw err;
+  }
   return data as TonDepositInfo;
 }
 
@@ -168,9 +174,10 @@ export class TonEscrowAdapter {
       return false;
     }
 
+    const myAddr: string = tc.account?.address || "";
     let info: TonDepositInfo;
     try {
-      info = await fetchDepositInfo(matchId);
+      info = await fetchDepositInfo(matchId, myAddr);
     } catch (e: any) {
       console.error("[TonEscrow] deposit-info failed:", e?.message || e);
       return false;

@@ -13,6 +13,7 @@ import type { WalletState, HistoryEntry } from '@/core/types';
 import { findMatch, socketUrl } from '@/lib/api';
 import type { Game, Asset } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { SliderCaptcha } from '@/components/wallet/SliderCaptcha';
 
 type MatchState =
   | null
@@ -57,6 +58,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const realWallet = useRealWallet();
   const { toast } = useToast();
   const [walletState, setWalletState] = useState<WalletState>(walletStore.getState());
+  // Anti-cheat L1 — first-deposit slider captcha. When non-null we render
+  // the modal; the resolver is awaited by the matchmaking flow so the
+  // deposit only fires once verification passes (or the user cancels).
+  const [pendingCaptcha, setPendingCaptcha] = useState<{
+    walletAddress: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+
+  const ensureCaptchaPassed = useCallback(
+    (walletAddress: string): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        setPendingCaptcha({ walletAddress, resolve });
+      }),
+    []
+  );
   const [selectedGame, setSelectedGame] = useState<Game | null>(() => {
     const s = localStorage.getItem('skills2crypto_selected_game');
     return s ? (s as Game) : null;
@@ -382,6 +398,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Anti-cheat L1 first-deposit gate. If the wallet has not yet
+      // passed the slider captcha, show the modal and wait for it.
+      // The deposit endpoints will refuse the call regardless, but
+      // gating client-side first avoids burning a queue slot for
+      // unverified players.
+      const captchaOk = await ensureCaptchaPassed(assetWalletAddress);
+      if (!captchaOk) {
+        setIsFinding(false);
+        setCurrentMatch(null);
+        return;
+      }
+
       const res = await findMatch({
         game: selectedGame,
         asset: selectedAsset,
@@ -507,7 +535,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [selectedGame, selectedAsset, stakeAmount, walletState, currentMatch, history, isFinding, socketInstance]
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      {pendingCaptcha && (
+        <SliderCaptcha
+          walletAddress={pendingCaptcha.walletAddress}
+          onPass={() => {
+            const r = pendingCaptcha.resolve;
+            setPendingCaptcha(null);
+            r(true);
+          }}
+          onCancel={() => {
+            const r = pendingCaptcha.resolve;
+            setPendingCaptcha(null);
+            r(false);
+          }}
+        />
+      )}
+    </Ctx.Provider>
+  );
 }
 
 export function useGame() {

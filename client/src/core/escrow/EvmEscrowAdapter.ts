@@ -38,14 +38,20 @@ interface SettleAuth {
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 60;
 
-async function fetchMatchAuth(matchId: string): Promise<MatchAuth> {
+async function fetchMatchAuth(matchId: string, walletAddress: string): Promise<MatchAuth> {
   const res = await fetch(apiUrl("/api/oracle/match-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ matchId }),
+    // walletAddress is required by the anti-cheat L1 captcha gate.
+    body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await res.json().catch(() => ({ error: "Invalid response" }));
-  if (!res.ok) throw new Error(data?.error || `match-auth HTTP ${res.status}`);
+  if (!res.ok) {
+    const err: any = new Error(data?.error || `match-auth HTTP ${res.status}`);
+    err.status = res.status;
+    err.body = data;
+    throw err;
+  }
   return data as MatchAuth;
 }
 
@@ -99,19 +105,19 @@ export class EvmEscrowAdapter {
       return false;
     }
 
-    let auth: MatchAuth;
-    try {
-      auth = await fetchMatchAuth(matchId);
-    } catch (e: any) {
-      console.error(`[EvmEscrow] match-auth failed:`, e.message);
-      return false;
-    }
-
     const account = getAccount(wagmiConfig);
     if (!account.address) {
       console.error(`[EvmEscrow] No connected wallet`);
       return false;
     }
+    let auth: MatchAuth;
+    try {
+      auth = await fetchMatchAuth(matchId, account.address);
+    } catch (e: any) {
+      console.error(`[EvmEscrow] match-auth failed:`, e.message);
+      return false;
+    }
+
     const me = account.address.toLowerCase();
     if (me !== auth.player1.toLowerCase() && me !== auth.player2.toLowerCase()) {
       console.error(`[EvmEscrow] connected wallet ${me} is not in this match`);

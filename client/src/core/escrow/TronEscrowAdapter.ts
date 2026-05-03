@@ -25,14 +25,20 @@ interface TronDepositAuth {
   types: Record<string, Array<{ name: string; type: string }>>;
 }
 
-async function fetchDepositAuth(matchId: string): Promise<TronDepositAuth> {
+async function fetchDepositAuth(matchId: string, walletAddress: string): Promise<TronDepositAuth> {
   const res = await fetch(apiUrl("/api/tron/deposit-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ matchId }),
+    // walletAddress is required by the anti-cheat L1 captcha gate.
+    body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await res.json().catch(() => ({ error: "Invalid response" }));
-  if (!res.ok) throw new Error(data?.error || `deposit-auth HTTP ${res.status}`);
+  if (!res.ok) {
+    const err: any = new Error(data?.error || `deposit-auth HTTP ${res.status}`);
+    err.status = res.status;
+    err.body = data;
+    throw err;
+  }
   return data as TronDepositAuth;
 }
 
@@ -163,7 +169,7 @@ export class TronEscrowAdapter {
 
     let auth: TronDepositAuth;
     try {
-      auth = await fetchDepositAuth(matchId);
+      auth = await fetchDepositAuth(matchId, me);
     } catch (e: any) {
       console.error(`[TronEscrow] deposit-auth failed:`, e?.message || e);
       return false;

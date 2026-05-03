@@ -14,6 +14,13 @@ import { randomBytes, timingSafeEqual } from "crypto";
 import { rlTight, rlMedium, rlLoose } from "./security/rateLimit";
 import { getMatchmakingCooldownRemainingMs } from "./security/socketLimits";
 import {
+  generateChallenge,
+  verifyChallenge,
+  checkDepositCaptcha,
+  isWalletCaptchaVerified,
+  getCaptchaCooldownRemainingMs,
+} from "./security/captcha";
+import {
   getAbuseCountersStatus,
   recordMatchmakingCooldownRejection,
 } from "./security/abuseCounters";
@@ -63,6 +70,96 @@ export async function registerRoutes(
   app: Express,
   io: SocketIOServer
 ): Promise<Server> {
+
+  // ============================================================
+  // Anti-cheat L1 — Slider/puzzle captcha
+  // ============================================================
+  // POST /api/captcha/challenge { walletAddress } — issues a fresh
+  // challenge unless the wallet is currently in fail-cooldown. Verified
+  // wallets receive {alreadyVerified:true} so the client can skip
+  // showing the modal. Rate-limited (rlTight) to limit challenge churn
+  // from a single IP.
+  app.post("/api/captcha/challenge", rlTight, async (req, res) => {
+    const { walletAddress } = (req.body ?? {}) as { walletAddress?: string };
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress required" });
+    }
+    const cooldownMs = await getCaptchaCooldownRemainingMs(walletAddress);
+    if (cooldownMs > 0) {
+      return res.status(429).json({
+        error: "captcha_cooldown",
+        message: "Too many tries — please wait and try again.",
+        retryAfterMs: cooldownMs,
+        retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
+      });
+    }
+    if (await isWalletCaptchaVerified(walletAddress)) {
+      return res.status(200).json({ alreadyVerified: true });
+    }
+    try {
+      const challenge = await generateChallenge({ wallet: walletAddress });
+      return res.status(200).json(challenge);
+    } catch (err: any) {
+      console.error("[captcha/challenge] failed:", err?.message || err);
+      return res.status(503).json({
+        error: "captcha_unavailable",
+        message:
+          "Verification is temporarily unavailable. Please try again shortly.",
+      });
+    }
+  });
+
+  // POST /api/captcha/verify { challengeId, slotX, motionSamples }
+  // Returns {ok:true} on success or a typed failure with optional cooldown
+  // info if the wallet has hit the failure threshold.
+  app.post("/api/captcha/verify", rlTight, async (req, res) => {
+    const { challengeId, slotX, motionSamples } = (req.body ?? {}) as {
+      challengeId?: string;
+      slotX?: number;
+      motionSamples?: Array<{ t: number; x: number }>;
+    };
+    if (
+      !challengeId ||
+      typeof challengeId !== "string" ||
+      typeof slotX !== "number" ||
+      !Array.isArray(motionSamples)
+    ) {
+      return res.status(400).json({ error: "bad params" });
+    }
+    const result = await verifyChallenge({
+      challengeId,
+      slotX,
+      motionSamples: motionSamples.map((s) => ({
+        t: Number(s.t),
+        x: Number(s.x),
+      })),
+    });
+    if (result.ok) {
+      return res.status(200).json({ ok: true });
+    }
+    // If this failure tipped the wallet into cooldown, surface that so
+    // the client renders "Too many tries — please wait 15 minutes."
+    let cooldownMs = 0;
+    if (result.wallet) {
+      cooldownMs = await getCaptchaCooldownRemainingMs(result.wallet);
+    }
+    if (cooldownMs > 0) {
+      return res.status(429).json({
+        ok: false,
+        error: "captcha_cooldown",
+        reason: result.reason,
+        message: "Too many tries — please wait and try again.",
+        retryAfterMs: cooldownMs,
+        retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
+      });
+    }
+    return res.status(400).json({
+      ok: false,
+      error: "captcha_failed",
+      reason: result.reason,
+      message: "Verification failed. Please try again.",
+    });
+  });
 
   app.post("/api/find-match", rlTight, async (req, res) => {
     const { game, asset, stake, socketId, walletAddress } = (req.body ?? {}) as Partial<FindMatchBody>;
@@ -824,10 +921,27 @@ export async function registerRoutes(
    * pull the same auth (cached in Redis) for a given match.
    */
   app.post("/api/oracle/match-auth", rlMedium, async (req, res) => {
-    const { matchId } = req.body ?? {};
+    const { matchId, walletAddress } = req.body ?? {};
 
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
+    }
+
+    // Anti-cheat L1: deposit-initiation captcha gate. The wallet that's
+    // about to spend money must have proven humanity once. We check the
+    // caller's own wallet (one of addr1/addr2) so each player is gated
+    // independently. Missing wallet ⇒ block — the client must send it
+    // (legacy clients without this field are blocked by design).
+    if (typeof walletAddress === "string" && walletAddress) {
+      const gate = await checkDepositCaptcha(walletAddress);
+      if (!gate.ok) {
+        return res.status(gate.status).json(gate.body);
+      }
+    } else {
+      return res.status(412).json({
+        error: "captcha_required",
+        message: "Please complete the slider verification before depositing.",
+      });
     }
 
     try {
@@ -953,9 +1067,22 @@ export async function registerRoutes(
    * consistent nonces during the deposit window.
    */
   app.post("/api/tron/deposit-auth", rlMedium, async (req, res) => {
-    const { matchId } = req.body ?? {};
+    const { matchId, walletAddress } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
+    }
+
+    // Anti-cheat L1 deposit gate (see oracle/match-auth for rationale).
+    if (typeof walletAddress === "string" && walletAddress) {
+      const gate = await checkDepositCaptcha(walletAddress);
+      if (!gate.ok) {
+        return res.status(gate.status).json(gate.body);
+      }
+    } else {
+      return res.status(412).json({
+        error: "captcha_required",
+        message: "Please complete the slider verification before depositing.",
+      });
     }
 
     try {
@@ -1537,9 +1664,22 @@ export async function registerRoutes(
    * first Deposit message. We just return the BOC the player must send.
    */
   app.post("/api/ton/deposit-info", rlMedium, async (req, res) => {
-    const { matchId } = req.body ?? {};
+    const { matchId, walletAddress } = req.body ?? {};
     if (!matchId || typeof matchId !== "string") {
       return res.status(400).json({ error: "Invalid matchId" });
+    }
+
+    // Anti-cheat L1 deposit gate (see oracle/match-auth for rationale).
+    if (typeof walletAddress === "string" && walletAddress) {
+      const gate = await checkDepositCaptcha(walletAddress);
+      if (!gate.ok) {
+        return res.status(gate.status).json(gate.body);
+      }
+    } else {
+      return res.status(412).json({
+        error: "captcha_required",
+        message: "Please complete the slider verification before depositing.",
+      });
     }
     // Off-chain pause kill-switch: TON has no oracle signature on the
     // deposit (the contract auto-creates the match on the first
