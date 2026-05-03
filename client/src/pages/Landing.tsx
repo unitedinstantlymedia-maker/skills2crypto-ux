@@ -60,10 +60,10 @@ export default function Landing() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.5 }}
-        className="flex flex-col gap-4 w-full max-w-xs"
+        className="flex flex-col gap-4 w-full max-w-xs mx-auto"
       >
-        <div className="flex items-center gap-3 w-full">
-          <Link href="/games" className="flex-1">
+        <div className="flex items-center justify-center gap-3 w-full">
+          <Link href="/games" className="flex-1 min-w-0">
             <Button
               className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
               data-testid="button-play-now"
@@ -72,15 +72,15 @@ export default function Landing() {
             </Button>
           </Link>
 
-          <Link href="/tournaments" className="flex-1">
+          <Link href="/tournaments" className="flex-1 min-w-0">
             <Button
               data-testid="button-tournaments"
               className="w-full h-14 text-lg font-display font-bold uppercase tracking-widest hover:brightness-110"
               style={{
-                backgroundColor: "#FFB300",
+                backgroundColor: "#FFE14F",
                 color: "#1a1100",
                 boxShadow:
-                  "0 0 12px rgba(255,179,0,0.85), 0 0 24px rgba(255,170,40,0.55), inset 0 0 8px rgba(255,220,120,0.45)",
+                  "0 0 12px rgba(255,225,79,0.9), 0 0 26px rgba(255,235,120,0.55), inset 0 0 10px rgba(255,245,180,0.55)",
               }}
             >
               {t('Tournaments', 'Tournaments')}
