@@ -434,6 +434,16 @@ interface TetrisPlayerState {
   startedAt: number;
   violations: number;
   reportedGameOver: boolean;
+  // Set true the first time we accept a tetris-state packet from this
+  // player. Used to gate `tetris-game-over`: a player that has never
+  // submitted any authoritative gameplay snapshot cannot legitimately
+  // claim they lost. NOTE: this is independent of score/lines because
+  // a real top-out at 0 cleared lines is possible.
+  hasAcceptedState: boolean;
+  // Latest accepted board so `tetris-game-over` can re-check the
+  // plausibility of the loser's claim (top of board congested) without
+  // trusting any payload on the game-over event itself.
+  lastBoard: (string | null)[][] | null;
 }
 
 interface TetrisRoom {
@@ -1431,6 +1441,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
           startedAt: nowTs,
           violations: 0,
           reportedGameOver: false,
+          hasAcceptedState: false,
+          lastBoard: null,
         });
       }
 
@@ -1560,6 +1572,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       playerState.lastLines = data.lines;
       playerState.lastLevel = data.level;
       playerState.lastUpdateAt = now;
+      playerState.lastBoard = data.board;
+      playerState.hasAcceptedState = true;
       // Decay violations on a clean update so brief network glitches
       // don't accumulate into a forfeit over a long match.
       if (playerState.violations > 0) playerState.violations--;
@@ -1590,20 +1604,24 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const playerState = room.players.get(loserId);
       if (!playerState) return;
 
-      // gameOver should be visually plausible. If the player's last
-      // accepted snapshot doesn't show a congested top of the board,
-      // count this as an anti-cheat violation rather than honouring it
-      // as a real loss. (We can't re-check the board here because this
-      // event has no payload by design — the latest authoritative board
-      // is already on `playerState`/`opponent-tetris-state`.)
-      if (playerState.lastLines === 0 && playerState.lastScore === 0) {
-        // No real gameplay yet — refuse to accept a self-loss claim,
-        // which prevents an "instant-forfeit" cheat where one player
-        // tries to weaponise the opponent's stake at zero risk.
+      // Plausibility gate: the loser must have at least one accepted
+      // tetris-state snapshot AND that snapshot's board must look like
+      // a real top-out (top rows congested). This blocks the
+      // "instant-forfeit" cheat where a fresh socket fires
+      // tetris-game-over before any gameplay, while still allowing a
+      // legitimate top-out at score=0/lines=0 (possible in real Tetris
+      // when no lines are cleared before the board fills).
+      const plausibleTopOut =
+        playerState.hasAcceptedState &&
+        playerState.lastBoard !== null &&
+        tetrisBoardLooksGameOver(playerState.lastBoard);
+      if (!plausibleTopOut) {
         playerState.violations++;
         console.warn(
-          "[socket] tetris-game-over rejected (no gameplay yet):",
-          data.matchId, loserId, "violations=", playerState.violations
+          "[socket] tetris-game-over rejected (implausible top-out):",
+          data.matchId, loserId,
+          "hasAcceptedState=", playerState.hasAcceptedState,
+          "violations=", playerState.violations
         );
         if (playerState.violations >= TETRIS_VIOLATION_THRESHOLD) {
           const winnerId = tetrisOpponentId(room, loserId);

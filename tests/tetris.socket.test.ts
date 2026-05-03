@@ -180,16 +180,17 @@ describe("tetris socket — anti-cheat L1", () => {
   it("tetris-game-over identity comes from socket, not payload (client-supplied playerId is ignored)", async () => {
     const { matchId, a, b, aId, bId } = await startMatch();
     try {
-      // Build a small history so the no-gameplay-yet guard doesn't fire.
+      // Submit a plausibly-game-over snapshot so the top-out gate accepts.
+      const ack = waitFor(b, "opponent-tetris-state", 1500);
       a.emit("tetris-state", {
         matchId,
-        board: emptyBoard(),
+        board: topFilledBoard(),
         score: 100,
         lines: 1,
         level: 1,
-        gameOver: false,
+        gameOver: true,
       });
-      await waitFor(b, "opponent-tetris-state", 1500);
+      await ack;
 
       // A claims B is the loser. Server must IGNORE that and treat A
       // (the sender) as the loser.
@@ -203,6 +204,63 @@ describe("tetris socket — anti-cheat L1", () => {
       expect(r.loserId).toBe(aId);
       expect(r.winnerId).toBe(bId);
       expect(r.reason).toBe("board_filled");
+    } finally {
+      a.disconnect();
+      b.disconnect();
+    }
+  });
+
+  it("legitimate top-out at score=0 / lines=0 is accepted as a real loss", async () => {
+    // A real Tetris top-out can happen before any line is ever cleared,
+    // so the gate must rely on board-plausibility, not score/lines.
+    const { matchId, a, b, aId, bId } = await startMatch();
+    try {
+      const ack = waitFor(b, "opponent-tetris-state", 1500);
+      a.emit("tetris-state", {
+        matchId,
+        board: topFilledBoard(),
+        score: 0,
+        lines: 0,
+        level: 1,
+        gameOver: true,
+      });
+      await ack;
+
+      const result = waitFor<{ winnerId: string; loserId: string; reason: string }>(
+        a,
+        "game-result",
+        1500
+      );
+      a.emit("tetris-game-over", { matchId });
+      const r = await result;
+      expect(r.loserId).toBe(aId);
+      expect(r.winnerId).toBe(bId);
+      expect(r.reason).toBe("board_filled");
+    } finally {
+      a.disconnect();
+      b.disconnect();
+    }
+  });
+
+  it("tetris-game-over with a non-congested last board is rejected (no game-result)", async () => {
+    const { matchId, a, b } = await startMatch();
+    try {
+      // Establish gameplay with an empty-top board.
+      const ack = waitFor(b, "opponent-tetris-state", 1500);
+      a.emit("tetris-state", {
+        matchId,
+        board: emptyBoard(),
+        score: 100,
+        lines: 1,
+        level: 1,
+        gameOver: false,
+      });
+      await ack;
+
+      // Now claim game-over even though the last accepted board is empty up top.
+      const noResult = expectNoEvent(a, "game-result", 300);
+      a.emit("tetris-game-over", { matchId });
+      await noResult;
     } finally {
       a.disconnect();
       b.disconnect();
