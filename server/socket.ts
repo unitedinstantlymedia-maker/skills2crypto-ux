@@ -1,7 +1,7 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { db } from "./db";
-import { matches } from "../shared/schema";
+import { matches, matchMoves } from "../shared/schema";
 import {
   applyMove as chessApplyMove,
   detectTerminal as chessDetectTerminal,
@@ -102,6 +102,87 @@ interface GameResult {
 const gameResults = new Map<string, GameResult>();
 
 const FEE_RATE = 0.03;
+
+// ---------------------------------------------------------------------------
+// Anti-cheat L1 — durable move history (Task #43).
+//
+// recordMatchMove appends one row to `match_moves` for every move that the
+// authoritative server-side validator has just accepted. Two design rules:
+//
+//   1. The socket hot path must NEVER be blocked by Postgres. We schedule
+//      the insert with setImmediate and never await it; transient DB
+//      latency or outages cannot stall live gameplay.
+//   2. Every row carries a 1-based ply derived from in-memory state, so
+//      ordering is correct even if writes complete out of order. The
+//      cache also lets us compute msSinceLastMove without a round-trip.
+//
+// On insert failure we retry with exponential backoff up to a small bound
+// and then drop the row with a warning — losing one audit row is strictly
+// preferable to crashing the game loop.
+// ---------------------------------------------------------------------------
+interface MoveLogState {
+  nextPly: number;
+  lastTsMs: number | null;
+}
+const moveLogState = new Map<string, MoveLogState>();
+const MOVE_LOG_MAX_RETRIES = 3;
+const MOVE_LOG_RETRY_BASE_MS = 100;
+
+function recordMatchMove(
+  matchId: string,
+  gameType: string,
+  actorId: string,
+  payload: Record<string, unknown>,
+): void {
+  if (!matchId || !actorId) return;
+  let state = moveLogState.get(matchId);
+  if (!state) {
+    state = { nextPly: 1, lastTsMs: null };
+    moveLogState.set(matchId, state);
+  }
+  const nowMs = Date.now();
+  const ply = state.nextPly++;
+  const msSinceLastMove = state.lastTsMs == null ? null : Math.max(0, nowMs - state.lastTsMs);
+  state.lastTsMs = nowMs;
+
+  const row = {
+    matchId,
+    gameType,
+    ply,
+    actorId,
+    payload,
+    serverTimestampMs: nowMs,
+    msSinceLastMove,
+  };
+
+  setImmediate(() => {
+    void (async () => {
+      let attempt = 0;
+      while (attempt < MOVE_LOG_MAX_RETRIES) {
+        try {
+          await db.insert(matchMoves).values(row);
+          return;
+        } catch (err: any) {
+          attempt++;
+          if (attempt >= MOVE_LOG_MAX_RETRIES) {
+            console.warn(
+              "[move-log] insert failed after retries:",
+              matchId, gameType, "ply=", ply,
+              err?.message || err,
+            );
+            return;
+          }
+          await new Promise((r) => setTimeout(r, MOVE_LOG_RETRY_BASE_MS * (1 << (attempt - 1))));
+        }
+      }
+    })();
+  });
+}
+
+// Exposed for tests; never call from the socket hot path.
+export function _resetMatchMoveLogStateForTests(): void {
+  moveLogState.clear();
+}
 
 async function storeGameResult(
   matchId: string,
@@ -239,12 +320,6 @@ async function storeGameResult(
       });
       console.log("[socket] match saved to database:", matchId);
 
-      // Match has fully resolved — drop it from the per-process tracking
-      // sets so they don't leak across the lifetime of the server.
-      gameStartedMatches.delete(matchId);
-      gameMovesRecorded.delete(matchId);
-      fundedMatches.delete(matchId);
-
       settleMatchOnChain(matchId, winnerId, resultType, reason).catch(err => {
         console.error("[socket] on-chain settlement failed:", matchId, err?.message || err);
       });
@@ -254,6 +329,15 @@ async function storeGameResult(
   } catch (err) {
     console.error("[socket] failed to save match to database:", err);
   }
+
+  // Match has fully resolved (or attempted to) — drop per-process tracking
+  // sets so they don't leak across the lifetime of the server. We do this
+  // OUTSIDE the matchData-found branch so a missing Redis hash or a DB
+  // failure during save still releases the in-memory state.
+  gameStartedMatches.delete(matchId);
+  gameMovesRecorded.delete(matchId);
+  fundedMatches.delete(matchId);
+  moveLogState.delete(matchId);
 
   return { result, isFirst: true };
 }
@@ -1177,6 +1261,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       fundedMatches.delete(matchId);
       gameStartedMatches.delete(matchId);
       gameMovesRecorded.delete(matchId);
+      moveLogState.delete(matchId);
     });
 
     socket.on("chess-move", (move: ChessMoveInput) => {
@@ -1255,6 +1340,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       room.lastMove = { from: result.applied.from, to: result.applied.to, san: result.applied.san };
       room.lastTickAt = now;
       markGameplayActivity(matchId);
+
+      recordMatchMove(matchId, 'chess', socketInfo.playerId, {
+        from: result.applied.from,
+        to: result.applied.to,
+        promotion: result.applied.promotion ?? null,
+        san: result.applied.san,
+        fen: result.applied.fen,
+        color: player.color,
+      });
 
       console.log(
         "[socket] chess-move", matchId, result.applied.from, result.applied.to, result.applied.san, "by", player.color
@@ -1582,6 +1676,16 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       // sanity validation has passed.
       markGameplayActivity(data.matchId);
 
+      // Tetris is snapshot-based, not move-based; we still log one row
+      // per accepted snapshot so the audit trail captures the score /
+      // lines / level trajectory used by the L1 anti-cheat bands.
+      recordMatchMove(data.matchId, 'tetris', playerId, {
+        score: data.score,
+        lines: data.lines,
+        level: data.level,
+        gameOver: data.gameOver,
+      });
+
       socket.to(`tetris:${data.matchId}`).emit('opponent-tetris-state', {
         board: data.board,
         score: data.score,
@@ -1835,6 +1939,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       }
 
       markGameplayActivity(data.matchId);
+
+      recordMatchMove(data.matchId, 'checkers', socketInfo.playerId, {
+        from: legal.from,
+        to: legal.to,
+        captures: legal.captures,
+        promoted,
+        turnEnded,
+        color: player.color,
+      });
 
       io.to(`checkers:${data.matchId}`).emit('opponent-checkers-move', {
         from: legal.from,
@@ -2170,6 +2283,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       console.log("[socket] battleship-attack", data.matchId, data.row, data.col, hit ? "HIT" : "MISS", sunkShip?.name || "");
 
+      recordMatchMove(data.matchId, 'battleship', socketInfo.playerId, {
+        row: data.row,
+        col: data.col,
+        hit,
+        sunkShip: sunkShip ? { id: sunkShip.id, name: sunkShip.name } : null,
+        allSunk,
+      });
+
       socket.emit('attack-result', {
         row: data.row,
         col: data.col,
@@ -2399,6 +2520,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       // The starter's lead requirement is satisfied — clear the gate.
       room.starterTile = null;
 
+      recordMatchMove(data.matchId, 'dominoes', socketInfo.playerId, {
+        type: 'place',
+        tileA: wantA,
+        tileB: wantB,
+        end: data.end,
+        role: player.role,
+      });
+
       const winnerByEmpty = player.hand.length === 0;
 
       if (winnerByEmpty) {
@@ -2461,6 +2590,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       markGameplayActivity(data.matchId);
       room.consecutivePasses += 1;
+
+      recordMatchMove(data.matchId, 'dominoes', socketInfo.playerId, {
+        type: 'pass',
+        role: player.role,
+        consecutivePasses: room.consecutivePasses,
+      });
 
       // Two consecutive passes = blocked board → settle by lowest pip count.
       if (room.consecutivePasses >= 2) {
@@ -2728,6 +2863,13 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       room.lastTickAt = Date.now();
 
       markGameplayActivity(data.matchId);
+
+      recordMatchMove(data.matchId, 'xiangqi', socketInfo.playerId, {
+        from: data.from,
+        to: data.to,
+        wasCapture,
+        color: player.color,
+      });
 
       // Opponent-only broadcast: the mover already applied the move
       // optimistically; echoing it would double-advance their engine.

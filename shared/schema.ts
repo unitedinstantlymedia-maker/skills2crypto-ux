@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, varchar, real, bigint } from "drizzle-orm/pg-core";
+import { pgTable, varchar, real, bigint, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -26,6 +26,34 @@ export const insertMatchSchema = createInsertSchema(matches).omit({
 
 export type InsertMatch = z.infer<typeof insertMatchSchema>;
 export type Match = typeof matches.$inferSelect;
+
+// Anti-cheat L1 — durable per-move audit log. One row is appended for
+// every server-validated move in chess, checkers, dominoes, battleship,
+// tetris, and xiangqi. Writes are fire-and-forget from the socket hot
+// path so a transient DB outage cannot stall live gameplay; the index
+// on (match_id, ply) supports the read endpoint and downstream replay.
+export const matchMoves = pgTable(
+  "match_moves",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    matchId: varchar("match_id").notNull(),
+    gameType: varchar("game_type", { length: 20 }).notNull(),
+    ply: integer("ply").notNull(),
+    actorId: varchar("actor_id").notNull(),
+    payload: jsonb("payload").notNull(),
+    serverTimestampMs: bigint("server_timestamp_ms", { mode: "number" }).notNull(),
+    msSinceLastMove: integer("ms_since_last_move"),
+  },
+  (t) => ({
+    // UNIQUE so a retried insert (the bounded-retry loop in
+    // recordMatchMove) cannot create a duplicate ply if a previous
+    // attempt actually committed before the client saw the error.
+    matchPlyIdx: uniqueIndex("match_moves_match_ply_idx").on(t.matchId, t.ply),
+  }),
+);
+
+export type MatchMove = typeof matchMoves.$inferSelect;
+export type InsertMatchMove = typeof matchMoves.$inferInsert;
 
 export const ChallengeStatusEnum = z.enum(["pending", "accepted", "expired", "cancelled", "completed"]);
 export type ChallengeStatus = z.infer<typeof ChallengeStatusEnum>;

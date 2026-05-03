@@ -1,12 +1,12 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import type { Server as SocketIOServer } from "socket.io";
-import { eq, or, desc } from "drizzle-orm";
+import { eq, or, desc, asc, and } from "drizzle-orm";
 import { findOrCreateMatch } from "./matchmaking/redisMatchmaking";
 import { checkSystemAddress, getSystemAddressesStatus } from "./security/systemAddresses";
 import type { Game, Asset } from "./core/types";
 import { db } from "./db";
-import { matches, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
+import { matches, matchMoves, type ChallengeData, type ChallengeStatus, type ChallengeHistoryEntry } from "../shared/schema";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
 import { randomBytes, timingSafeEqual } from "crypto";
@@ -654,6 +654,86 @@ export async function registerRoutes(
     } catch (err) {
       console.error("fetch history failed:", err);
       return res.status(200).json([]);
+    }
+  });
+
+  // Anti-cheat L1 — durable move history (Task #43).
+  //
+  // Returns the chronological list of server-validated moves for a match,
+  // gated to the two real participants. Identity is asserted via the
+  // `walletAddress` query param (the same wallet the player used to enter
+  // the match). We resolve the participant set from Redis first (live and
+  // recently-finished matches) and fall back to the `matches` row in
+  // Postgres so historical lookups still work after the Redis hash TTLs.
+  app.get("/api/matches/:matchId/moves", rlLoose, async (req, res) => {
+    const { matchId } = req.params;
+    const walletAddress = typeof req.query.walletAddress === "string"
+      ? req.query.walletAddress
+      : "";
+
+    if (!matchId || !walletAddress) {
+      return res.status(400).json({ error: "matchId and walletAddress required" });
+    }
+
+    let player1Id: string | null = null;
+    let player2Id: string | null = null;
+    try {
+      const md = await redis.hgetall(`match:${matchId}`);
+      if (md && (md.addr1 || md.player1Id)) {
+        player1Id = String(md.addr1 || md.player1Id);
+        player2Id = String(md.addr2 || md.player2Id);
+      }
+    } catch (err: any) {
+      console.warn("[moves] redis lookup failed:", err?.message || err);
+    }
+
+    if (!player1Id || !player2Id) {
+      try {
+        const rows = await db.select({
+          player1Id: matches.player1Id,
+          player2Id: matches.player2Id,
+        })
+          .from(matches)
+          .where(eq(matches.matchId, matchId))
+          .limit(1);
+        if (rows.length > 0) {
+          player1Id = rows[0].player1Id;
+          player2Id = rows[0].player2Id;
+        }
+      } catch (err: any) {
+        console.error("[moves] match lookup failed:", err?.message || err);
+        return res.status(500).json({ error: "lookup_failed" });
+      }
+    }
+
+    if (!player1Id || !player2Id) {
+      return res.status(404).json({ error: "match_not_found" });
+    }
+
+    if (walletAddress !== player1Id && walletAddress !== player2Id) {
+      return res.status(403).json({ error: "not_a_participant" });
+    }
+
+    try {
+      const rows = await db.select()
+        .from(matchMoves)
+        .where(eq(matchMoves.matchId, matchId))
+        .orderBy(asc(matchMoves.ply))
+        .limit(5000);
+      return res.status(200).json({
+        matchId,
+        moves: rows.map((r) => ({
+          ply: r.ply,
+          gameType: r.gameType,
+          actorId: r.actorId,
+          payload: r.payload,
+          serverTimestampMs: r.serverTimestampMs,
+          msSinceLastMove: r.msSinceLastMove,
+        })),
+      });
+    } catch (err: any) {
+      console.error("[moves] fetch failed:", err?.message || err);
+      return res.status(500).json({ error: "fetch_failed" });
     }
   });
 
