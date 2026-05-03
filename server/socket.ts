@@ -63,6 +63,17 @@ import {
   releaseSocketSlot,
   setMatchmakingCooldown,
 } from "./security/socketLimits";
+import { recordSocketCapRejection } from "./security/abuseCounters";
+
+// Per-socket bookkeeping for the IP cap. A WeakMap keeps the data
+// strongly typed without colliding with socket.io's existing
+// SocketData generic and without `any` casts. Entries are GC'd when
+// the Socket is collected after disconnect.
+interface SocketLimiterData {
+  clientIp: string;
+  slotAcquired: boolean;
+}
+const socketLimiterState = new WeakMap<Socket, SocketLimiterData>();
 
 interface SocketOptions {
   isProd: boolean;
@@ -1239,19 +1250,35 @@ const SHIP_CONFIGS: { id: string; name: string; size: number }[] = [
   { id: 'destroyer', name: 'Destroyer', size: 2 },
 ];
 
-// Resolve the real client IP for a Socket.io handshake. Express has
-// `trust proxy` set to 1 in server/index.ts, but Socket.io does NOT
-// inherit that — we have to walk X-Forwarded-For ourselves. Take the
-// LEFTMOST entry (first hop = real client) when present, else fall
-// back to the raw socket address.
+// Resolve the real client IP for a Socket.io handshake.
+//
+// Express in server/index.ts uses `app.set("trust proxy", 1)`, which
+// means it trusts EXACTLY ONE reverse-proxy hop and uses the IP that
+// hop appended to X-Forwarded-For (the rightmost entry) as `req.ip`.
+// Socket.io does NOT inherit that setting, so we have to mirror it
+// ourselves — and critically we must NOT trust the LEFTMOST XFF entry,
+// because anything to the left of the trusted proxy was supplied by
+// the client and is freely spoofable, which would let a bot rotate
+// fake IPs and bypass the per-IP socket cap.
+//
+// Algorithm (mirrors express trust-proxy=1):
+//   - If a single trusted reverse proxy is in front (XFF present),
+//     take the RIGHTMOST entry — that's what the proxy itself wrote
+//     based on the TCP peer it observed.
+//   - Otherwise fall back to the raw TCP-level handshake address.
 function resolveSocketClientIp(socket: Socket): string {
   const xff = socket.handshake.headers["x-forwarded-for"];
+  let entries: string[] = [];
   if (typeof xff === "string" && xff.length > 0) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
+    entries = xff.split(",").map((s) => s.trim()).filter(Boolean);
   } else if (Array.isArray(xff) && xff.length > 0) {
-    const first = String(xff[0]).split(",")[0]?.trim();
-    if (first) return first;
+    entries = xff
+      .flatMap((v) => String(v).split(","))
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (entries.length > 0) {
+    return entries[entries.length - 1];
   }
   return socket.handshake.address || "unknown";
 }
@@ -1275,15 +1302,17 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
   // there's no proxy header.
   io.use(async (socket, next) => {
     const ip = resolveSocketClientIp(socket);
-    (socket as any).data = (socket as any).data || {};
-    (socket as any).data.clientIp = ip;
+    socketLimiterState.set(socket, { clientIp: ip, slotAcquired: false });
     const slot = await acquireSocketSlot(ip);
     if (!slot.ok) {
+      recordSocketCapRejection();
       console.warn(
         `[socket] rejected handshake — ip=${ip} concurrent=${slot.current} cap=${slot.max}`
       );
-      const err = new Error("too_many_connections");
-      (err as any).data = {
+      const err: Error & { data?: Record<string, unknown> } = new Error(
+        "too_many_connections"
+      );
+      err.data = {
         code: "too_many_connections",
         message:
           "Too many concurrent connections from your network. Close extra tabs and try again.",
@@ -1291,7 +1320,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       };
       return next(err);
     }
-    (socket as any).data.slotAcquired = true;
+    socketLimiterState.set(socket, { clientIp: ip, slotAcquired: true });
     next();
   });
 
@@ -3333,9 +3362,10 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       console.log("[socket] disconnected", socket.id);
       // Release the per-IP slot first thing so a client that opens and
       // closes connections in a tight loop never gets permanently capped.
-      const data = (socket as any).data || {};
-      if (data.slotAcquired && data.clientIp) {
-        releaseSocketSlot(data.clientIp).catch(() => {});
+      const limiter = socketLimiterState.get(socket);
+      if (limiter?.slotAcquired && limiter.clientIp) {
+        releaseSocketSlot(limiter.clientIp).catch(() => {});
+        socketLimiterState.delete(socket);
       }
       const socketInfo = socketToPlayer.get(socket.id);
 

@@ -8,6 +8,7 @@
 // The HTTP rate limiter does the same; matching that behaviour keeps
 // matchmaking up during transient Upstash incidents.
 
+import type { SetCommandOptions } from "@upstash/redis";
 import { redis } from "../redis";
 
 const DEFAULT_SOCKET_MAX_PER_IP = 8;
@@ -106,7 +107,8 @@ export async function setMatchmakingCooldown(wallet: string): Promise<void> {
   const ttlMs = getMatchmakingCooldownMs();
   if (ttlMs <= 0) return;
   try {
-    await redis.set(cooldownKey(wallet), "1", { px: ttlMs } as any);
+    const opts: SetCommandOptions = { px: ttlMs };
+    await redis.set(cooldownKey(wallet), "1", opts);
   } catch (e: any) {
     console.warn(
       `[socketLimits] redis set cooldown failed for ${wallet}: ${e?.message || e}`
@@ -121,7 +123,7 @@ export async function getMatchmakingCooldownRemainingMs(
   if (!wallet) return 0;
   const key = cooldownKey(wallet);
   try {
-    const pttl = await (redis as any).pttl(key);
+    const pttl = await redis.pttl(key);
     if (typeof pttl === "number" && pttl > 0) return pttl;
     return 0;
   } catch {

@@ -13,6 +13,10 @@ import { nanoid } from "nanoid";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { rlTight, rlMedium, rlLoose } from "./security/rateLimit";
 import { getMatchmakingCooldownRemainingMs } from "./security/socketLimits";
+import {
+  getAbuseCountersStatus,
+  recordMatchmakingCooldownRejection,
+} from "./security/abuseCounters";
 import { isOraclePaused, setPause, getPauseStatus, type PauseScope } from "./security/oraclePause";
 import { getOpsAlertStatus } from "./security/opsAlert";
 import { getReconciliationStatus } from "./security/reconciliation";
@@ -95,6 +99,7 @@ export async function registerRoutes(
       const remainingMs = await getMatchmakingCooldownRemainingMs(walletAddress);
       if (remainingMs > 0) {
         const remainingSec = Math.max(1, Math.ceil(remainingMs / 1000));
+        recordMatchmakingCooldownRejection();
         console.warn(
           `[find-match] cooldown rejected wallet=${walletAddress} remainingMs=${remainingMs}`
         );
@@ -1368,6 +1373,7 @@ export async function registerRoutes(
       pause: pauseState,
       ops: getOpsAlertStatus(),
       reconciliation: getReconciliationStatus(),
+      abuseCounters: getAbuseCountersStatus(),
       timestamp: Date.now(),
     });
   });
