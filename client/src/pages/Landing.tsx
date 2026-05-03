@@ -65,7 +65,7 @@ export default function Landing() {
         <div className="flex items-center justify-center gap-3 w-full">
           <Link href="/games" className="flex-1 min-w-0">
             <Button
-              className="w-full h-14 px-6 text-lg font-display font-bold uppercase tracking-widest bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
+              className="w-full h-14 px-6 text-lg font-display font-bold uppercase tracking-normal bg-primary text-primary-foreground hover:bg-primary/90 border-glow"
               data-testid="button-play-now"
             >
               {t('Play Now', 'Play Now')}
