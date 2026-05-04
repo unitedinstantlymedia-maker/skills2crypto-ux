@@ -45,7 +45,11 @@ export default function Tournaments() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="font-display font-bold text-3xl uppercase tracking-widest text-center text-glow mt-6"
+        className="font-display font-bold text-5xl uppercase tracking-widest text-center text-primary mt-6 leading-none"
+        style={{
+          textShadow:
+            "0 0 14px rgba(0,255,136,0.95), 0 0 32px rgba(0,255,136,0.65), 0 0 56px rgba(0,255,136,0.35)",
+        }}
         data-testid="text-tournaments-title"
       >
         Tournaments
@@ -55,11 +59,11 @@ export default function Tournaments() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.15, duration: 0.5 }}
-        className="font-display font-bold text-sm uppercase tracking-widest text-center leading-relaxed"
+        className="font-display font-bold text-lg uppercase tracking-widest text-center leading-relaxed"
         style={{
-          color: "#FFE14F",
+          color: "#FFC83D",
           textShadow:
-            "0 0 10px rgba(255,225,79,0.85), 0 0 22px rgba(255,200,60,0.45)",
+            "0 0 12px rgba(255,200,60,0.95), 0 0 26px rgba(255,180,40,0.6), 0 0 48px rgba(255,170,30,0.35)",
         }}
         data-testid="text-tournaments-tagline"
       >
@@ -78,11 +82,15 @@ export default function Tournaments() {
         data-testid="card-countdown"
       >
         <div className="flex flex-col items-center gap-1">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-white/80">
+          <div className="font-mono text-xs uppercase tracking-widest text-white/85">
             Next Tournament
           </div>
           <div
-            className="font-display font-bold text-lg uppercase tracking-widest text-glow"
+            className="font-display font-bold text-2xl uppercase tracking-widest text-primary"
+            style={{
+              textShadow:
+                "0 0 12px rgba(0,255,136,0.9), 0 0 26px rgba(0,255,136,0.5)",
+            }}
             data-testid="text-next-game"
           >
             Chess
@@ -147,7 +155,7 @@ export default function Tournaments() {
             className="flex flex-col items-center gap-1.5"
             data-testid={`card-day-${d.name.toLowerCase()}`}
           >
-            <div className="font-mono text-[10px] uppercase tracking-widest text-white/85">
+            <div className="font-mono text-xs uppercase tracking-widest text-white/90">
               {d.day}
             </div>
 
@@ -194,7 +202,7 @@ export default function Tournaments() {
                 </div>
 
                 <div
-                  className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md bg-black/70 border whitespace-nowrap"
+                  className="font-mono text-xs uppercase tracking-wider px-2 py-0.5 rounded-md bg-black/70 border whitespace-nowrap"
                   style={
                     d.active
                       ? { borderColor: "rgba(255,225,79,0.55)", color: "#FFE14F" }
