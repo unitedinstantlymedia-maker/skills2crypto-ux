@@ -103,10 +103,24 @@ async function bootstrap() {
   // FRONTEND (DEV / PROD)
   if (NODE_ENV === "production") {
     // Отдаём собранный фронт (no-op when split-deployed: dist/public absent on Railway)
-    app.use(express.static("dist/public"));
-    app.get("/", (_req, res) => {
-      res.send("skills2crypto API running");
-    });
+    const path = await import("path");
+    const fs = await import("fs");
+    const distDir = path.resolve("dist/public");
+    const indexHtml = path.join(distDir, "index.html");
+    const hasFrontend = fs.existsSync(indexHtml);
+
+    if (hasFrontend) {
+      app.use(express.static(distDir));
+      // SPA fallback: any non-API GET serves index.html so client-side
+      // routes (/lobby, /game, /tournaments, etc.) work on hard-refresh.
+      app.get(/^\/(?!api(?:\/|$)|socket\.io(?:\/|$)|healthz(?:\/|$)|tonconnect-manifest\.json(?:\/|$)).*/, (_req, res) => {
+        res.sendFile(indexHtml);
+      });
+    } else {
+      app.get("/", (_req, res) => {
+        res.send("skills2crypto API running");
+      });
+    }
   } else {
     // Vite middleware в деве
     await setupVite(httpServer, app);
