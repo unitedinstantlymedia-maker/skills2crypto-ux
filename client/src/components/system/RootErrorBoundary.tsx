@@ -98,52 +98,66 @@ export class RootErrorBoundary extends React.Component<Props, State> {
         </div>
 
         {stack && (
-          <details style={{ marginBottom: "12px" }}>
-            <summary style={{ cursor: "pointer", color: "#a1a1aa" }}>
-              Stack trace
-            </summary>
+          <div style={{ marginBottom: "12px" }}>
+            <div style={{ color: "#a1a1aa", marginBottom: "6px" }}>
+              Stack trace:
+            </div>
             <pre
               style={{
                 background: "#1a1a1a",
                 border: "1px solid #3f3f46",
                 borderRadius: "8px",
                 padding: "12px",
-                marginTop: "6px",
                 overflowX: "auto",
-                fontSize: "12px",
+                fontSize: "11px",
                 color: "#d4d4d8",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
+                maxHeight: "300px",
+                overflowY: "auto",
               }}
             >
               {stack}
             </pre>
-          </details>
+          </div>
         )}
 
         {componentStack && (
-          <details style={{ marginBottom: "16px" }}>
-            <summary style={{ cursor: "pointer", color: "#a1a1aa" }}>
-              Component stack
-            </summary>
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ color: "#a1a1aa", marginBottom: "6px" }}>
+              Component stack:
+            </div>
             <pre
               style={{
                 background: "#1a1a1a",
                 border: "1px solid #3f3f46",
                 borderRadius: "8px",
                 padding: "12px",
-                marginTop: "6px",
                 overflowX: "auto",
-                fontSize: "12px",
+                fontSize: "11px",
                 color: "#d4d4d8",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
+                maxHeight: "200px",
+                overflowY: "auto",
               }}
             >
               {componentStack}
             </pre>
-          </details>
+          </div>
         )}
+
+        <div
+          style={{
+            marginBottom: "12px",
+            color: "#71717a",
+            fontSize: "11px",
+            fontFamily: "monospace",
+            wordBreak: "break-all",
+          }}
+        >
+          UA: {typeof navigator !== "undefined" ? navigator.userAgent : "?"}
+        </div>
 
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           <button
