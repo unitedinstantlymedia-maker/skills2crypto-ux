@@ -3,7 +3,7 @@ import { FEE_RATE, NETWORK_FEE_USD_PER_PLAYER, ASSET_PRICES_USD } from "@/config
 import { getCachedAssetFee, ensureFeeSnapshotLoaded } from "@/core/networkFees";
 import { writeContract, waitForTransactionReceipt, getAccount, switchChain, getChainId } from "@wagmi/core";
 import { parseAbi } from "viem";
-import { wagmiConfig } from "@/config/wagmi";
+import { requireWagmiConfig } from "@/config/wagmi";
 import { apiUrl } from "@/lib/api";
 
 const ESCROW_ABI = parseAbi([
@@ -71,11 +71,11 @@ async function fetchSettleAuth(matchId: string): Promise<SettleAuth | null> {
 }
 
 async function ensureChain(targetChainId: number): Promise<boolean> {
-  const current = getChainId(wagmiConfig);
+  const current = getChainId(requireWagmiConfig());
   if (current === targetChainId) return true;
   try {
-    await switchChain(wagmiConfig, { chainId: targetChainId });
-    return getChainId(wagmiConfig) === targetChainId;
+    await switchChain(requireWagmiConfig(), { chainId: targetChainId });
+    return getChainId(requireWagmiConfig()) === targetChainId;
   } catch (e: any) {
     console.error(`[EvmEscrow] chain switch to ${targetChainId} rejected:`, e?.shortMessage || e?.message || e);
     return false;
@@ -105,7 +105,7 @@ export class EvmEscrowAdapter {
       return false;
     }
 
-    const account = getAccount(wagmiConfig);
+    const account = getAccount(requireWagmiConfig());
     if (!account.address) {
       console.error(`[EvmEscrow] No connected wallet`);
       return false;
@@ -129,7 +129,7 @@ export class EvmEscrowAdapter {
     const value = BigInt(auth.stake);
     let txHash: `0x${string}`;
     try {
-      txHash = await writeContract(wagmiConfig, {
+      txHash = await writeContract(requireWagmiConfig(), {
         chainId: auth.chainId,
         address: auth.escrowAddress,
         abi: ESCROW_ABI,
@@ -150,7 +150,7 @@ export class EvmEscrowAdapter {
     }
 
     try {
-      const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: auth.chainId, hash: txHash });
+      const receipt = await waitForTransactionReceipt(requireWagmiConfig(), { chainId: auth.chainId, hash: txHash });
       if (receipt.status !== "success") {
         console.error(`[EvmEscrow] tx reverted on-chain: ${txHash}`);
         return false;
@@ -204,7 +204,7 @@ export class EvmEscrowAdapter {
       return null;
     }
 
-    const account = getAccount(wagmiConfig);
+    const account = getAccount(requireWagmiConfig());
     if (!account.address) {
       console.warn(`[EvmEscrow] no connected wallet — cannot claim`);
       return null;
@@ -212,14 +212,14 @@ export class EvmEscrowAdapter {
     if (!(await ensureChain(auth.chainId))) return null;
 
     try {
-      const txHash = await writeContract(wagmiConfig, {
+      const txHash = await writeContract(requireWagmiConfig(), {
         chainId: auth.chainId,
         address: auth.escrowAddress,
         abi: ESCROW_ABI,
         functionName: "settleMatch",
         args: [auth.matchIdBytes32, auth.winner, auth.reason, auth.oracleSig],
       });
-      const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: auth.chainId, hash: txHash });
+      const receipt = await waitForTransactionReceipt(requireWagmiConfig(), { chainId: auth.chainId, hash: txHash });
       if (receipt.status !== "success") {
         console.error(`[EvmEscrow] settleMatch reverted: ${txHash}`);
         return null;

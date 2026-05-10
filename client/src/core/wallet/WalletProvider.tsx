@@ -4,7 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { mainnet, bsc } from '@reown/appkit/networks';
 import { useAppKit, useAppKitAccount, useAppKitNetwork, useDisconnect as useAppKitDisconnect } from '@reown/appkit/react';
 import { useBalance } from 'wagmi';
-import { wagmiConfig, appKit } from '@/config/wagmi';
+import { wagmiConfig, appKit, isWagmiReady, wagmiInitError } from '@/config/wagmi';
 import { queryClient } from '@/lib/queryClient';
 import { walletStore } from './WalletStore';
 import { NicknameDialog } from '@/components/wallet/NicknameDialog';
@@ -241,7 +241,66 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Degraded fallback provider used when AppKit/wagmi init failed at module
+ * load (e.g. on a mobile WebView with restricted IndexedDB). It supplies a
+ * no-op context so non-wallet pages still render. Connect attempts surface
+ * a clean message instead of crashing the app.
+ */
+function DegradedWalletProvider({ children }: { children: React.ReactNode }) {
+  const showUnavailable = useCallback(() => {
+    const msg =
+      wagmiInitError?.message ||
+      'Wallet features are unavailable on this device.';
+    if (typeof window !== 'undefined') {
+      // eslint-disable-next-line no-alert
+      window.alert(`Wallet unavailable: ${msg}`);
+    }
+  }, []);
+
+  const contextValue: RealWalletContextValue = {
+    openConnectDialog: showUnavailable,
+    disconnectAll: () => {},
+    evmAddress: null,
+    isEvmConnected: false,
+    nickname: null,
+    setNickname: () => {},
+    currentChainId: null,
+    currentChainName: null,
+    switchToChain: async () => { showUnavailable(); },
+    isCorrectChainForAsset: () => false,
+    isSwitchingChain: false,
+    isTronLinkInstalled: false,
+    isTronConnected: false,
+    tronAddress: null,
+    usdtTrc20Balance: 0,
+    isTronConnecting: false,
+    connectTronLink: async () => { showUnavailable(); },
+    disconnectTronLink: () => {},
+    isTonConnected: false,
+    tonAddress: null,
+    tonBalance: 0,
+    isTonConnecting: false,
+    connectTonWallet: () => { showUnavailable(); },
+    disconnectTonWallet: () => {},
+  };
+
+  return (
+    <RealWalletContext.Provider value={contextValue}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </RealWalletContext.Provider>
+  );
+}
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
+  // If wagmi/AppKit failed to initialize at module load, skip the AppKit-aware
+  // tree entirely — its hooks (useAppKit, useAppKitAccount, ...) would throw
+  // during render, defeating the fallback config. Render the degraded
+  // provider instead so the rest of the app stays usable.
+  if (!isWagmiReady || !wagmiConfig) {
+    return <DegradedWalletProvider>{children}</DegradedWalletProvider>;
+  }
+
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={queryClient}>
