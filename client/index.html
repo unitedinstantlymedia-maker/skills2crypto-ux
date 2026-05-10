@@ -32,7 +32,20 @@
       (function () {
         var boxEl = document.getElementById('boot-error');
         var statusEl = document.getElementById('boot-status');
+        // Only show the boot error overlay BEFORE React has mounted. Once
+        // React replaces #boot-loader, the in-app error boundary takes over,
+        // and transient errors (WebSocket reconnects, etc.) must not blank
+        // out a working app.
+        function reactHasMounted() {
+          return !document.getElementById('boot-loader');
+        }
+        window.__appBooted = false;
         function showBootError(label, info) {
+          if (window.__appBooted || reactHasMounted()) {
+            // App is running — just log to console, do not blank the UI.
+            try { console.error('[post-boot]', label, info); } catch (e) {}
+            return;
+          }
           try {
             boxEl.style.display = 'block';
             var msg = '<div style="color:#f55;font-size:16px;margin-bottom:12px;font-family:sans-serif;">App failed to load</div>';
@@ -59,15 +72,15 @@
         });
         // If after 12s React still hasn't replaced the boot loader, declare failure.
         setTimeout(function () {
-          if (document.getElementById('boot-loader')) {
+          if (!reactHasMounted()) {
             showBootError('React did not mount within 12 seconds',
               'The JavaScript bundle may have failed to download, parse, or execute on this device.\n\n' +
               'This can happen on older browsers (e.g. iOS 13 or earlier) that do not support modern JavaScript syntax.');
           }
         }, 12000);
         if (statusEl) {
-          setTimeout(function(){ if(statusEl) statusEl.textContent = 'Still loading…'; }, 4000);
-          setTimeout(function(){ if(statusEl) statusEl.textContent = 'This is taking a while…'; }, 8000);
+          setTimeout(function(){ if(statusEl && !reactHasMounted()) statusEl.textContent = 'Still loading…'; }, 4000);
+          setTimeout(function(){ if(statusEl && !reactHasMounted()) statusEl.textContent = 'This is taking a while…'; }, 8000);
         }
       })();
     </script>

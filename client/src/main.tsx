@@ -20,3 +20,10 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </RootErrorBoundary>,
 );
+
+// Tell the inline boot script that React mounted successfully, so any later
+// background errors (WebSocket reconnects, async network blips, etc.) don't
+// blank out a working app with the boot error overlay.
+if (typeof window !== "undefined") {
+  (window as any).__appBooted = true;
+}
