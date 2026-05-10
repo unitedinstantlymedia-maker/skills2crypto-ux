@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, writeFile, unlink } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -27,11 +27,28 @@ async function buildAll() {
   // Build client using vite from client directory.
   // Note: tonconnect-manifest.json is now served dynamically by the Express
   // route in server/index.ts, so no PUBLIC_URL substitution is needed here.
+  //
+  // Vite only reads VITE_* vars from .env files in its root, NOT from
+  // process.env. Replit's shared env vars live in the shell, so we must
+  // materialize them into client/.env.production right before the build
+  // (and clean up after) so they get baked into the client bundle.
+  const viteEnvLines = Object.entries(process.env)
+    .filter(([k, v]) => k.startsWith("VITE_") && v != null && v !== "")
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+  const tmpEnvPath = "client/.env.production";
+  if (viteEnvLines.length > 0) {
+    await writeFile(tmpEnvPath, viteEnvLines + "\n");
+    console.log(`  wrote ${tmpEnvPath} (${viteEnvLines.split("\n").length} VITE_* vars)`);
+  }
   process.chdir("client");
   try {
     await viteBuild();
   } finally {
     process.chdir("..");
+    if (viteEnvLines.length > 0) {
+      await unlink(tmpEnvPath).catch(() => {});
+    }
   }
 
   // Move built assets to dist/public (mkdir -p so the parent exists after rm).
