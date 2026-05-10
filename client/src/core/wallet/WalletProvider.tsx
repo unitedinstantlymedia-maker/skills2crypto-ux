@@ -61,6 +61,10 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   const [nickname, setNicknameState] = useState<string | null>(null);
   const [isSwitchingChain, setIsSwitchingChain] = useState(false);
   const hasPromptedNickname = useRef(false);
+  // Tracks whether the user explicitly initiated a connect during this session.
+  // Auto-reconnect on page load should NOT trigger the nickname prompt — only
+  // a fresh user-initiated connect should.
+  const userInitiatedConnect = useRef(false);
 
   const {
     isTronLinkInstalled,
@@ -118,7 +122,14 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   }, [evmAddress, isEvmConnected, ethBalance.data, bnbBalance.data, isTronConnected, tronAddress, usdtTrc20Balance, primaryAddress, isAnyConnected, isTonConnected, tonAddress, tonBalance]);
 
   useEffect(() => {
-    if (isAnyConnected && primaryAddress && !hasPromptedNickname.current) {
+    // Only prompt for a nickname when the user explicitly initiated a connect
+    // in this session. Auto-reconnect on page load must not trigger the modal.
+    if (
+      isAnyConnected &&
+      primaryAddress &&
+      userInitiatedConnect.current &&
+      !hasPromptedNickname.current
+    ) {
       const storedNick = localStorage.getItem(`nickname_${primaryAddress}`);
       hasPromptedNickname.current = true;
       if (!storedNick) {
@@ -134,6 +145,7 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     if (isTronConnected) disconnectTronLink();
     if (isTonConnected) disconnectTonWallet();
     hasPromptedNickname.current = false;
+    userInitiatedConnect.current = false;
     walletStore.disconnect();
   }, [disconnectEvm, isEvmConnected, isTronConnected, disconnectTronLink, isTonConnected, disconnectTonWallet]);
 
@@ -146,8 +158,19 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
   }, [primaryAddress]);
 
   const openConnectDialog = useCallback(() => {
+    userInitiatedConnect.current = true;
     open({ view: 'Connect' });
   }, [open]);
+
+  const connectTronLinkWithIntent = useCallback(async () => {
+    userInitiatedConnect.current = true;
+    await connectTronLink();
+  }, [connectTronLink]);
+
+  const connectTonWalletWithIntent = useCallback(() => {
+    userInitiatedConnect.current = true;
+    connectTonWallet();
+  }, [connectTonWallet]);
 
   const switchToChain = useCallback(async (targetChainId: number) => {
     setIsSwitchingChain(true);
@@ -196,13 +219,13 @@ function WalletSyncer({ children }: { children: React.ReactNode }) {
     tronAddress,
     usdtTrc20Balance,
     isTronConnecting,
-    connectTronLink,
+    connectTronLink: connectTronLinkWithIntent,
     disconnectTronLink,
     isTonConnected,
     tonAddress,
     tonBalance,
     isTonConnecting,
-    connectTonWallet,
+    connectTonWallet: connectTonWalletWithIntent,
     disconnectTonWallet,
   };
 

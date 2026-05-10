@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, writeFile, unlink } from "fs/promises";
+import { rm, readFile, writeFile, unlink, access } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -37,16 +37,26 @@ async function buildAll() {
     .map(([k, v]) => `${k}=${v}`)
     .join("\n");
   const tmpEnvPath = "client/.env.production";
+  // Never clobber a user-managed client/.env.production. If one exists,
+  // assume it's authoritative and skip materialization. Otherwise write a
+  // temporary one from process.env and clean it up after the build.
+  let wroteTmpEnv = false;
   if (viteEnvLines.length > 0) {
-    await writeFile(tmpEnvPath, viteEnvLines + "\n");
-    console.log(`  wrote ${tmpEnvPath} (${viteEnvLines.split("\n").length} VITE_* vars)`);
+    const exists = await access(tmpEnvPath).then(() => true).catch(() => false);
+    if (exists) {
+      console.log(`  ${tmpEnvPath} already exists; leaving it untouched`);
+    } else {
+      await writeFile(tmpEnvPath, viteEnvLines + "\n");
+      wroteTmpEnv = true;
+      console.log(`  wrote ${tmpEnvPath} (${viteEnvLines.split("\n").length} VITE_* vars)`);
+    }
   }
   process.chdir("client");
   try {
     await viteBuild();
   } finally {
     process.chdir("..");
-    if (viteEnvLines.length > 0) {
+    if (wroteTmpEnv) {
       await unlink(tmpEnvPath).catch(() => {});
     }
   }
