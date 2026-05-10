@@ -20,8 +20,57 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@200..800&family=Space+Grotesk:wght@300..700&family=Inter:wght@100..900&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-background text-foreground antialiased selection:bg-accent selection:text-accent-foreground">
-    <div id="root"></div>
+  <body class="bg-background text-foreground antialiased selection:bg-accent selection:text-accent-foreground" style="background:#000;color:#fff;margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <div id="root">
+      <div id="boot-loader" style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px;padding:24px;text-align:center;">
+        <div style="font-size:18px;font-weight:600;letter-spacing:2px;">SKILLS2CRYPTO</div>
+        <div id="boot-status" style="font-size:13px;color:#888;">Loading…</div>
+      </div>
+    </div>
+    <div id="boot-error" style="display:none;position:fixed;inset:0;z-index:99999;background:#000;color:#fff;padding:24px;overflow:auto;font-family:monospace;font-size:12px;line-height:1.5;"></div>
+    <script>
+      (function () {
+        var boxEl = document.getElementById('boot-error');
+        var statusEl = document.getElementById('boot-status');
+        function showBootError(label, info) {
+          try {
+            boxEl.style.display = 'block';
+            var msg = '<div style="color:#f55;font-size:16px;margin-bottom:12px;font-family:sans-serif;">App failed to load</div>';
+            msg += '<div style="color:#aaa;margin-bottom:8px;">' + label + '</div>';
+            msg += '<pre style="white-space:pre-wrap;word-break:break-word;color:#fff;background:#111;padding:12px;border-radius:6px;">' + info + '</pre>';
+            msg += '<div style="margin-top:16px;"><button onclick="location.reload()" style="background:#22c55e;color:#000;border:0;padding:10px 18px;border-radius:6px;font-weight:600;font-size:14px;">Reload</button>';
+            msg += ' <button onclick="(function(){try{localStorage.clear();sessionStorage.clear();}catch(e){}location.reload();})()" style="background:#444;color:#fff;border:0;padding:10px 18px;border-radius:6px;font-weight:600;font-size:14px;margin-left:8px;">Clear &amp; Reload</button></div>';
+            msg += '<div style="margin-top:16px;color:#666;font-size:11px;">UA: ' + (navigator.userAgent || '?') + '</div>';
+            boxEl.innerHTML = msg;
+          } catch (e) {
+            document.body.innerText = label + ': ' + info;
+          }
+        }
+        window.addEventListener('error', function (e) {
+          var info = '';
+          if (e.error && e.error.stack) info = e.error.stack;
+          else info = (e.message || 'unknown') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || '?');
+          showBootError('JavaScript error during load', info);
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          var info = (r && r.stack) ? r.stack : String(r);
+          showBootError('Unhandled promise rejection', info);
+        });
+        // If after 12s React still hasn't replaced the boot loader, declare failure.
+        setTimeout(function () {
+          if (document.getElementById('boot-loader')) {
+            showBootError('React did not mount within 12 seconds',
+              'The JavaScript bundle may have failed to download, parse, or execute on this device.\n\n' +
+              'This can happen on older browsers (e.g. iOS 13 or earlier) that do not support modern JavaScript syntax.');
+          }
+        }, 12000);
+        if (statusEl) {
+          setTimeout(function(){ if(statusEl) statusEl.textContent = 'Still loading…'; }, 4000);
+          setTimeout(function(){ if(statusEl) statusEl.textContent = 'This is taking a while…'; }, 8000);
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

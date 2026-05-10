@@ -19,7 +19,11 @@ export default defineConfig({
   root: ".",
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    // Target broadly compatible JS so older mobile browsers (e.g. iOS Safari
+    // < 14) can at least parse the bundle and run our error boundary instead
+    // of failing silently with a black screen.
+    target: ["es2020", "safari14", "chrome87", "firefox78", "edge88"]
   },
   server: {
     host: "0.0.0.0",
