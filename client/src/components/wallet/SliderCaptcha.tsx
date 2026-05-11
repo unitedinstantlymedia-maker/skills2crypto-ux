@@ -49,6 +49,23 @@ export function SliderCaptcha(props: SliderCaptchaProps): React.ReactElement {
   const startTimeRef = useRef(0);
   const trackRef = useRef<HTMLDivElement | null>(null);
 
+  // Stash the latest callbacks in refs so loadChallenge() can call them
+  // without taking them as dependencies. Without this, every parent
+  // re-render (and there are many — TON balance polling, socket events,
+  // wallet state churn) creates fresh onPass/onCancel arrow functions,
+  // which would invalidate loadChallenge's useCallback, refire its
+  // useEffect, reset status back to "loading", and start a new fetch
+  // before the previous one completed. Net effect on a phone:
+  // permanent "Loading…" with no puzzle ever shown.
+  const onPassRef = useRef(onPass);
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => {
+    onPassRef.current = onPass;
+  }, [onPass]);
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
   const loadChallenge = useCallback(async () => {
     setStatus({ kind: "loading" });
     setPieceX(0);
@@ -77,7 +94,7 @@ export function SliderCaptcha(props: SliderCaptchaProps): React.ReactElement {
       }
       if (data?.alreadyVerified) {
         setStatus({ kind: "passed" });
-        onPass();
+        onPassRef.current?.();
         return;
       }
       setStatus({ kind: "ready", challenge: data as ChallengePayload });
@@ -87,7 +104,7 @@ export function SliderCaptcha(props: SliderCaptchaProps): React.ReactElement {
         message: e?.message || "Network error loading verification.",
       });
     }
-  }, [walletAddress, onPass]);
+  }, [walletAddress]);
 
   useEffect(() => {
     void loadChallenge();
@@ -135,7 +152,7 @@ export function SliderCaptcha(props: SliderCaptchaProps): React.ReactElement {
         const data = await res.json().catch(() => ({}));
         if (res.ok && data?.ok) {
           setStatus({ kind: "passed" });
-          onPass();
+          onPassRef.current?.();
           return;
         }
         if (res.status === 429) {
@@ -157,7 +174,7 @@ export function SliderCaptcha(props: SliderCaptchaProps): React.ReactElement {
         });
       }
     },
-    [onPass]
+    []
   );
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
