@@ -19,12 +19,31 @@ export default defineConfig({
       react: path.resolve(import.meta.dirname, "../node_modules/react"),
       "react-dom": path.resolve(import.meta.dirname, "../node_modules/react-dom"),
       "react/jsx-runtime": path.resolve(import.meta.dirname, "../node_modules/react/jsx-runtime.js"),
-      "react/jsx-dev-runtime": path.resolve(import.meta.dirname, "../node_modules/react/jsx-dev-runtime.js")
+      "react/jsx-dev-runtime": path.resolve(import.meta.dirname, "../node_modules/react/jsx-dev-runtime.js"),
+      "@tanstack/react-query": path.resolve(import.meta.dirname, "../node_modules/@tanstack/react-query"),
+      wagmi: path.resolve(import.meta.dirname, "../node_modules/wagmi"),
+      viem: path.resolve(import.meta.dirname, "../node_modules/viem")
     },
-    dedupe: ["react", "react-dom", "react/jsx-runtime"]
+    dedupe: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "@tanstack/react-query",
+      "@tanstack/query-core",
+      "wagmi",
+      "viem"
+    ]
   },
   optimizeDeps: {
-    include: ["socket.io-client", "react", "react-dom", "react/jsx-runtime"]
+    include: [
+      "socket.io-client",
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "@tanstack/react-query",
+      "wagmi",
+      "viem"
+    ]
   },
   root: ".",
   build: {
