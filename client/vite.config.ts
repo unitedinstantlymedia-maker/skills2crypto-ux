@@ -10,11 +10,21 @@ export default defineConfig({
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
       "@shared": path.resolve(import.meta.dirname, "../shared"),
-      "@assets": path.resolve(import.meta.dirname, "../attached_assets")
-    }
+      "@assets": path.resolve(import.meta.dirname, "../attached_assets"),
+      // Force every package (wagmi, @reown/appkit, @tanstack/react-query, etc.)
+      // to resolve React/ReactDOM to the SAME copy. Without this, transitive
+      // deps can pull a second React, leaving its hook dispatcher null and
+      // causing "Cannot read properties of null (reading 'useRef')" the
+      // moment WagmiProvider mounts on mobile.
+      react: path.resolve(import.meta.dirname, "../node_modules/react"),
+      "react-dom": path.resolve(import.meta.dirname, "../node_modules/react-dom"),
+      "react/jsx-runtime": path.resolve(import.meta.dirname, "../node_modules/react/jsx-runtime.js"),
+      "react/jsx-dev-runtime": path.resolve(import.meta.dirname, "../node_modules/react/jsx-dev-runtime.js")
+    },
+    dedupe: ["react", "react-dom", "react/jsx-runtime"]
   },
   optimizeDeps: {
-    include: ["socket.io-client"]
+    include: ["socket.io-client", "react", "react-dom", "react/jsx-runtime"]
   },
   root: ".",
   build: {
