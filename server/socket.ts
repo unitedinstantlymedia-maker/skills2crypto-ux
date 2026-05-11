@@ -90,6 +90,7 @@ interface ChessMoveInput {
 interface PlayerInfo {
   socketId: string;
   color: 'white' | 'black';
+  nickname?: string | null;
 }
 
 interface MatchRoom {
@@ -168,6 +169,25 @@ interface GameResult {
 }
 
 const gameResults = new Map<string, GameResult>();
+
+const DISCONNECT_FORFEIT_GRACE_MS = 120_000;
+
+function sanitizeNickname(n: unknown): string | null {
+  if (typeof n !== 'string') return null;
+  const trimmed = n.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 32 ? trimmed.slice(0, 32) : trimmed;
+}
+
+function getOpponentNickname(
+  room: { players: Map<string, { nickname?: string | null }> },
+  playerId: string,
+): string | null {
+  for (const [id, p] of room.players.entries()) {
+    if (id !== playerId) return p.nickname ?? null;
+  }
+  return null;
+}
 
 const FEE_RATE = 0.03;
 
@@ -748,6 +768,7 @@ interface TetrisPlayerState {
   // plausibility of the loser's claim (top of board congested) without
   // trusting any payload on the game-over event itself.
   lastBoard: (string | null)[][] | null;
+  nickname?: string | null;
 }
 
 interface TetrisRoom {
@@ -815,6 +836,7 @@ function tetrisBoardIsWellFormed(board: unknown): board is (string | null)[][] {
 interface CheckersPlayerInfo {
   socketId: string;
   color: 'red' | 'black';
+  nickname?: string | null;
 }
 
 interface CheckersRoom {
@@ -883,9 +905,16 @@ function startCheckersGame(io: SocketIOServer, matchId: string, room: CheckersRo
   room.blackTime = CHECKERS_INITIAL_TIME_MS;
   room.lastTickAt = Date.now();
   room.pendingJumpAt = null;
-  io.to(`checkers:${matchId}`).emit("checkers-game-start", {
-    publicState: checkersPublicState(room),
-  });
+  const publicState = checkersPublicState(room);
+  for (const [pid, p] of room.players.entries()) {
+    const sock = io.sockets.sockets.get(p.socketId);
+    if (sock) {
+      sock.emit("checkers-game-start", {
+        publicState,
+        opponentNickname: getOpponentNickname(room, pid),
+      });
+    }
+  }
 }
 
 interface ShipPlacement {
@@ -909,6 +938,7 @@ interface BattleshipPlayerInfo {
   role: 'player1' | 'player2';
   ready: boolean;
   ships: BattleshipShip[];
+  nickname?: string | null;
 }
 
 interface BattleshipRoom {
@@ -925,6 +955,7 @@ interface DominoesPlayerInfo {
   socketId: string;
   role: DominoesPlayerRole;
   hand: DominoesTile[];
+  nickname?: string | null;
 }
 
 interface DominoesRoom {
@@ -1035,20 +1066,28 @@ function startDominoesGame(io: SocketIOServer, room: DominoesRoom): void {
   const publicState = dominoesPublicState(room);
   const p1Sock = io.sockets.sockets.get(p1Player.socketId);
   const p2Sock = io.sockets.sockets.get(p2Player.socketId);
-  if (p1Sock) {
+  let p1Id: string | null = null;
+  let p2Id: string | null = null;
+  for (const [id, p] of room.players.entries()) {
+    if (p.role === "p1") p1Id = id;
+    else if (p.role === "p2") p2Id = id;
+  }
+  if (p1Sock && p1Id) {
     p1Sock.emit("dominoes-game-start", {
       role: "p1",
       hand: p1Player.hand,
       publicState,
       starterTile: deal.starterTile,
+      opponentNickname: getOpponentNickname(room, p1Id),
     });
   }
-  if (p2Sock) {
+  if (p2Sock && p2Id) {
     p2Sock.emit("dominoes-game-start", {
       role: "p2",
       hand: p2Player.hand,
       publicState,
       starterTile: deal.starterTile,
+      opponentNickname: getOpponentNickname(room, p2Id),
     });
   }
 }
@@ -1066,6 +1105,7 @@ function dominoesOpponentId(
 interface XiangqiPlayerInfo {
   socketId: string;
   color: XiangqiColor;
+  nickname?: string | null;
 }
 
 interface XiangqiRoom {
@@ -1137,7 +1177,13 @@ function startChessGame(io: SocketIOServer, matchId: string, room: MatchRoom): v
     room.lastTickAt = Date.now();
     room.started = true;
   }
-  io.to(`match:${matchId}`).emit("game-start", chessPublicState(room));
+  const base = chessPublicState(room);
+  for (const [pid, p] of room.players.entries()) {
+    const sock = io.sockets.sockets.get(p.socketId);
+    if (sock) {
+      sock.emit("game-start", { ...base, opponentNickname: getOpponentNickname(room, pid) });
+    }
+  }
 }
 
 function startXiangqiGame(io: SocketIOServer, matchId: string, room: XiangqiRoom): void {
@@ -1149,9 +1195,16 @@ function startXiangqiGame(io: SocketIOServer, matchId: string, room: XiangqiRoom
   room.pliesSinceCapture = 0;
   room.drawOfferedBy = null;
   room.history = [{ posKey: xiangqiPositionKey(room.board, room.currentTurn), checkingSide: null }];
-  io.to(`xiangqi:${matchId}`).emit("xiangqi-game-start", {
-    publicState: xiangqiPublicState(room),
-  });
+  const publicState = xiangqiPublicState(room);
+  for (const [pid, p] of room.players.entries()) {
+    const sock = io.sockets.sockets.get(p.socketId);
+    if (sock) {
+      sock.emit("xiangqi-game-start", {
+        publicState,
+        opponentNickname: getOpponentNickname(room, pid),
+      });
+    }
+  }
 }
 
 function xiangqiOpponentId(room: XiangqiRoom, playerId: string): string | null {
@@ -1220,7 +1273,12 @@ export function markMatchFunded(matchId: string): void {
   const tetris = tetrisRooms.get(matchId);
   if (tetris && tetris.players.size === 2 && !tetris.started) {
     tetris.started = true;
-    io.to(`tetris:${matchId}`).emit('tetris-game-start');
+    for (const [pid, p] of tetris.players.entries()) {
+      const sock = io.sockets.sockets.get(p.socketId);
+      if (sock) {
+        sock.emit('tetris-game-start', { opponentNickname: getOpponentNickname(tetris, pid) });
+      }
+    }
     markGameStarted(matchId);
     console.log("[socket] tetris-game-start (post-funding)", matchId);
   }
@@ -1236,7 +1294,12 @@ export function markMatchFunded(matchId: string): void {
   const battleship = battleshipRooms.get(matchId);
   if (battleship && battleship.players.size === 2 && !battleship.started) {
     battleship.started = true;
-    io.to(`battleship:${matchId}`).emit('battleship-game-start');
+    for (const [pid, p] of battleship.players.entries()) {
+      const sock = io.sockets.sockets.get(p.socketId);
+      if (sock) {
+        sock.emit('battleship-game-start', { opponentNickname: getOpponentNickname(battleship, pid) });
+      }
+    }
     markGameStarted(matchId);
     console.log("[socket] battleship-game-start (post-funding)", matchId);
   }
@@ -1451,10 +1514,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       next();
     });
 
-    socket.on("join-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`match:${matchId}`);
       console.log("[socket] join match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -1505,14 +1572,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingPlayer = room.players.get(playerId);
       if (existingPlayer) {
         existingPlayer.socketId = socket.id;
+        if (nickname) existingPlayer.nickname = nickname;
         socket.emit('color-assigned', { color: existingPlayer.color });
         console.log("[socket] reconnect, color preserved:", existingPlayer.color);
 
-        // Reconnect snapshot: send the authoritative public state so the
-        // client can render the live board, clocks, last-move highlight,
-        // and side-to-move without trusting any cached values.
         if (room.players.size === 2 && fundedMatches.has(matchId) && room.started) {
-          socket.emit('game-start', chessPublicState(room));
+          socket.emit('game-start', {
+            ...chessPublicState(room),
+            opponentNickname: getOpponentNickname(room, playerId),
+          });
         }
         return;
       }
@@ -1526,7 +1594,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingColors = Array.from(room.players.values()).map(p => p.color);
       const assignedColor: 'white' | 'black' = existingColors.includes('white') ? 'black' : 'white';
       
-      room.players.set(playerId, { socketId: socket.id, color: assignedColor });
+      room.players.set(playerId, { socketId: socket.id, color: assignedColor, nickname });
 
       socket.emit('color-assigned', { color: assignedColor });
       console.log("[socket] color assigned", matchId, playerId, assignedColor);
@@ -1843,10 +1911,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     // Legacy client-claimed `game-end` removed: terminals are detected
     // server-side inside `chess-move`, resignation via `chess-resign`.
 
-    socket.on("join-tetris-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-tetris-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`tetris:${matchId}`);
       console.log("[socket] join tetris match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -1883,8 +1955,11 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
       const existing = room.players.get(playerId);
       if (existing) {
-        // Reconnect: keep accumulated counters/timestamps, refresh socketId.
         existing.socketId = socket.id;
+        if (nickname) existing.nickname = nickname;
+        if (room.players.size === 2 && room.started) {
+          socket.emit('tetris-game-start', { opponentNickname: getOpponentNickname(room, playerId) });
+        }
       } else {
         const nowTs = Date.now();
         room.players.set(playerId, {
@@ -1898,13 +1973,19 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
           reportedGameOver: false,
           hasAcceptedState: false,
           lastBoard: null,
+          nickname,
         });
       }
 
       if (room.players.size === 2 && !room.started) {
         if (fundedMatches.has(matchId)) {
           room.started = true;
-          io.to(`tetris:${matchId}`).emit('tetris-game-start');
+          for (const [pid, p] of room.players.entries()) {
+            const sock = io.sockets.sockets.get(p.socketId);
+            if (sock) {
+              sock.emit('tetris-game-start', { opponentNickname: getOpponentNickname(room, pid) });
+            }
+          }
           markGameStarted(matchId);
           console.log("[socket] tetris-game-start", matchId);
         } else {
@@ -2120,10 +2201,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       tetrisRooms.delete(data.matchId);
     });
 
-    socket.on("join-checkers-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-checkers-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`checkers:${matchId}`);
       console.log("[socket] join checkers match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -2166,11 +2251,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingPlayer = room.players.get(playerId);
       if (existingPlayer) {
         existingPlayer.socketId = socket.id;
+        if (nickname) existingPlayer.nickname = nickname;
         socket.emit('checkers-color-assigned', { color: existingPlayer.color });
         console.log("[socket] checkers reconnect, color preserved:", existingPlayer.color);
 
         if (room.players.size === 2 && room.started) {
-          socket.emit('checkers-game-start', { publicState: checkersPublicState(room) });
+          socket.emit('checkers-game-start', {
+            publicState: checkersPublicState(room),
+            opponentNickname: getOpponentNickname(room, playerId),
+          });
         }
         return;
       }
@@ -2184,7 +2273,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingColors = Array.from(room.players.values()).map(p => p.color);
       const assignedColor: 'red' | 'black' = existingColors.includes('red') ? 'black' : 'red';
 
-      room.players.set(playerId, { socketId: socket.id, color: assignedColor });
+      room.players.set(playerId, { socketId: socket.id, color: assignedColor, nickname });
 
       socket.emit('checkers-color-assigned', { color: assignedColor });
       console.log("[socket] checkers color assigned", matchId, playerId, assignedColor);
@@ -2442,10 +2531,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     // detected server-side inside `checkers-move`; resignation flows
     // through `checkers-resign`.
 
-    socket.on("join-battleship-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-battleship-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`battleship:${matchId}`);
       console.log("[socket] join battleship match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -2486,11 +2579,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingPlayer = room.players.get(playerId);
       if (existingPlayer) {
         existingPlayer.socketId = socket.id;
+        if (nickname) existingPlayer.nickname = nickname;
         socket.emit('battleship-role-assigned', { role: existingPlayer.role });
         console.log("[socket] battleship reconnect, role preserved:", existingPlayer.role);
         
         if (room.players.size === 2 && room.started) {
-          socket.emit('battleship-game-start');
+          socket.emit('battleship-game-start', { opponentNickname: getOpponentNickname(room, playerId) });
           if (room.battlePhase) {
             socket.emit('battle-phase-start', { firstTurn: room.currentTurn });
           }
@@ -2511,7 +2605,8 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         socketId: socket.id, 
         role: assignedRole,
         ready: false,
-        ships: []
+        ships: [],
+        nickname,
       });
 
       socket.emit('battleship-role-assigned', { role: assignedRole });
@@ -2520,7 +2615,12 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       if (room.players.size === 2 && !room.started) {
         if (fundedMatches.has(matchId)) {
           room.started = true;
-          io.to(`battleship:${matchId}`).emit('battleship-game-start');
+          for (const [pid, p] of room.players.entries()) {
+            const sock = io.sockets.sockets.get(p.socketId);
+            if (sock) {
+              sock.emit('battleship-game-start', { opponentNickname: getOpponentNickname(room, pid) });
+            }
+          }
           markGameStarted(matchId);
           console.log("[socket] battleship-game-start", matchId);
         } else {
@@ -2703,10 +2803,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
 
     // ─────────────────── Dominoes ───────────────────
 
-    socket.on("join-dominoes-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-dominoes-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`dominoes:${matchId}`);
       console.log("[socket] join dominoes match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -2753,16 +2857,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingPlayer = room.players.get(playerId);
       if (existingPlayer) {
         existingPlayer.socketId = socket.id;
+        if (nickname) existingPlayer.nickname = nickname;
         socket.emit('dominoes-role-assigned', { role: existingPlayer.role });
         if (room.dealt) {
-          // On reconnect, re-send this player's full game state. Pass
-          // starterTile only while the chain is still empty so the UI can
-          // re-arm the lead-tile restriction; otherwise it's irrelevant.
           socket.emit('dominoes-game-start', {
             role: existingPlayer.role,
             hand: existingPlayer.hand,
             publicState: dominoesPublicState(room),
             starterTile: room.chain.length === 0 ? room.starterTile : null,
+            opponentNickname: getOpponentNickname(room, playerId),
           });
         }
         console.log("[socket] dominoes reconnect, role preserved:", existingPlayer.role);
@@ -2782,6 +2885,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         socketId: socket.id,
         role: assignedRole,
         hand: [],
+        nickname,
       });
 
       socket.emit('dominoes-role-assigned', { role: assignedRole });
@@ -3074,10 +3178,14 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
     //   `opponent-xiangqi-move`. Server overrides redTime/blackTime/newTurn
     //   with its own authoritative values.
 
-    socket.on("join-xiangqi-match", (data: { matchId: string; playerId: string }) => {
+    socket.on("join-xiangqi-match", (data: { matchId: string; playerId: string; nickname?: string }) => {
       const { matchId, playerId } = data;
+      const nickname = sanitizeNickname(data.nickname);
       socket.join(`xiangqi:${matchId}`);
       console.log("[socket] join xiangqi match", matchId, socket.id, playerId);
+
+      const cachedResult = gameResults.get(matchId);
+      if (cachedResult) socket.emit('game-result', cachedResult);
 
       const oldSocketId = playerToSocket.get(playerId);
       if (oldSocketId && oldSocketId !== socket.id) {
@@ -3122,13 +3230,15 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingPlayer = room.players.get(playerId);
       if (existingPlayer) {
         existingPlayer.socketId = socket.id;
+        if (nickname) existingPlayer.nickname = nickname;
         socket.emit('xiangqi-color-assigned', { color: existingPlayer.color });
         console.log("[socket] xiangqi reconnect, color preserved:", existingPlayer.color);
 
         if (room.players.size === 2 && room.started) {
-          // Re-send a fresh game-start with the live (time-bled) public
-          // state so the reconnecting client lines up its own clock.
-          socket.emit('xiangqi-game-start', { publicState: xiangqiPublicState(room) });
+          socket.emit('xiangqi-game-start', {
+            publicState: xiangqiPublicState(room),
+            opponentNickname: getOpponentNickname(room, playerId),
+          });
         }
         return;
       }
@@ -3142,7 +3252,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
       const existingColors = Array.from(room.players.values()).map((p) => p.color);
       const assignedColor: XiangqiColor = existingColors.includes('red') ? 'black' : 'red';
 
-      room.players.set(playerId, { socketId: socket.id, color: assignedColor });
+      room.players.set(playerId, { socketId: socket.id, color: assignedColor, nickname });
 
       socket.emit('xiangqi-color-assigned', { color: assignedColor });
       console.log("[socket] xiangqi color assigned", matchId, playerId, assignedColor);
@@ -3503,7 +3613,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
         // for; only the room with live subscribers will actually receive it.
         // The disconnecting socket has already left its rooms at this point,
         // so this never echoes back to the player who dropped.
-        const graceUntilMs = Date.now() + 30000;
+        const graceUntilMs = Date.now() + DISCONNECT_FORFEIT_GRACE_MS;
         io.to(`match:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`tetris:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
         io.to(`checkers:${matchId}`).emit('opponent-disconnect-pending', { matchId, graceUntilMs });
@@ -3675,7 +3785,7 @@ export function setupSocket(httpServer: HttpServer, opts: SocketOptions): Socket
               xiangqiRooms.delete(matchId);
             }
           }
-        }, 30000);
+        }, DISCONNECT_FORFEIT_GRACE_MS);
 
         pendingDisconnects.set(playerId, timeout);
       }

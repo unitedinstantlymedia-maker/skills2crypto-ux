@@ -24,6 +24,10 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || "anonymous";
+  const nickname = state.wallet.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
 
   const engineRef = useRef<DominoesClientEngine>(new DominoesClientEngine());
   const [view, setView] = useState<DominoesViewState | null>(null);
@@ -51,16 +55,21 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
   useEffect(() => {
     if (!socket || !matchId || !playerId) return;
 
-    socket.emit("join-dominoes-match", { matchId, playerId });
+    const emitJoin = () => {
+      socket.emit("join-dominoes-match", { matchId, playerId, nickname: nickname ?? undefined });
+    };
+    emitJoin();
 
     const onGameStart = (data: {
       role: PlayerRole;
       hand: Tile[];
       publicState: DominoesPublicState;
       starterTile?: Tile | null;
+      opponentNickname?: string | null;
     }) => {
       setWaiting(false);
       setSelectedIdx(null);
+      if (data.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
       engineRef.current.setStart(data.role, data.hand, data.publicState);
       engineRef.current.setStarterTile(data.starterTile ?? null);
     };
@@ -132,6 +141,7 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
       setTimeout(() => onFinish(result), 1500);
     };
 
+    socket.on("connect", emitJoin);
     socket.on("dominoes-game-start", onGameStart);
     socket.on("dominoes-move-played", onMovePlayed);
     socket.on("dominoes-pass-played", onPassPlayed);
@@ -140,6 +150,7 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
     socket.on("game-result", onGameResult);
 
     return () => {
+      socket.off("connect", emitJoin);
       socket.off("dominoes-game-start", onGameStart);
       socket.off("dominoes-move-played", onMovePlayed);
       socket.off("dominoes-pass-played", onPassPlayed);
@@ -282,7 +293,7 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
         )}
       >
         <div className="flex items-center gap-3">
-          <span className="font-semibold">{t("Opponent", "Opponent")}</span>
+          <span className="font-semibold">{opponentNickname || t("Opponent", "Opponent")}</span>
           <div className="flex gap-1">
             {Array.from({ length: oppTileCount }).map((_, i) => (
               <DominoTile
@@ -359,7 +370,7 @@ export function DominoesGame({ onFinish }: DominoesGameProps) {
           view.myTurn ? "bg-zinc-800 ring-2 ring-emerald-500" : "bg-zinc-800/50",
         )}
       >
-        <span className="font-semibold">{t("You", "You")}</span>
+        <span className="font-semibold">{nickname || t("You", "You")}</span>
         <div
           className={cn(
             "font-mono text-lg font-bold px-3 py-1 rounded",

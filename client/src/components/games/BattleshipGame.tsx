@@ -25,6 +25,10 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
 
   const [gameState, setGameState] = useState<BattleshipState | null>(null);
   const [playerRole, setPlayerRole] = useState<'player1' | 'player2' | null>(null);
+  const nickname = state.wallet?.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
   const [waitingForOpponent, setWaitingForOpponent] = useState(true);
   const [opponentReady, setOpponentReady] = useState(false);
   const isConnected = !!socket?.connected;
@@ -44,20 +48,26 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
     const playerId = state.wallet?.address || localStorage.getItem('playerId') || `player-${Date.now()}`;
     localStorage.setItem('playerId', playerId);
 
-    socket.emit('join-battleship-match', { matchId, playerId });
-    console.log('[BattleshipGame] join-battleship-match emitted via shared socket', matchId);
+    const emitJoin = () => {
+      socket.emit('join-battleship-match', { matchId, playerId, nickname: nickname ?? undefined });
+      console.log('[BattleshipGame] join-battleship-match emitted via shared socket', matchId);
+    };
+    emitJoin();
 
     const onRoleAssigned = (data: { role: 'player1' | 'player2' }) => {
       console.log('[BattleshipGame] role assigned:', data.role);
       setPlayerRole(data.role);
-      const engine = new BattleshipEngine(setGameState, data.role);
-      engineRef.current = engine;
-      setGameState(engine.getState());
+      if (!engineRef.current) {
+        const engine = new BattleshipEngine(setGameState, data.role);
+        engineRef.current = engine;
+        setGameState(engine.getState());
+      }
     };
 
-    const onGameStart = () => {
+    const onGameStart = (data?: { opponentNickname?: string | null }) => {
       console.log('[BattleshipGame] game start');
       setWaitingForOpponent(false);
+      if (data?.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
     };
 
     const onOpponentReady = () => {
@@ -145,6 +155,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     };
 
+    socket.on('connect', emitJoin);
     socket.on('battleship-role-assigned', onRoleAssigned);
     socket.on('battleship-game-start', onGameStart);
     socket.on('opponent-ready', onOpponentReady);
@@ -156,6 +167,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
     socket.on('game-result', onGameResult);
 
     return () => {
+      socket.off('connect', emitJoin);
       socket.off('battleship-role-assigned', onRoleAssigned);
       socket.off('battleship-game-start', onGameStart);
       socket.off('opponent-ready', onOpponentReady);
@@ -166,7 +178,7 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
       socket.off('opponent-disconnected', onOpponentDisconnected);
       socket.off('game-result', onGameResult);
     };
-  }, [socket, matchId, onFinish, t, state.wallet?.address]);
+  }, [socket, matchId, onFinish, t, state.wallet?.address, nickname]);
 
   useEffect(() => {
     if (!gameState || gameState.phase !== 'battle' || gameEnded) {
@@ -434,6 +446,10 @@ export function BattleshipGame({ onFinish }: BattleshipGameProps) {
           {lastSunkMessage}
         </div>
       )}
+
+      <div className="text-center text-xs text-zinc-400 font-semibold">
+        {nickname || t('You', 'You')} <span className="text-zinc-600">vs</span> {opponentNickname || t('Opponent', 'Opponent')}
+      </div>
 
       <div className={cn(
         "flex items-center justify-between px-4 py-2 rounded-lg",

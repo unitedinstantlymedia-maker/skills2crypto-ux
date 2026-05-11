@@ -57,6 +57,10 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
+  const nickname = state.wallet.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
   const isConnected = !!socket?.connected;
 
   const isPlayerTurn = playerColor && gameState?.currentTurn === playerColor;
@@ -89,17 +93,21 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
   useEffect(() => {
     if (!socket || !matchId || matchId === 'pending') return;
 
-    socket.emit('join-checkers-match', { matchId, playerId });
-    console.log('[CheckersGame] join-checkers-match emitted via shared socket', matchId);
+    const emitJoin = () => {
+      socket.emit('join-checkers-match', { matchId, playerId, nickname: nickname ?? undefined });
+      console.log('[CheckersGame] join-checkers-match emitted via shared socket', matchId);
+    };
+    emitJoin();
 
     const onColorAssigned = (data: { color: PieceColor }) => {
       console.log('[CheckersGame] color assigned:', data.color);
       setPlayerColor(data.color);
     };
 
-    const onGameStart = (data?: { publicState?: ServerSnapshot }) => {
+    const onGameStart = (data?: { publicState?: ServerSnapshot; opponentNickname?: string | null }) => {
       console.log('[CheckersGame] game started');
       setWaitingForOpponent(false);
+      if (data?.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
       if (data?.publicState) hydrate(data.publicState);
     };
 
@@ -159,6 +167,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     };
 
+    socket.on('connect', emitJoin);
     socket.on('checkers-color-assigned', onColorAssigned);
     socket.on('checkers-game-start', onGameStart);
     socket.on('opponent-checkers-move', onOpponentMove);
@@ -168,6 +177,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
     socket.on('game-result', onGameResult);
 
     return () => {
+      socket.off('connect', emitJoin);
       socket.off('checkers-color-assigned', onColorAssigned);
       socket.off('checkers-game-start', onGameStart);
       socket.off('opponent-checkers-move', onOpponentMove);
@@ -291,7 +301,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
             "w-5 h-5 rounded-full border-2 shadow-md",
             opponentColor === 'red' ? "bg-red-600 border-red-400" : "bg-zinc-900 border-zinc-600"
           )} />
-          <span className="font-semibold">{t('Opponent', 'Opponent')}</span>
+          <span className="font-semibold">{opponentNickname || t('Opponent', 'Opponent')}</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",
@@ -368,7 +378,7 @@ export function CheckersGame({ onFinish }: CheckersGameProps) {
             "w-5 h-5 rounded-full border-2 shadow-md",
             playerColor === 'red' ? "bg-red-600 border-red-400" : "bg-zinc-900 border-zinc-600"
           )} />
-          <span className="font-semibold">{t('You', 'You')} ({playerColor})</span>
+          <span className="font-semibold">{nickname || t('You', 'You')} ({playerColor})</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",

@@ -1,0 +1,42 @@
+Subject: Critical disconnect handling bug – Analysis required (no code yet)
+
+I finally got a full match to work, but discovered a serious problem with how the game handles a player who briefly loses focus or connection.
+
+What happened (step by step):
+
+Two players (PC and phone) matched successfully and started a chess game on TON. Both were on the production link.
+
+On the phone, I switched to another app (WhatsApp) for a few seconds to send a message. I did NOT close the browser tab or turn off the phone.
+
+On the PC, I immediately saw a message that the opponent had disconnected and the game would be forfeited.
+
+I quickly returned to the browser on the phone, but the game was already frozen. I could not make any moves. The timer on the PC was running down from 30 seconds.
+
+Even though I was back on the phone and trying to play, nothing happened until the timer expired. The PC was then declared the winner by forfeit.
+
+The match history recorded correctly on both devices.
+
+New observation: Even after the match was settled and one player received the victory/defeat result, the other player's screen still showed the active game board for a while. The game-end event was not delivered to both clients at the same time, causing a visual desync.
+
+The two problems I need you to analyze:
+
+The disconnect timeout is WAY too short. It's currently 30 seconds. This is completely unrealistic for mobile players. If someone gets a phone call, needs to check a message, or their internet flickers for a second, they lose the game. This timeout MUST be increased to 2 minutes (120 seconds).
+
+The player who returns cannot resume the game. The phone player came back to the browser well before the timeout expired. The game should have detected the reconnection, stopped the forfeit countdown, and allowed play to continue. Instead, it stayed frozen and the player was helpless. This is a bug in the reconnection logic.
+Additionally, the fact that one client still showed the game board after the other had already received the result indicates that the game-end event was not broadcast correctly to both sockets. Please investigate why the game-end notification was not delivered simultaneously to both players.
+
+Your task:
+
+Investigate the server-side code in server/socket.ts that handles the disconnect timeout and the reconnection logic.
+
+Explain exactly why the game did not resume when the phone player returned to the browser.
+
+Explain why the forfeit timer does not reset or cancel upon reconnection.
+
+Investigate why the game-end event desynchronizes between the two clients.
+
+Provide a plan to fix these issues: (a) change the timeout to 120 seconds, (b) ensure the game resumes correctly when the disconnected player reconnects and sends a move or a 'reconnect' event, and (c) ensure the game-end result is delivered reliably and simultaneously to both players.
+
+I have attached console logs and screenshots from both the PC and the phone for your reference. The key log entries are [ChessGame] opponent disconnected – forfeit and [ChessGame] game-result received.
+
+Show me the analysis and the plan first. Do NOT write any code until I approve your plan."

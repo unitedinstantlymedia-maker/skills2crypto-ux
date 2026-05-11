@@ -36,6 +36,10 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
+  const nickname = state.wallet.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
   const isConnected = !!socket?.connected;
 
   const sendStateUpdate = useCallback(() => {
@@ -68,15 +72,21 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
   useEffect(() => {
     if (!socket || !matchId || matchId === 'pending') return;
 
-    socket.emit('join-tetris-match', { matchId, playerId });
-    console.log('[TetrisGame] join-tetris-match emitted via shared socket', matchId);
+    const emitJoin = () => {
+      socket.emit('join-tetris-match', { matchId, playerId, nickname: nickname ?? undefined });
+      console.log('[TetrisGame] join-tetris-match emitted via shared socket', matchId);
+    };
+    emitJoin();
 
-    const onGameStart = () => {
+    const onGameStart = (data?: { opponentNickname?: string | null }) => {
       console.log('[TetrisGame] game started');
       setWaitingForOpponent(false);
-      const engine = new TetrisEngine(handleStateChange);
-      engineRef.current = engine;
-      engine.start();
+      if (data?.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
+      if (!engineRef.current) {
+        const engine = new TetrisEngine(handleStateChange);
+        engineRef.current = engine;
+        engine.start();
+      }
     };
 
     const onOpponentState = (data: OpponentState) => {
@@ -114,6 +124,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
       setTimeout(() => onFinish(playerWins ? 'win' : 'loss'), 1500);
     };
 
+    socket.on('connect', emitJoin);
     socket.on('tetris-game-start', onGameStart);
     socket.on('opponent-tetris-state', onOpponentState);
     socket.on('opponent-tetris-game-over', onOpponentGameOver);
@@ -121,6 +132,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
     socket.on('game-result', onGameResult);
 
     return () => {
+      socket.off('connect', emitJoin);
       socket.off('tetris-game-start', onGameStart);
       socket.off('opponent-tetris-state', onOpponentState);
       socket.off('opponent-tetris-game-over', onOpponentGameOver);
@@ -128,7 +140,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
       socket.off('game-result', onGameResult);
       if (engineRef.current) engineRef.current.stop();
     };
-  }, [socket, matchId, playerId, handleStateChange, onFinish, t]);
+  }, [socket, matchId, playerId, nickname, handleStateChange, onFinish, t]);
 
   useEffect(() => {
     if (!gameState || gameEnded) return;
@@ -302,6 +314,9 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
     <div className="w-full flex flex-col gap-4">
       <div className="flex justify-between items-start gap-4">
         <div className="flex flex-col gap-2">
+          <div className="text-xs text-zinc-400 text-center font-semibold">
+            {nickname || t('You', 'You')}
+          </div>
           <div className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-700/50">
             <div className="text-xs text-zinc-400">{t('Score', 'Score')}</div>
             <div className="text-xl font-bold font-mono text-primary">{gameState.score}</div>
@@ -323,7 +338,7 @@ export function TetrisGame({ onFinish }: TetrisGameProps) {
 
         {opponentState && (
           <div className="flex flex-col gap-2">
-            <div className="text-xs text-zinc-400 text-center">{t('Opponent', 'Opponent')}</div>
+            <div className="text-xs text-zinc-400 text-center font-semibold">{opponentNickname || t('Opponent', 'Opponent')}</div>
             {renderBoard(opponentState.board, undefined, null, true)}
             <div className="text-xs text-center font-mono">
               <span className="text-zinc-400">{t('Score', 'Score')}: </span>

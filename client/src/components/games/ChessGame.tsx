@@ -51,6 +51,10 @@ export function ChessGame({ onFinish }: ChessGameProps) {
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || 'anonymous';
+  const nickname = state.wallet.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
 
   const isPlayerTurn = playerColor && game.turn() === (playerColor === 'white' ? 'w' : 'b');
   const isConnected = !!socket?.connected;
@@ -58,8 +62,11 @@ export function ChessGame({ onFinish }: ChessGameProps) {
   useEffect(() => {
     if (!socket || !matchId || matchId === 'pending') return;
 
-    socket.emit('join-match', { matchId, playerId });
-    console.log('[ChessGame] join-match emitted via shared socket', matchId);
+    const emitJoin = () => {
+      socket.emit('join-match', { matchId, playerId, nickname: nickname ?? undefined });
+      console.log('[ChessGame] join-match emitted via shared socket', matchId);
+    };
+    emitJoin();
 
     const onColorAssigned = (data: { color: 'white' | 'black' }) => {
       console.log('[ChessGame] color assigned:', data.color);
@@ -72,6 +79,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       blackTime: number;
       turn?: 'w' | 'b';
       lastMove?: { from: string; to: string; san: string } | null;
+      opponentNickname?: string | null;
     }) => {
       console.log('[ChessGame] game started');
       setWaitingForOpponent(false);
@@ -80,6 +88,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       setBlackTime(data.blackTime);
       setSelectedSquare(null);
       setLegalMoves([]);
+      if (data.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
       if (data.lastMove) {
         setLastMove({ from: data.lastMove.from as Square, to: data.lastMove.to as Square });
       } else {
@@ -155,6 +164,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       }
     };
 
+    socket.on('connect', emitJoin);
     socket.on('color-assigned', onColorAssigned);
     socket.on('game-start', onGameStart);
     socket.on('opponent-move', onOpponentMove);
@@ -164,6 +174,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
     socket.on('game-result', onGameResult);
 
     return () => {
+      socket.off('connect', emitJoin);
       socket.off('color-assigned', onColorAssigned);
       socket.off('game-start', onGameStart);
       socket.off('opponent-move', onOpponentMove);
@@ -172,7 +183,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
       socket.off('opponent-disconnected', onOpponentDisconnected);
       socket.off('game-result', onGameResult);
     };
-  }, [socket, matchId, playerId, onFinish, t]);
+  }, [socket, matchId, playerId, nickname, onFinish, t]);
 
   useEffect(() => {
     if (gameOver || waitingForOpponent) return;
@@ -433,7 +444,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
             "w-4 h-4 rounded-full border-2",
             playerColor === 'white' ? "bg-zinc-900 border-zinc-600" : "bg-white border-zinc-400"
           )} />
-          <span className="font-semibold">{t('Opponent', 'Opponent')}</span>
+          <span className="font-semibold">{opponentNickname || t('Opponent', 'Opponent')}</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",
@@ -486,7 +497,7 @@ export function ChessGame({ onFinish }: ChessGameProps) {
             "w-4 h-4 rounded-full border-2",
             playerColor === 'white' ? "bg-white border-zinc-400" : "bg-zinc-900 border-zinc-600"
           )} />
-          <span className="font-semibold">{t('You', 'You')} ({playerColor})</span>
+          <span className="font-semibold">{nickname || t('You', 'You')} ({playerColor})</span>
         </div>
         <div className={cn(
           "font-mono text-lg font-bold px-3 py-1 rounded",

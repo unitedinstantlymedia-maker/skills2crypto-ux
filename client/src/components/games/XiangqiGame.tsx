@@ -48,6 +48,10 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
 
   const matchId = state.currentMatch?.id;
   const playerId = state.wallet.address || "anonymous";
+  const nickname = state.wallet.address
+    ? localStorage.getItem(`nickname_${state.wallet.address}`)
+    : null;
+  const [opponentNickname, setOpponentNickname] = useState<string | null>(null);
   const isConnected = !!socket?.connected;
   const isPlayerTurn = !!playerColor && gameState?.currentTurn === playerColor;
 
@@ -79,8 +83,11 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
   useEffect(() => {
     if (!socket || !matchId || matchId === "pending") return;
 
-    socket.emit("join-xiangqi-match", { matchId, playerId });
-    console.log("[XiangqiGame] join-xiangqi-match emitted", matchId);
+    const emitJoin = () => {
+      socket.emit("join-xiangqi-match", { matchId, playerId, nickname: nickname ?? undefined });
+      console.log("[XiangqiGame] join-xiangqi-match emitted", matchId);
+    };
+    emitJoin();
 
     const onColorAssigned = (data: { color: Color }) => {
       console.log("[XiangqiGame] color assigned:", data.color);
@@ -95,9 +102,11 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
         board?: string;
         pliesSinceCapture?: number;
       };
+      opponentNickname?: string | null;
     }) => {
       console.log("[XiangqiGame] game started", data);
       setWaitingForOpponent(false);
+      if (data?.opponentNickname !== undefined) setOpponentNickname(data.opponentNickname);
       const engine = new XiangqiEngine(handleStateChange);
       engineRef.current = engine;
       // Hydrate from server snapshot so reconnect restores true state.
@@ -188,6 +197,7 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
       setTimeout(() => onFinish(result), 1500);
     };
 
+    socket.on("connect", emitJoin);
     socket.on("xiangqi-color-assigned", onColorAssigned);
     socket.on("xiangqi-game-start", onGameStart);
     socket.on("opponent-xiangqi-move", onOpponentMove);
@@ -197,6 +207,7 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
     socket.on("game-result", onGameResult);
 
     return () => {
+      socket.off("connect", emitJoin);
       socket.off("xiangqi-color-assigned", onColorAssigned);
       socket.off("xiangqi-game-start", onGameStart);
       socket.off("opponent-xiangqi-move", onOpponentMove);
@@ -368,7 +379,7 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
                 : "bg-zinc-900 border-zinc-600",
             )}
           />
-          <span className="font-semibold">{t("Opponent", "Opponent")}</span>
+          <span className="font-semibold">{opponentNickname || t("Opponent", "Opponent")}</span>
         </div>
         <div
           className={cn(
@@ -487,7 +498,7 @@ export function XiangqiGame({ onFinish }: XiangqiGameProps) {
             )}
           />
           <span className="font-semibold">
-            {t("You", "You")} ({playerColor})
+            {nickname || t("You", "You")} ({playerColor})
           </span>
         </div>
         <div
