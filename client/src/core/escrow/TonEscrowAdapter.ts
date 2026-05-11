@@ -60,7 +60,6 @@ async function fetchDepositInfo(matchId: string, walletAddress: string): Promise
   const r = await fetch(apiUrl("/api/ton/deposit-info"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // walletAddress is required by the anti-cheat L1 captcha gate.
     body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await r.json().catch(() => ({}));

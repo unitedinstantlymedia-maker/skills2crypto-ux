@@ -31,9 +31,9 @@ export function invalidateUserStatusCache(wallet?: string): void {
 }
 
 // Fire-and-forget upsert. Called from every entry point that sees a
-// wallet (matchmaking, deposit endpoints, captcha verify, match
-// settlement) so first/last-seen timestamps stay current and no
-// downstream code needs to manually create a row before reading.
+// wallet (matchmaking, deposit endpoints, match settlement) so
+// first/last-seen timestamps stay current and no downstream code
+// needs to manually create a row before reading.
 export async function touchUser(wallet: string): Promise<void> {
   const w = normalize(wallet);
   if (!w) return;
@@ -72,8 +72,7 @@ export async function getUserStatus(wallet: string): Promise<UserStatus> {
     // Fail OPEN for status reads — a DB blip should not block honest
     // users from playing. Bans are advisory anti-cheat, not auth: if
     // the DB is unreachable, allow play and rely on retries to catch
-    // up later. This is the symmetric choice to captcha's fail-closed
-    // (captcha protects deposits; soft-ban protects pairing).
+    // up later.
     console.warn(`[users] getUserStatus(${w}) failed, treating as active: ${e?.message || e}`);
     status = "active";
   }
@@ -140,12 +139,10 @@ export async function setUserStatus(params: SetUserStatusParams): Promise<User> 
   return updated;
 }
 
-// Helper for the deposit endpoints. Returns a {ok:false, status, body}
-// shape that mirrors checkDepositCaptchaForWallets so the call sites
-// stay symmetrical. A hard-banned participant fails the deposit auth
-// for the whole match — we don't want a banned player's opponent to
-// stake real money into a match that the banned account can never
-// reach matchmaking for again.
+// Helper for the deposit endpoints. A hard-banned participant fails
+// the deposit auth for the whole match — we don't want a banned
+// player's opponent to stake real money into a match that the
+// banned account can never reach matchmaking for again.
 export async function checkDepositBanForWallets(
   wallets: Array<string | null | undefined>,
 ): Promise<

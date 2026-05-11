@@ -42,7 +42,6 @@ async function fetchMatchAuth(matchId: string, walletAddress: string): Promise<M
   const res = await fetch(apiUrl("/api/oracle/match-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // walletAddress is required by the anti-cheat L1 captcha gate.
     body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await res.json().catch(() => ({ error: "Invalid response" }));

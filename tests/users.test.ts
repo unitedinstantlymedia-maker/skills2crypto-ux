@@ -284,7 +284,7 @@ describe("checkDepositBanForWallets", () => {
 // Matchmaking gate semantics — assert the status returned by
 // getUserStatus drives the right find-match branch. We exercise the
 // helper directly rather than spinning up the route, which would
-// require mocking ~10 unrelated subsystems (oracles, captcha, etc.).
+// require mocking ~10 unrelated subsystems (oracles, etc.).
 // ---------------------------------------------------------------------------
 describe("matchmaking gate semantics", () => {
   it("'active' → playable", async () => {

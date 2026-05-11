@@ -29,7 +29,6 @@ async function fetchDepositAuth(matchId: string, walletAddress: string): Promise
   const res = await fetch(apiUrl("/api/tron/deposit-auth"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // walletAddress is required by the anti-cheat L1 captcha gate.
     body: JSON.stringify({ matchId, walletAddress }),
   });
   const data = await res.json().catch(() => ({ error: "Invalid response" }));

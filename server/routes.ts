@@ -10,16 +10,9 @@ import { matches, matchMoves, type ChallengeData, type ChallengeStatus, type Cha
 import { verifyMatchToken } from "./security/matchToken";
 import { redis } from "./redis";
 import { nanoid } from "nanoid";
-import { randomBytes, timingSafeEqual } from "crypto";
+import { timingSafeEqual } from "crypto";
 import { rlTight, rlMedium, rlLoose } from "./security/rateLimit";
 import { getMatchmakingCooldownRemainingMs } from "./security/socketLimits";
-import {
-  generateChallenge,
-  verifyChallenge,
-  checkDepositCaptchaForWallets,
-  isWalletCaptchaVerified,
-  getCaptchaCooldownRemainingMs,
-} from "./security/captcha";
 import {
   getAbuseCountersStatus,
   recordMatchmakingCooldownRejection,
@@ -79,115 +72,6 @@ export async function registerRoutes(
   app: Express,
   io: SocketIOServer
 ): Promise<Server> {
-
-  // ============================================================
-  // Anti-cheat L1 — Slider/puzzle captcha
-  // ============================================================
-  // POST /api/captcha/challenge { walletAddress } — issues a fresh
-  // challenge unless the wallet is currently in fail-cooldown. Verified
-  // wallets receive {alreadyVerified:true} so the client can skip
-  // showing the modal. Rate-limited (rlTight) to limit challenge churn
-  // from a single IP.
-  app.post("/api/captcha/challenge", rlTight, async (req, res) => {
-    const { walletAddress } = (req.body ?? {}) as { walletAddress?: string };
-    if (!walletAddress || typeof walletAddress !== "string") {
-      return res.status(400).json({ error: "walletAddress required" });
-    }
-    // Soft fast-path. Cooldown / already-verified checks are best-effort
-    // here — if Redis is flaky we just fall through to issuing a fresh
-    // challenge rather than 503-ing the user out of the lobby. The
-    // ACTUAL gate (deposit endpoints) fails closed via
-    // checkDepositCaptchaForWallets, so doing the soft path here can't
-    // grant access on its own.
-    try {
-      const cooldownMs = await getCaptchaCooldownRemainingMs(walletAddress);
-      if (cooldownMs > 0) {
-        return res.status(429).json({
-          error: "captcha_cooldown",
-          message: "Too many tries — please wait and try again.",
-          retryAfterMs: cooldownMs,
-          retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
-        });
-      }
-      if (await isWalletCaptchaVerified(walletAddress)) {
-        return res.status(200).json({ alreadyVerified: true });
-      }
-    } catch (err: any) {
-      console.warn(
-        "[captcha/challenge] soft fast-path failed, issuing fresh challenge:",
-        err?.message || err
-      );
-    }
-    try {
-      const challenge = await generateChallenge({ wallet: walletAddress });
-      return res.status(200).json(challenge);
-    } catch (err: any) {
-      console.error("[captcha/challenge] failed:", err?.message || err);
-      return res.status(503).json({
-        error: "captcha_unavailable",
-        message:
-          "Verification is temporarily unavailable. Please try again shortly.",
-      });
-    }
-  });
-
-  // POST /api/captcha/verify { challengeId, slotX, motionSamples }
-  // Returns {ok:true} on success or a typed failure with optional cooldown
-  // info if the wallet has hit the failure threshold.
-  app.post("/api/captcha/verify", rlTight, async (req, res) => {
-    const { challengeId, slotX, motionSamples } = (req.body ?? {}) as {
-      challengeId?: string;
-      slotX?: number;
-      motionSamples?: Array<{ t: number; x: number }>;
-    };
-    if (
-      !challengeId ||
-      typeof challengeId !== "string" ||
-      typeof slotX !== "number" ||
-      !Array.isArray(motionSamples)
-    ) {
-      return res.status(400).json({ error: "bad params" });
-    }
-    const result = await verifyChallenge({
-      challengeId,
-      slotX,
-      motionSamples: motionSamples.map((s) => ({
-        t: Number(s.t),
-        x: Number(s.x),
-      })),
-    });
-    // Anti-cheat L1 (Task #46): record this wallet as having
-    // interacted with the system regardless of pass/fail. Failed
-    // captcha attempts are themselves anti-cheat signal — the admin
-    // wants to see them reflected in lastSeenAt. Fire-and-forget so a
-    // DB blip can't break the verification path.
-    if (result.wallet) touchUser(result.wallet).catch(() => {});
-    if (result.ok) {
-      return res.status(200).json({ ok: true });
-    }
-    // If this failure tipped the wallet into cooldown, surface that so
-    // the client renders "Too many tries — please wait 15 minutes."
-    let cooldownMs = 0;
-    if (result.wallet) {
-      cooldownMs = await getCaptchaCooldownRemainingMs(result.wallet);
-    }
-    if (cooldownMs > 0) {
-      return res.status(429).json({
-        ok: false,
-        error: "captcha_cooldown",
-        reason: result.reason,
-        message: "Too many tries — please wait and try again.",
-        retryAfterMs: cooldownMs,
-        retryAfterSec: Math.max(1, Math.ceil(cooldownMs / 1000)),
-      });
-    }
-    return res.status(400).json({
-      ok: false,
-      error: "captcha_failed",
-      reason: result.reason,
-      message: "Verification failed. Please try again.",
-    });
-  });
 
   app.post("/api/find-match", rlTight, async (req, res) => {
     const { game, asset, stake, socketId, walletAddress } = (req.body ?? {}) as Partial<FindMatchBody>;
@@ -1052,19 +936,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Match not found" });
       }
 
-      // Anti-cheat L1 deposit gate. We read the depositor wallets from
-      // TRUSTED match data (addr1/addr2) instead of the request body so
-      // a scripted client can't bypass the gate by submitting some
-      // unrelated already-verified wallet. Both players must be
-      // captcha-verified before either can fetch the deposit auth.
       if (matchData.addr1 || matchData.addr2) {
-        const gate = await checkDepositCaptchaForWallets([
-          String(matchData.addr1 || ""),
-          String(matchData.addr2 || ""),
-        ]);
-        if (!gate.ok) {
-          return res.status(gate.status).json(gate.body);
-        }
         // Soft-ban gate (Task #46). If either participant has been
         // hard-banned since matchmaking, refuse the deposit auth so the
         // honest opponent doesn't put real money behind a match the
@@ -1208,16 +1080,7 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Match not found" });
       }
 
-      // Anti-cheat L1 deposit gate, bound to TRUSTED match data
-      // (addr1/addr2) so it can't be spoofed via the request body.
       if (matchData.addr1 || matchData.addr2) {
-        const gate = await checkDepositCaptchaForWallets([
-          String(matchData.addr1 || ""),
-          String(matchData.addr2 || ""),
-        ]);
-        if (!gate.ok) {
-          return res.status(gate.status).json(gate.body);
-        }
         const banGate = await checkDepositBanForWallets([
           String(matchData.addr1 || ""),
           String(matchData.addr2 || ""),
@@ -1834,12 +1697,6 @@ export async function registerRoutes(
       const player1 = String(matchData.addr1);
       const player2 = String(matchData.addr2);
 
-      // Anti-cheat L1 deposit gate, bound to TRUSTED match data
-      // (addr1/addr2) so it can't be spoofed via the request body.
-      const captchaGate = await checkDepositCaptchaForWallets([player1, player2]);
-      if (!captchaGate.ok) {
-        return res.status(captchaGate.status).json(captchaGate.body);
-      }
       const banGate = await checkDepositBanForWallets([player1, player2]);
       if (!banGate.ok) {
         return res.status(banGate.status).json(banGate.body);
