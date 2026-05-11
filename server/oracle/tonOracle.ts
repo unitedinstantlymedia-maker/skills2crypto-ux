@@ -266,9 +266,6 @@ function build() {
     p1Funded: boolean;
     p2Funded: boolean;
     stakeNano: string;
-    player1: string;
-    player2: string;
-    firstDepositAt: number;
   } | null> {
     try {
       const matchIdHash = matchIdToBigInt(matchId);
@@ -298,19 +295,15 @@ function build() {
         );
       }
 
-      const player1Raw = items[1];
-      const player2Raw = items[2];
       const stakeRaw = items[3];
       const p1FundedRaw = items[4];
       const p2FundedRaw = items[5];
-      const firstDepositAtRaw = items[6];
       const statusRaw = items[7];
 
       if (
         typeof stakeRaw !== "bigint" ||
         typeof p1FundedRaw !== "bigint" ||
         typeof p2FundedRaw !== "bigint" ||
-        typeof firstDepositAtRaw !== "bigint" ||
         typeof statusRaw !== "bigint"
       ) {
         throw new TonOracleError(
@@ -319,34 +312,12 @@ function build() {
         );
       }
 
-      // player1/player2 come back as Slice or Cell containing an Address.
-      // Decode each into a friendly bounceable string so the caller can
-      // compare against TonConnect's `account.address` directly.
-      function decodeAddrItem(it: unknown): string {
-        try {
-          const anyIt = it as any;
-          const slice = typeof anyIt?.beginParse === "function"
-            ? anyIt.beginParse()
-            : (typeof anyIt?.asSlice === "function" ? anyIt.asSlice() : anyIt);
-          const addr = slice.loadAddress();
-          return addr.toString({ bounceable: false });
-        } catch (e: any) {
-          throw new TonOracleError(
-            `Could not decode address item: ${e?.message || e}`,
-            "BAD_STACK_SHAPE"
-          );
-        }
-      }
-
       // TVM booleans are encoded as -1n (true) / 0n (false).
       return {
         status: Number(statusRaw),
         p1Funded: p1FundedRaw !== 0n,
         p2Funded: p2FundedRaw !== 0n,
         stakeNano: stakeRaw.toString(),
-        player1: decodeAddrItem(player1Raw),
-        player2: decodeAddrItem(player2Raw),
-        firstDepositAt: Number(firstDepositAtRaw),
       };
     } catch (e: any) {
       const msg = String(e?.message || e);
