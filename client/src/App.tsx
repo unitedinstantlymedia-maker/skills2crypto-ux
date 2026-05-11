@@ -18,6 +18,7 @@ import Wallet from "@/pages/Wallet";
 import History from "@/pages/History";
 import Tournaments from "@/pages/Tournaments";
 import Challenge from "@/pages/Challenge";
+import Refund from "@/pages/Refund";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -35,6 +36,7 @@ function Router() {
         <Route path="/wallet" component={Wallet} />
         <Route path="/history" component={History} />
         <Route path="/tournaments" component={Tournaments} />
+        <Route path="/refund" component={Refund} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

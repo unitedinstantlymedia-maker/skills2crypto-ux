@@ -1823,6 +1823,129 @@ export async function registerRoutes(
   });
 
   /**
+   * POST /api/ton/refund-info
+   * Body: { matchId, walletAddress }
+   *
+   * Returns the BOC payload + escrow address + gas amount that the depositor
+   * must send via TonConnect to recover funds from a single-sided pending
+   * match (i.e. their opponent never deposited and the contract's
+   * deposit-timeout window has elapsed). The contract enforces the actual
+   * eligibility rules in `RefundNoShow`, but we pre-check here so the UI
+   * can show a precise error instead of a TonKeeper "transaction failed".
+   */
+  app.post("/api/ton/refund-info", rlMedium, async (req, res) => {
+    const { matchId, walletAddress } = req.body ?? {};
+    if (!matchId || typeof matchId !== "string") {
+      return res.status(400).json({ error: "Invalid matchId" });
+    }
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+    try {
+      const { createTonOracle } = await import("./oracle/tonOracle");
+      const ton = createTonOracle();
+      const m = await ton.getMatchOnChain(matchId);
+      if (!m) {
+        return res.status(404).json({
+          error: "match_not_found",
+          message: "No match with that ID exists in the escrow contract.",
+        });
+      }
+      if (m.status !== 1) {
+        const label = ["none", "pending", "active", "settled", "cancelled"][m.status] ?? "unknown";
+        return res.status(409).json({
+          error: "not_pending",
+          message: `Match is not refundable — on-chain status is '${label}'.`,
+          onChainStatus: m.status,
+        });
+      }
+      if (m.p1Funded === m.p2Funded) {
+        // Either both funded (impossible for status=pending) or neither
+        // funded (also impossible — first deposit creates the match).
+        return res.status(409).json({
+          error: "invalid_funding_state",
+          message: "Match funding state is inconsistent with a single-sided refund.",
+        });
+      }
+
+      // Compare normalized raw addresses so different friendly encodings
+      // (bounceable vs non-bounceable, EQ vs UQ) all match.
+      const { Address } = await import("@ton/core");
+      let walletRaw: string;
+      let p1Raw: string;
+      let p2Raw: string;
+      try {
+        walletRaw = Address.parse(walletAddress).toRawString();
+        p1Raw = Address.parse(m.player1).toRawString();
+        p2Raw = Address.parse(m.player2).toRawString();
+      } catch {
+        return res.status(400).json({ error: "Malformed TON address" });
+      }
+
+      const depositorRaw = m.p1Funded ? p1Raw : p2Raw;
+      if (walletRaw !== depositorRaw) {
+        const depositorFriendly = m.p1Funded ? m.player1 : m.player2;
+        return res.status(403).json({
+          error: "not_depositor",
+          message: `Only the original depositor (${depositorFriendly}) can claim this refund. Connect that wallet in TonConnect.`,
+          depositorAddress: depositorFriendly,
+        });
+      }
+
+      // Read the contract's deposit-timeout window so the UI can show the
+      // exact eligibility window. Cheap read, ~1 RPC call.
+      const { TonClient } = await import("@ton/ton");
+      const client = new TonClient({
+        endpoint: process.env.TON_RPC_URL || "https://toncenter.com/api/v2/jsonRPC",
+        apiKey: process.env.TON_API_KEY,
+      });
+      const escrowAddr = Address.parse(ton.escrowAddressFriendly);
+      let timeoutSec = 3600;
+      try {
+        const r = await client.runMethod(escrowAddr, "getDepositTimeoutSeconds", []);
+        timeoutSec = Number(r.stack.readBigNumber());
+      } catch (e: any) {
+        console.warn(`[ton/refund-info] could not read getDepositTimeoutSeconds: ${e?.message || e}`);
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const eligibleAtSec = m.firstDepositAt + timeoutSec;
+      // Contract uses strict `now() > firstDepositAt + timeout`, so we must
+      // reject the exact-equality second too — otherwise the TX would revert
+      // on-chain after the user signed the prompt.
+      if (nowSec <= eligibleAtSec) {
+        return res.status(409).json({
+          error: "timeout_not_elapsed",
+          message: `Deposit timeout has not elapsed. You can claim refund after epoch ${eligibleAtSec}.`,
+          eligibleAtSec,
+          firstDepositAtSec: m.firstDepositAt,
+          timeoutSec,
+          nowSec,
+        });
+      }
+
+      const payloadBoc = ton.encodeRefundNoShowPayload(matchId);
+      const gasNano = "50000000"; // 0.05 TON gas — contract refunds excess.
+      const validUntilSec = nowSec + 15 * 60;
+
+      console.log(
+        `[ton/refund-info] match=${matchId} depositor=${walletAddress} elapsed=${nowSec - m.firstDepositAt}s — refund authorised`
+      );
+      return res.json({
+        matchId,
+        escrowAddress: ton.escrowAddressFriendly,
+        amountNano: gasNano,
+        payloadBoc,
+        validUntilSec,
+        stakeNano: m.stakeNano,
+        depositorAddress: m.p1Funded ? m.player1 : m.player2,
+      });
+    } catch (err: any) {
+      console.error("[ton/refund-info] Error:", err?.message || err);
+      return res.status(500).json({ error: err?.message || "Failed to build refund info" });
+    }
+  });
+
+  /**
    * POST /api/ton/notify-deposit
    * Body: { matchId, txInfo?, playerAddress }
    *
