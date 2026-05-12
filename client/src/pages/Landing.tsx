@@ -9,7 +9,7 @@ export default function Landing() {
   const { t } = useLanguage();
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[80vh] space-y-8 text-center relative">
+    <div className="flex flex-col items-center justify-start md:justify-center min-h-screen md:min-h-[80vh] pt-24 md:pt-0 pb-8 space-y-8 text-center relative">
       <div className="fixed top-4 left-4 z-50 flex gap-4">
         <Link href="/rules">
           <div className="flex flex-col items-center cursor-pointer group pt-[2px]">
@@ -29,9 +29,7 @@ export default function Landing() {
         </Link>
       </div>
       <div className="fixed top-4 right-4 z-50">
-        <div className="transform scale-150 origin-top-right">
-          <LanguageSelector />
-        </div>
+        <LanguageSelector />
       </div>
 
       <motion.div 
