@@ -115,18 +115,18 @@
     if (($msg'reason == 0)) {
         int $platformFee = (($totalStake * 300) / 10000);
         int $payout = ($totalStake - $platformFee);
-        $global_send($SendParameters$_constructor_to_value_mode_body($msg'winner, $payout, 1, __gen_cell_comment_b232160ffd5341d3be1a36313aa3b1f87b7150ac4b3e83615f759dfcc4fb4b6f()));
-        $global_send($SendParameters$_constructor_to_value_mode_body($self'platformWallet, $platformFee, 1, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($msg'winner, $payout, 1, false, __gen_cell_comment_b232160ffd5341d3be1a36313aa3b1f87b7150ac4b3e83615f759dfcc4fb4b6f()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($self'platformWallet, $platformFee, 1, false, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
     } elseif (($msg'reason == 1)) {
         int $platformFee = (($totalStake * 300) / 10000);
         int $halfFee = ($platformFee / 2);
         int $refundPerPlayer = ($m'stake - $halfFee);
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $refundPerPlayer, 1, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $refundPerPlayer, 1, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
-        $global_send($SendParameters$_constructor_to_value_mode_body($self'platformWallet, $platformFee, 1, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player1, $refundPerPlayer, 1, false, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player2, $refundPerPlayer, 1, false, __gen_cell_comment_a5d4bc2c9cefea863b9b1707ff7ac04cc68b1f6307d756a954c6744d770dffe2()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($self'platformWallet, $platformFee, 1, false, __gen_cell_comment_58c510fdc5f0ab917524b322d7a3394a9439a35ab802413ac44b26f16d6aa383()));
     } else {
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $m'stake, 1, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $m'stake, 1, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player1, $m'stake, 1, false, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player2, $m'stake, 1, false, __gen_cell_comment_e3daa26a08e99c2da00501d1da5ea192643e7d593a493c1da1e9fa7ff2404292()));
     }
     return (($self'owner, $self'oraclePubkey, $self'platformWallet, $self'depositTimeoutSeconds, $self'matches), ());
 }
@@ -144,12 +144,12 @@
         throw_unless(1459, ( __tact_slice_eq_bits($m'player1, $player) ));
         $m'status = 3;
         $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player1, $m'stake, 1, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player1, $m'stake, 1, false, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
     } elseif (( ($m'p2Funded) ? ((~ $m'p1Funded)) : (false) )) {
         throw_unless(1459, ( __tact_slice_eq_bits($m'player2, $player) ));
         $m'status = 3;
         $self'matches~__tact_dict_set_int_cell(257, $msg'matchId, $Match$_store_cell(($m'matchId, $m'player1, $m'player2, $m'stake, $m'p1Funded, $m'p2Funded, $m'firstDepositAt, $m'status)));
-        $global_send($SendParameters$_constructor_to_value_mode_body($m'player2, $m'stake, 1, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
+        $global_send($SendParameters$_constructor_to_value_mode_bounce_body($m'player2, $m'stake, 1, false, __gen_cell_comment_5337b96390d242df2a2f3fb5453fbeebf05d38f98c4c8845c2e0ed5380c6e634()));
     } else {
         throw_unless(57981, false);
     }

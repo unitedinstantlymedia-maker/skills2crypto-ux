@@ -46,7 +46,7 @@ PROGRAM{
   DECLPROC $Skills2CryptoEscrowTON$_fun_requireOwner
   DECLPROC $Skills2CryptoEscrowTON$_fun_owner
   DECLPROC $Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status
-  DECLPROC $SendParameters$_constructor_to_value_mode_body
+  DECLPROC $SendParameters$_constructor_to_value_mode_bounce_body
   DECLPROC $DeployOk$_constructor_queryId
   DECLPROC $Skills2CryptoEscrowTON$_internal_binary_Deposit
   DECLPROC $Skills2CryptoEscrowTON$_internal_binary_Settle
@@ -541,9 +541,9 @@ PROGRAM{
   }>
   $Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status PROCINLINE:<{
   }>
-  $SendParameters$_constructor_to_value_mode_body PROCINLINE:<{
-    TRUE
-    4 -ROLL
+  $SendParameters$_constructor_to_value_mode_bounce_body PROCINLINE:<{
+    s1 s4 XCHG
+    s3 s3 s0 XCHG3
     PUSHNULL
     PUSHNULL
   }>
@@ -771,15 +771,17 @@ PROGRAM{
       s2 s2 XCPU
       SUB
       1 PUSHINT
+      FALSE
           B{b5ee9c7241010101001000001c0000000057696e207061796f7574334d1da2} B>boc PUSHREF
-      $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+      $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
       $global_send INLINECALLDICT
       DROP
       1 PUSHINT
+      FALSE
           B{b5ee9c7241010101001200002000000000506c6174666f726d2066656575ee76c0} B>boc PUSHREF
-      s5 PUSH
-      3 -ROLL
-      $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+      s6 PUSH
+      4 -ROLL
+      $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
       $global_send INLINECALLDICT
       DROP
     }>ELSE<{
@@ -797,42 +799,48 @@ PROGRAM{
         s1 s5 XCHG
         SUB
         1 PUSHINT
+        FALSE
             B{b5ee9c7241010101001100001e000000004472617720726566756e6455279df0} B>boc PUSHREF
-        s2 PUSH
+        s3 PUSH
+        s4 s6 XCHG
+        3 -ROLL
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
+        $global_send INLINECALLDICT
+        DROP
+        1 PUSHINT
+        FALSE
+            B{b5ee9c7241010101001100001e000000004472617720726566756e6455279df0} B>boc PUSHREF
+        s4 s5 XCHG
         s3 s5 XCHG
-        -ROT
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
         $global_send INLINECALLDICT
         DROP
         1 PUSHINT
-            B{b5ee9c7241010101001100001e000000004472617720726566756e6455279df0} B>boc PUSHREF
-        s3 s4 XCHG
-        s2 s4 XCHG
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
-        $global_send INLINECALLDICT
-        DROP
-        1 PUSHINT
+        FALSE
             B{b5ee9c7241010101001200002000000000506c6174666f726d2066656575ee76c0} B>boc PUSHREF
-        s5 PUSH
-        s0 s3 XCHG
-        s4 s4 s4 XCHG3
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        s6 PUSH
+        s0 s4 XCHG
+        s0 s5 XCHG
+        3 -ROLL
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
         $global_send INLINECALLDICT
         DROP
       }>ELSE<{
         s2 POP
         1 PUSHINT
+        FALSE
             B{b5ee9c7241010101001700002a00000000446973636f6e6e65637420726566756e64f3190529} B>boc PUSHREF
-        s5 PUSH
-        s3 s4 XCHG
-        -ROT
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        s6 PUSH
+        s4 s5 XCHG
+        3 -ROLL
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
         $global_send INLINECALLDICT
         DROP
         1 PUSHINT
+        FALSE
             B{b5ee9c7241010101001700002a00000000446973636f6e6e65637420726566756e64f3190529} B>boc PUSHREF
-        s2 s4 XCHG
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        s3 s5 XCHG
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
         $global_send INLINECALLDICT
         DROP
       }>
@@ -885,9 +893,10 @@ PROGRAM{
       s1 s4 s0 XCHG3
       __tact_dict_set_int_cell INLINECALLDICT
       1 PUSHINT
+      FALSE
           B{b5ee9c72410101010014000024000000004e6f2d73686f7720726566756e648e495e14} B>boc PUSHREF
-      s2 s4 XCHG
-      $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+      s3 s5 XCHG
+      $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
       $global_send INLINECALLDICT
       DROP
     }>ELSE<{
@@ -915,9 +924,10 @@ PROGRAM{
         s1 s4 XCHG
         __tact_dict_set_int_cell INLINECALLDICT
         1 PUSHINT
+        FALSE
             B{b5ee9c72410101010014000024000000004e6f2d73686f7720726566756e648e495e14} B>boc PUSHREF
-        s2 s4 XCHG
-        $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        s3 s5 XCHG
+        $SendParameters$_constructor_to_value_mode_bounce_body INLINECALLDICT
         $global_send INLINECALLDICT
         DROP
       }>ELSE<{

@@ -155,12 +155,14 @@ contract Skills2CryptoEscrowTON with Deployable, Ownable {
                 to: msg.winner,
                 value: payout,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Win payout".asComment()
             });
             send(SendParameters{
                 to: self.platformWallet,
                 value: platformFee,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Platform fee".asComment()
             });
         } else if (msg.reason == REASON_DRAW) {
@@ -171,18 +173,21 @@ contract Skills2CryptoEscrowTON with Deployable, Ownable {
                 to: m.player1,
                 value: refundPerPlayer,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Draw refund".asComment()
             });
             send(SendParameters{
                 to: m.player2,
                 value: refundPerPlayer,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Draw refund".asComment()
             });
             send(SendParameters{
                 to: self.platformWallet,
                 value: platformFee,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Platform fee".asComment()
             });
         } else {
@@ -191,12 +196,14 @@ contract Skills2CryptoEscrowTON with Deployable, Ownable {
                 to: m.player1,
                 value: m.stake,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Disconnect refund".asComment()
             });
             send(SendParameters{
                 to: m.player2,
                 value: m.stake,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "Disconnect refund".asComment()
             });
         }
@@ -218,6 +225,7 @@ contract Skills2CryptoEscrowTON with Deployable, Ownable {
                 to: m.player1,
                 value: m.stake,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "No-show refund".asComment()
             });
         } else if (m.p2Funded && !m.p1Funded) {
@@ -228,6 +236,7 @@ contract Skills2CryptoEscrowTON with Deployable, Ownable {
                 to: m.player2,
                 value: m.stake,
                 mode: SendPayGasSeparately,
+                bounce: false,
                 body: "No-show refund".asComment()
             });
         } else {

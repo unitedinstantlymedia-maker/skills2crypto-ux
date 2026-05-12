@@ -144,8 +144,8 @@ int $global_send((int, slice, int, int, cell, cell, cell) $params) impure inline
 ;; $Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status
 ((int, slice, slice, int, int, int, int, int)) $Match$_constructor_matchId_player1_player2_stake_p1Funded_p2Funded_firstDepositAt_status(int $matchId, slice $player1, slice $player2, int $stake, int $p1Funded, int $p2Funded, int $firstDepositAt, int $status) inline;
 
-;; $SendParameters$_constructor_to_value_mode_body
-((int, slice, int, int, cell, cell, cell)) $SendParameters$_constructor_to_value_mode_body(slice $to, int $value, int $mode, cell $body) inline;
+;; $SendParameters$_constructor_to_value_mode_bounce_body
+((int, slice, int, int, cell, cell, cell)) $SendParameters$_constructor_to_value_mode_bounce_body(slice $to, int $value, int $mode, int $bounce, cell $body) inline;
 
 ;; $DeployOk$_constructor_queryId
 ((int)) $DeployOk$_constructor_queryId(int $queryId) inline;

@@ -1,6 +1,6 @@
 # TACT Compilation Report
 Contract: Skills2CryptoEscrowTON
-BOC Size: 2302 bytes
+BOC Size: 2314 bytes
 
 # Types
 Total Types: 18
