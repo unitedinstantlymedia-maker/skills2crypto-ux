@@ -35,7 +35,7 @@ export function LanguageSelector() {
           >
             <span className="text-2xl leading-none filter drop-shadow-md group-hover:scale-110 transition-transform">{currentLanguage.flag}</span>
           </Button>
-          <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1">
+          <span className="hidden sm:inline text-[10px] uppercase font-bold tracking-wider text-muted-foreground group-hover:text-primary transition-colors mt-1 max-w-[96px] truncate">
             {t('Select Language', 'Select Language')}
           </span>
         </div>
