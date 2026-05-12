@@ -1066,12 +1066,6 @@ function startDominoesGame(io: SocketIOServer, room: DominoesRoom): void {
   const publicState = dominoesPublicState(room);
   const p1Sock = io.sockets.sockets.get(p1Player.socketId);
   const p2Sock = io.sockets.sockets.get(p2Player.socketId);
-  let p1Id: string | null = null;
-  let p2Id: string | null = null;
-  for (const [id, p] of room.players.entries()) {
-    if (p.role === "p1") p1Id = id;
-    else if (p.role === "p2") p2Id = id;
-  }
   if (p1Sock && p1Id) {
     p1Sock.emit("dominoes-game-start", {
       role: "p1",
