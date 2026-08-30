@@ -1,0 +1,23 @@
+#54 - Reconnect resilience + on-board nicknames
+What & Why
+Mobile players who background the app (incoming call, switching to WhatsApp, screen lock) currently lose their match: the disconnect-forfeit fires after 30s, returning to the tab leaves the board frozen, and the two clients can end the game out of sync. Lengthen the grace to 120s, make socket reconnection actually resume the game on every game type and every chain, and replace generic "You" / "Opponent" labels on each game board with the local player's nickname and the opponent's short wallet address.
+
+Done looks like
+A player who disconnects for up to ~119s and returns resumes the match with no forfeit; the surviving opponent sees a 2:00 amber countdown, then an "Opponent reconnected" toast.
+If the disconnect exceeds 120s the forfeit still fires, and the absent player on rejoin immediately sees the canonical result screen instead of a stale board.
+Both players receive the game-end notification in the same broadcast for normal game ends (checkmate, blocked board, score-out, ship sinks, resign, timeout, draw).
+Each game board shows the local player's chosen nickname (read from the existing wallet provider, which loads it from localStorage) where it used to say "You", falling back to the translated "You" string if the local user has not set a nickname. The opponent label uses the opponent's nickname if it is already available from existing match data; otherwise it falls back to the translated "Opponent" string. No truncated wallet addresses are ever displayed on the board. Chess and Xiangqi keep the color suffix.
+Honest caveat: nicknames live in each user's own browser localStorage and the existing match payloads do not carry the opponent's nickname, so under the "no new socket fields, no server storage" constraint the opponent label will in practice always render the translated "Opponent" fallback. The render path is written so that if a future task surfaces the opponent's nickname, the board will display it automatically with no further code changes.
+Behaviour is identical for BNB, ETH, USDT, and TON matches — no per-chain code paths.
+Out of scope
+No anti-cheat changes.
+No belt-and-braces rebinding of playerToSocket inside individual move handlers (per user instruction — re-emitting join-match on reconnect is the single resume mechanism).
+No new socket fields. No new server-side nickname storage. No DB migration. No new REST endpoints. The implementation reads only from the nickname plumbing that already exists today (WalletProvider.nickname, sourced from the per-address nickname_<addr> localStorage key set by the existing NicknameDialog flow).
+No wallet addresses on the game board, ever.
+No changes to escrow / oracle / on-chain settlement.
+No changes to the lobby, history page, or wallet flow.
+Steps
+Lengthen forfeit grace to 120s. Replace the two hard-coded 30 000ms values in the disconnect handler with a single named constant (DISCONNECT_FORFEIT_GRACE_MS = 120_000). The client banner already reads the deadline from the server payload, so the countdown updates automatically.
+Re-emit join-match on every socket reconnect. In each game component (and the Challenge page), add a connect listener inside the existing setup effect that re-sends the same join-match payload whenever the socket transport reconnects. The server's existing reconnect branches already cancel the pending forfeit, rejoin the room, refresh socketToPlayer/playerToSocket, emit opponent-reconnected, and replay a fresh game-start snapshot — no new server logic needed for the resume path itself.
+Late-deliver cached game-result on (re)join. In the server's join-match-equivalent handler for each of the six games, after joining the room, if a result for that match is already cached in gameResults, emit it directly to the rejoining socket. This covers the player who reconnects after their forfeit already fired.
+Render names on each board. In each game component, replace the "You" label with useWallet().nickname (the existing wallet provider already exposes this — it reads nickname_<address> from localStorage on connect). If nickname is null/empty, render the existing translated "You" string. For the opponent label, look at any nickname field already present on the existing match-related data the component receives; if none is available, render the existing translated "Opponent" string. Keep the (playerColor) suffix on chess and xiangqi. No wallet addresses or truncated addresses anywhere on the board. No new socket fields, no new server logic, no payload additions of any kind.
