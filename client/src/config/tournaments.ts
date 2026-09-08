@@ -1,0 +1,1 @@
+export const DEFAULT_TOURNAMENT_ENTRY_FEE_USDT = 5;

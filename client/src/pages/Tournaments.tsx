@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
+import { DEFAULT_TOURNAMENT_ENTRY_FEE_USDT } from "@/config/tournaments";
 
 import photorealisticChessImage from "@assets/generated_images/elegant_photorealistic_chess_pieces.png";
 import cleanTetrisImage from "@assets/generated_images/clean_3d_colorful_tetris_blocks.png";
@@ -128,7 +129,7 @@ export default function Tournaments() {
               }}
               data-testid="text-prize-pool"
             >
-              4,820 USDT
+              2,410 USDT
             </div>
           </div>
           <div className="flex flex-col items-center text-center">
@@ -209,7 +210,7 @@ export default function Tournaments() {
                       : { borderColor: "rgba(0,255,136,0.35)", color: "rgba(255,255,255,0.85)" }
                   }
                 >
-                  Entry 10 USDT
+                  Entry {DEFAULT_TOURNAMENT_ENTRY_FEE_USDT} USDT
                 </div>
               </div>
             </div>
