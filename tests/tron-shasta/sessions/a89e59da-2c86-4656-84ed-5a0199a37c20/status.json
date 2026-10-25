@@ -1,0 +1,26 @@
+{
+  "host": "https://api.shasta.trongrid.io",
+  "block": 69556028,
+  "balances": {
+    "sponsor": {
+      "address": "TM9Jt4EHHMKVCLympjMzspqSdW3Zcy5WVG",
+      "balanceSun": 2000000000
+    },
+    "playerA": {
+      "address": "TLjCbmfCdGq4wEwEjFXFrC6MxoRL42p2U3",
+      "balanceSun": 0
+    },
+    "playerB": {
+      "address": "TFwQhb5XG5eKpqLnYvXgUs5FgaGoZkzYge",
+      "balanceSun": 0
+    },
+    "platform": {
+      "address": "TSuasa8Zq3SN3KGgHYH88eVY3bLg22DY3J",
+      "balanceSun": 0
+    },
+    "resourceTreasury": {
+      "address": "TJgFqt6SWpu9mKTXEoXnxuW4PqUtLYKWQJ",
+      "balanceSun": 0
+    }
+  }
+}

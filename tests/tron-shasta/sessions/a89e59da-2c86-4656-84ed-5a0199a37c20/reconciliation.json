@@ -1,0 +1,59 @@
+{
+  "status": "stopped-resource-capacity-blocked",
+  "completed": false,
+  "reason": "Live Shasta resource allocations are inadequate for the planned first-time approvals and oracle contract calls. Runner stopped before deployment.",
+  "lastJournalledTransaction": {
+    "label": "delegate Bandwidth playerB",
+    "txID": "e06807437a12344857423d0dabf60b3eb691856cd387cf1d9df7da44174a7559",
+    "state": "solidified",
+    "verifiedUsing": [
+      "wallet/gettransactioninfobyid",
+      "walletsolidity/gettransactioninfobyid"
+    ],
+    "receipt": {
+      "id": "e06807437a12344857423d0dabf60b3eb691856cd387cf1d9df7da44174a7559",
+      "fee": 276000,
+      "blockNumber": 69556218,
+      "blockTimeStamp": 1792970262000,
+      "contractResult": [""],
+      "receipt": {"net_fee": 276000}
+    }
+  },
+  "observedBalancesSun": {
+    "sponsor": 894492000,
+    "playerA": 0,
+    "playerB": 0
+  },
+  "observedResources": {
+    "sponsor": {
+      "EnergyLimit": 8430,
+      "NetLimit": 5,
+      "freeNetLimit": 600,
+      "freeNetUsed": 502
+    },
+    "playerA": {"EnergyLimit": 2810, "NetLimit": 1, "freeNetLimit": 600},
+    "playerB": {"EnergyLimit": 2810, "NetLimit": 1, "freeNetLimit": 600},
+    "network": {
+      "TotalEnergyLimit": 180000000000,
+      "TotalEnergyWeight": 12810672736,
+      "TotalNetLimit": 43200000000,
+      "TotalNetWeight": 456292706249
+    }
+  },
+  "sponsorAccountingTRX": {
+    "initial": 2000,
+    "stakedEnergy": 1000,
+    "stakedBandwidth": 100,
+    "setupTransactionFees": 5.508,
+    "remainingLiquid": 894.492
+  },
+  "unverified": [
+    "Token approval Energy consumption",
+    "Deposit and settlement Energy consumption",
+    "Full zero-TRX token flow",
+    "Live rental-provider delivery",
+    "Mainnet USDT costs",
+    "Provider recharge economics"
+  ],
+  "replayPolicy": "Do not replay setup or create another funded session. Preserve this manifest and reconcile existing staking/delegations before continuing."
+}

@@ -1,0 +1,312 @@
+{
+  "host": "https://api.shasta.trongrid.io",
+  "chainId": 2494104990,
+  "compiler": "0.8.26+commit.8a97fa7a.Emscripten.clang",
+  "evmTarget": "paris",
+  "openzeppelin": "5.0.2",
+  "fixtureSha256": "09f82bd54c4386cee82148dc9d1f1a4bbe3f5b31b27f38558dbd0cc708949cf4",
+  "manifest": {
+    "storageVersion": 2,
+    "runId": "a89e59da-2c86-4656-84ed-5a0199a37c20",
+    "host": "https://api.shasta.trongrid.io",
+    "chainId": 2494104990,
+    "created": "2026-10-25T23:07:46.563Z",
+    "addresses": {
+      "sponsor": "TM9Jt4EHHMKVCLympjMzspqSdW3Zcy5WVG",
+      "playerA": "TLjCbmfCdGq4wEwEjFXFrC6MxoRL42p2U3",
+      "playerB": "TFwQhb5XG5eKpqLnYvXgUs5FgaGoZkzYge",
+      "platform": "TSuasa8Zq3SN3KGgHYH88eVY3bLg22DY3J",
+      "resourceTreasury": "TJgFqt6SWpu9mKTXEoXnxuW4PqUtLYKWQJ"
+    },
+    "warning": "SHASTA ONLY. No value. Never send mainnet funds."
+  },
+  "caveats": [
+    "Mock token and test escrow, NOT mainnet USDT or final production escrow costs.",
+    "Test sponsor delegates resources, NOT TronZap.",
+    "CLI signing does not prove TronLink/mobile wallet compatibility.",
+    "No provider recharge or self-sustaining funding loop is demonstrated."
+  ],
+  "transactions": [
+    {
+      "label": "activate playerA",
+      "txID": "e38b31505b3a61a72a0843f7119536a1597fde2e0d0220e6a3d7dcf244953179",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/e38b31505b3a61a72a0843f7119536a1597fde2e0d0220e6a3d7dcf244953179",
+      "info": {
+        "id": "e38b31505b3a61a72a0843f7119536a1597fde2e0d0220e6a3d7dcf244953179",
+        "fee": 1100000,
+        "blockNumber": 69556030,
+        "blockTimeStamp": 1792969698000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "e38b31505b3a61a72a0843f7119536a1597fde2e0d0220e6a3d7dcf244953179",
+        "fee": 1100000,
+        "blockNumber": 69556030,
+        "blockTimeStamp": 1792969698000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      }
+    },
+    {
+      "label": "activate playerB",
+      "txID": "adb43160ec76f527031acbe2add2616476fd3a4e79f7d365c7f585872e58fa07",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/adb43160ec76f527031acbe2add2616476fd3a4e79f7d365c7f585872e58fa07",
+      "info": {
+        "id": "adb43160ec76f527031acbe2add2616476fd3a4e79f7d365c7f585872e58fa07",
+        "fee": 1100000,
+        "blockNumber": 69556050,
+        "blockTimeStamp": 1792969758000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "adb43160ec76f527031acbe2add2616476fd3a4e79f7d365c7f585872e58fa07",
+        "fee": 1100000,
+        "blockNumber": 69556050,
+        "blockTimeStamp": 1792969758000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      }
+    },
+    {
+      "label": "activate platform",
+      "txID": "c09291664338816f9b0762e5dc70d3f1fece2c4a0f3b183d8d24ce0b03db61aa",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/c09291664338816f9b0762e5dc70d3f1fece2c4a0f3b183d8d24ce0b03db61aa",
+      "info": {
+        "id": "c09291664338816f9b0762e5dc70d3f1fece2c4a0f3b183d8d24ce0b03db61aa",
+        "fee": 1100000,
+        "blockNumber": 69556071,
+        "blockTimeStamp": 1792969821000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "c09291664338816f9b0762e5dc70d3f1fece2c4a0f3b183d8d24ce0b03db61aa",
+        "fee": 1100000,
+        "blockNumber": 69556071,
+        "blockTimeStamp": 1792969821000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      }
+    },
+    {
+      "label": "activate resourceTreasury",
+      "txID": "104a54a025e9b7e1b307432a07e14d27afcc3b68bba9b340d1a6e7b8f555a434",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/104a54a025e9b7e1b307432a07e14d27afcc3b68bba9b340d1a6e7b8f555a434",
+      "info": {
+        "id": "104a54a025e9b7e1b307432a07e14d27afcc3b68bba9b340d1a6e7b8f555a434",
+        "fee": 1100000,
+        "blockNumber": 69556092,
+        "blockTimeStamp": 1792969884000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "104a54a025e9b7e1b307432a07e14d27afcc3b68bba9b340d1a6e7b8f555a434",
+        "fee": 1100000,
+        "blockNumber": 69556092,
+        "blockTimeStamp": 1792969884000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 100000
+        }
+      }
+    },
+    {
+      "label": "stake Energy",
+      "txID": "51fcb0835e5d1ac0e85fad925c909a6ee2bd190770432fab52a6e36e5dd3f6ca",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/51fcb0835e5d1ac0e85fad925c909a6ee2bd190770432fab52a6e36e5dd3f6ca",
+      "info": {
+        "id": "51fcb0835e5d1ac0e85fad925c909a6ee2bd190770432fab52a6e36e5dd3f6ca",
+        "blockNumber": 69556113,
+        "blockTimeStamp": 1792969947000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_usage": 254
+        }
+      },
+      "solidifiedInfo": {
+        "id": "51fcb0835e5d1ac0e85fad925c909a6ee2bd190770432fab52a6e36e5dd3f6ca",
+        "blockNumber": 69556113,
+        "blockTimeStamp": 1792969947000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_usage": 254
+        }
+      }
+    },
+    {
+      "label": "stake Bandwidth",
+      "txID": "c136ead0a79094c17930b1a22b0286066d0ecd71193fdf20482fd9a36792cf6d",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/c136ead0a79094c17930b1a22b0286066d0ecd71193fdf20482fd9a36792cf6d",
+      "info": {
+        "id": "c136ead0a79094c17930b1a22b0286066d0ecd71193fdf20482fd9a36792cf6d",
+        "blockNumber": 69556135,
+        "blockTimeStamp": 1792970013000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_usage": 251
+        }
+      },
+      "solidifiedInfo": {
+        "id": "c136ead0a79094c17930b1a22b0286066d0ecd71193fdf20482fd9a36792cf6d",
+        "blockNumber": 69556135,
+        "blockTimeStamp": 1792970013000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_usage": 251
+        }
+      }
+    },
+    {
+      "label": "delegate Energy playerA",
+      "txID": "6f4b5233f80216b1edace66760a518893dafb2e237b4d922fa4ba54b6806005d",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/6f4b5233f80216b1edace66760a518893dafb2e237b4d922fa4ba54b6806005d",
+      "info": {
+        "id": "6f4b5233f80216b1edace66760a518893dafb2e237b4d922fa4ba54b6806005d",
+        "fee": 278000,
+        "blockNumber": 69556156,
+        "blockTimeStamp": 1792970076000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 278000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "6f4b5233f80216b1edace66760a518893dafb2e237b4d922fa4ba54b6806005d",
+        "fee": 278000,
+        "blockNumber": 69556156,
+        "blockTimeStamp": 1792970076000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 278000
+        }
+      }
+    },
+    {
+      "label": "delegate Bandwidth playerA",
+      "txID": "7393217c5fe77f8904f7418bde76a48f01b5eb011dd44151ffcf57ac90e79255",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/7393217c5fe77f8904f7418bde76a48f01b5eb011dd44151ffcf57ac90e79255",
+      "info": {
+        "id": "7393217c5fe77f8904f7418bde76a48f01b5eb011dd44151ffcf57ac90e79255",
+        "fee": 276000,
+        "blockNumber": 69556176,
+        "blockTimeStamp": 1792970136000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 276000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "7393217c5fe77f8904f7418bde76a48f01b5eb011dd44151ffcf57ac90e79255",
+        "fee": 276000,
+        "blockNumber": 69556176,
+        "blockTimeStamp": 1792970136000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 276000
+        }
+      }
+    },
+    {
+      "label": "delegate Energy playerB",
+      "txID": "49932b48def50a4a53b0108e1f106111eb85460514f0b293159414c1d8b8ba47",
+      "state": "solidified",
+      "explorer": "https://shasta.tronscan.org/#/transaction/49932b48def50a4a53b0108e1f106111eb85460514f0b293159414c1d8b8ba47",
+      "info": {
+        "id": "49932b48def50a4a53b0108e1f106111eb85460514f0b293159414c1d8b8ba47",
+        "fee": 278000,
+        "blockNumber": 69556197,
+        "blockTimeStamp": 1792970199000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 278000
+        }
+      },
+      "solidifiedInfo": {
+        "id": "49932b48def50a4a53b0108e1f106111eb85460514f0b293159414c1d8b8ba47",
+        "fee": 278000,
+        "blockNumber": 69556197,
+        "blockTimeStamp": 1792970199000,
+        "contractResult": [
+          ""
+        ],
+        "receipt": {
+          "net_fee": 278000
+        }
+      }
+    },
+    {
+      "label": "delegate Bandwidth playerB",
+      "txID": "e06807437a12344857423d0dabf60b3eb691856cd387cf1d9df7da44174a7559",
+      "state": "broadcast",
+      "explorer": "https://shasta.tronscan.org/#/transaction/e06807437a12344857423d0dabf60b3eb691856cd387cf1d9df7da44174a7559"
+    }
+  ],
+  "measurements": [],
+  "initialPlayerBalancesSun": {
+    "playerA": 0,
+    "playerB": 0
+  },
+  "activatedPlayerBalancesSun": {
+    "playerA": 0,
+    "playerB": 0
+  }
+}

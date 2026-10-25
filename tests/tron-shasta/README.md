@@ -32,11 +32,18 @@ The initial prototype used `/tmp` private wallets. That directory disappeared
 between turns after its sponsor was funded. It is not a supported storage
 scheme; do not send any additional tokens to that old address.
 
-Only the sponsor needs test TRX: request 2,000 using the official Shasta faucet,
-reached through https://developers.tron.network/docs/getting-testnet-tokens-on-tron.
-The faucet may require the user to complete a CAPTCHA. Never fund players with
-TRX. Their accounts are activated using CreateAccount, then receive delegated
-Energy and Bandwidth. Test-token minting does not transfer TRX.
+Only the sponsor needs test TRX. **The original 2,000-test-TRX budget is not
+sufficient for this runner's resource allocations at the observed Shasta
+staking ratios. Do not request funding or run another session using that
+assumption.** In the first execution, 200 TRX of delegated stake provided only
+2,810 Energy per player; 20 TRX provided only 1 staked Bandwidth per player.
+That execution was stopped before contract deployment. Read its public
+reconciliation record and re-size resource provisioning before continuing.
+The official test-token source is linked from
+https://developers.tron.network/docs/getting-testnet-tokens-on-tron.
+Never fund players with TRX. Their accounts are activated using CreateAccount,
+then receive delegated Energy and Bandwidth. Test-token minting does not
+transfer TRX.
 
 The run deploys a six-decimal **mock token** and a **test escrow**, mints test
 tokens, executes two MAX approvals, three paired deposits and normal/draw/

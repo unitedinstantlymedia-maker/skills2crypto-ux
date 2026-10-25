@@ -1,0 +1,15 @@
+{
+  "storageVersion": 2,
+  "runId": "a89e59da-2c86-4656-84ed-5a0199a37c20",
+  "host": "https://api.shasta.trongrid.io",
+  "chainId": 2494104990,
+  "created": "2026-10-25T23:07:46.563Z",
+  "addresses": {
+    "sponsor": "TM9Jt4EHHMKVCLympjMzspqSdW3Zcy5WVG",
+    "playerA": "TLjCbmfCdGq4wEwEjFXFrC6MxoRL42p2U3",
+    "playerB": "TFwQhb5XG5eKpqLnYvXgUs5FgaGoZkzYge",
+    "platform": "TSuasa8Zq3SN3KGgHYH88eVY3bLg22DY3J",
+    "resourceTreasury": "TJgFqt6SWpu9mKTXEoXnxuW4PqUtLYKWQJ"
+  },
+  "warning": "SHASTA ONLY. No value. Never send mainnet funds."
+}
