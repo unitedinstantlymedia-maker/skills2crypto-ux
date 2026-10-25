@@ -2,6 +2,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet, verifyTypedData, keccak256, toUtf8Bytes } = require("ethers");
+const crypto = require("node:crypto");
+const { deriveRoles, publicAddresses, ROLES } = require("./wallets.cjs");
 const {
   CHAIN_ID, DEPOSIT_TYPES, compile, requiredEnergy,
   assertResources, assertReceipt, expectedDeltas,
@@ -65,4 +67,21 @@ test("deposit signatures bind the player to chain, escrow, match, stake and nonc
   assert.notEqual(verifyTypedData({ ...domain, chainId: 728126428 }, DEPOSIT_TYPES, value, signature), wallet.address);
   assert.notEqual(verifyTypedData({ ...domain, verifyingContract: "0x2222222222222222222222222222222222222222" },
     DEPOSIT_TYPES, value, signature), wallet.address);
+});
+
+test("test wallets reconstruct from the secure root and public run ID without a private file", () => {
+  const secret = crypto.randomBytes(32).toString("hex"); // Unfunded unit-test key; never logged.
+  const a = deriveRoles(secret, "run-a");
+  const restored = deriveRoles(secret, "run-a");
+  const other = deriveRoles(secret, "run-b");
+  assert.deepEqual(publicAddresses(a), publicAddresses(restored));
+  assert.equal(publicAddresses(a).sponsor, publicAddresses(other).sponsor);
+  for (const role of ROLES.filter((v) => v !== "sponsor"))
+    assert.notEqual(a[role].address, other[role].address);
+  assert.equal(new Set(Object.values(publicAddresses(a))).size, ROLES.length);
+  for (const value of Object.values(publicAddresses(a)))
+    assert(!value.includes(secret));
+  assert.throws(() => deriveRoles(undefined, "run-a"));
+  assert.throws(() => deriveRoles("bad-key", "run-a"));
+  assert.throws(() => deriveRoles(secret, "../escape"));
 });

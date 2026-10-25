@@ -1,22 +1,36 @@
 # Disposable Shasta zero-TRX proof
 
 This opt-in CLI is isolated from the application, its startup and normal tests.
-It never loads project environment secrets. The RPC is fixed to Shasta, and the
-chain ID is checked before generating wallets or running on-chain operations.
+It reads only `SHASTA_TEST_SPONSOR_PRIVATE_KEY`, a dedicated test-only credential
+entered through the workspace's secure secret form. Never use a production or
+real-money wallet key. The RPC is fixed to Shasta, and the chain ID is checked
+before preparing wallets or running on-chain operations.
 **Never send mainnet funds to any generated test address.**
 
 ```sh
 node --test tests/tron-shasta/support.test.cjs
 node tests/tron-shasta/proof.cjs --compile
 node tests/tron-shasta/proof.cjs --prepare
-node tests/tron-shasta/proof.cjs --status /tmp/skills2crypto-shasta-REPLACE
-node tests/tron-shasta/proof.cjs --run /tmp/skills2crypto-shasta-REPLACE
+node tests/tron-shasta/proof.cjs --status tests/tron-shasta/sessions/REPLACE
+node tests/tron-shasta/proof.cjs --run tests/tron-shasta/sessions/REPLACE
 ```
 
-Use the directory printed by `--prepare`. It contains permission-restricted
-disposable test keys; never print, upload, commit or present the private file.
-The temporary directory is not durable across container replacement. Public
-status checks do not load the private file.
+Use the public session directory printed by `--prepare`. It contains only
+public addresses, a run ID, status and transaction evidence. No private-key
+file is ever written. Role keys are derived in memory using HMAC-SHA256 with
+the dedicated test key, the public run ID and role-specific domain separation.
+The same secret/run ID reconstructs the same wallets after filesystem
+replacement. The sponsor remains controlled by the owner's test-only key.
+Public status checks do not need the secret.
+
+Preserve the public session manifest and transaction journal in checkpoints
+alongside the harness. A durable signer does not make a missing transaction
+journal safe to ignore: recover public on-chain history before resuming.
+Never automatically restart a partially executed session.
+
+The initial prototype used `/tmp` private wallets. That directory disappeared
+between turns after its sponsor was funded. It is not a supported storage
+scheme; do not send any additional tokens to that old address.
 
 Only the sponsor needs test TRX: request 2,000 using the official Shasta faucet,
 reached through https://developers.tron.network/docs/getting-testnet-tokens-on-tron.
@@ -43,7 +57,7 @@ insufficient resources stop execution before broadcast.
 
 Transaction IDs are journalled **before broadcast**, and included transactions
 must also acquire a SolidityNode receipt. Public evidence is in `results.json`
-in the temporary directory. Started runs cannot be blindly replayed after
+in the public session directory. Started runs cannot be blindly replayed after
 failure: reconcile all journalled IDs first.
 
 ## Evidence boundaries

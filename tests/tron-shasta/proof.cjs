@@ -1,28 +1,31 @@
 #!/usr/bin/env node
 "use strict";
 
-// Opt-in test runner: no dotenv, project keys, app imports or configurable RPC.
+// Opt-in test runner: only a dedicated Shasta test secret, never project/mainnet keys.
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const assert = require("node:assert/strict");
 const { TronWeb } = require("tronweb");
+const { deriveRoles, publicAddresses } = require("./wallets.cjs");
 const {
   HOST, CHAIN_ID, compile,
 } = require("./support.cjs");
 const mode = process.argv[2];
 const dir = process.argv[3] && path.resolve(process.argv[3]);
+const SESSIONS = path.join(__dirname, "sessions");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const client = (key) => new TronWeb({ fullHost: HOST, ...(key ? { privateKey: key } : {}) });
 const save = (name, data) => fs.writeFileSync(path.join(dir, name),
   JSON.stringify(data, null, 2), { mode: 0o600 });
 
 function validateDir() {
-  assert(dir && path.dirname(dir) === os.tmpdir() &&
-    path.basename(dir).startsWith("skills2crypto-shasta-"), "Use the --prepare directory");
+  assert(dir && path.dirname(dir) === SESSIONS &&
+    /^[a-zA-Z0-9-]{1,80}$/.test(path.basename(dir)), "Use the public session directory from --prepare");
   const stat = fs.lstatSync(dir);
   assert(stat.isDirectory() && !stat.isSymbolicLink(), "Refuse non-directory/symlink");
-  assert.equal(stat.mode & 0o077, 0, "Wallet directory must be private");
+  assert.equal(fs.realpathSync(dir), path.join(fs.realpathSync(SESSIONS), path.basename(dir)),
+    "Refuse escaped session directory");
 }
 
 async function assertShasta() {
@@ -47,25 +50,27 @@ async function main() {
   }
   await assertShasta();
   if (mode === "--prepare") {
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "skills2crypto-shasta-"));
-    fs.chmodSync(temp, 0o700);
-    const keys = {};
-    for (const role of ["sponsor", "playerA", "playerB", "platform", "resourceTreasury"]) {
-      const account = await TronWeb.createAccount();
-      keys[role] = { address: account.address.base58, privateKey: account.privateKey };
-    }
-    fs.writeFileSync(path.join(temp, "wallets.private.json"), JSON.stringify(keys), { mode: 0o600, flag: "wx" });
+    const runId = crypto.randomUUID();
+    // Fail before creating a session if the persistent test secret is unavailable.
+    const keys = deriveRoles(process.env.SHASTA_TEST_SPONSOR_PRIVATE_KEY, runId);
     const manifest = {
-      host: HOST, chainId: CHAIN_ID, created: new Date().toISOString(),
-      addresses: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.address])),
+      storageVersion: 2, runId, host: HOST, chainId: CHAIN_ID, created: new Date().toISOString(),
+      addresses: publicAddresses(keys),
       warning: "SHASTA ONLY. No value. Never send mainnet funds.",
     };
-    fs.writeFileSync(path.join(temp, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600, flag: "wx" });
-    console.log(JSON.stringify({ directory: temp, ...manifest }, null, 2));
+    fs.mkdirSync(SESSIONS, { recursive: true, mode: 0o700 });
+    assert(!fs.lstatSync(SESSIONS).isSymbolicLink(), "Refuse symlink session root");
+    const session = path.join(SESSIONS, runId);
+    fs.mkdirSync(session, { mode: 0o700 });
+    fs.writeFileSync(path.join(session, "manifest.json"), JSON.stringify(manifest, null, 2),
+      { mode: 0o600, flag: "wx" });
+    console.log(JSON.stringify({ directory: session, ...manifest }, null, 2));
     return;
   }
   validateDir();
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(manifest.storageVersion, 2, "Legacy temporary-key sessions cannot be resumed");
+  assert.equal(manifest.runId, path.basename(dir), "Session/run ID mismatch");
   assert.equal(manifest.host, HOST);
   assert.equal(manifest.chainId, CHAIN_ID);
   const reader = client();
@@ -84,13 +89,8 @@ async function main() {
     "FUNDING_REQUIRED: sponsor needs 1,800 test TRX (request 2,000); never fund the players.");
   assert.equal(balances.playerA.balanceSun, 0, "Player A must start at zero TRX");
   assert.equal(balances.playerB.balanceSun, 0, "Player B must start at zero TRX");
-  const privateFile = path.join(dir, "wallets.private.json");
-  const stat = fs.lstatSync(privateFile);
-  assert(stat.isFile() && !stat.isSymbolicLink(), "Invalid private wallet file");
-  assert.equal(stat.mode & 0o077, 0, "Wallet file must be private");
-  const keys = JSON.parse(fs.readFileSync(privateFile, "utf8"));
-  for (const [role, key] of Object.entries(keys))
-    assert.equal(TronWeb.address.fromPrivateKey(key.privateKey), manifest.addresses[role]);
+  const keys = deriveRoles(process.env.SHASTA_TEST_SPONSOR_PRIVATE_KEY, manifest.runId);
+  assert.deepEqual(publicAddresses(keys), manifest.addresses, "Test secret does not match this session");
   const compiled = compile();
   // An interrupted run is NOT retried automatically. Reconcile every journalled txID.
   fs.writeFileSync(path.join(dir, "execution-started.json"),
