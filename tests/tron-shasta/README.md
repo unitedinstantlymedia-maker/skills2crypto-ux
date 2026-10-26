@@ -15,6 +15,23 @@ node tests/tron-shasta/proof.cjs --status tests/tron-shasta/sessions/REPLACE
 node tests/tron-shasta/proof.cjs --run tests/tron-shasta/sessions/REPLACE
 ```
 
+The original setup-only session can be continued once with `--resume-setup DIR`.
+This mode validates the exact ten-transaction setup journal, rechecks all ten
+solidified receipts and never repeats activation/staking/delegation setup.
+An exclusive continuation marker prevents blindly retrying an interrupted
+continuation. Contract deployment and test-token minting may spend sponsor test
+TRX as setup costs; all measured approvals/deposits/settlements still require
+full resource coverage and zero TRX burn. Player resource top-ups use live
+weights, the transaction Energy estimate plus 25%, and an additional 2% capacity
+margin. Player Energy delegation is reclaimed after approval for reuse; used
+Energy debt returns to the sponsor and is not magically replenished.
+The narrower `--resume-token DIR` recovery accepts exactly those ten setup
+transactions plus the first token deployment, reconciles that deployment and
+reuses its contract rather than deploying another token. Each continuation
+has its own exclusive marker; neither is a general automatic retry command.
+Approval transactions are rebuilt and signed after provisioning has solidified
+so resource-delivery delays cannot expire an already-built transaction.
+
 Use the public session directory printed by `--prepare`. It contains only
 public addresses, a run ID, status and transaction evidence. No private-key
 file is ever written. Role keys are derived in memory using HMAC-SHA256 with

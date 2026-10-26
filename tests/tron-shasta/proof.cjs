@@ -39,8 +39,8 @@ async function assertShasta() {
 }
 
 async function main() {
-  assert(["--compile", "--prepare", "--status", "--run"].includes(mode),
-    "Use --compile, --prepare, --status DIR, or --run DIR");
+  assert(["--compile", "--prepare", "--status", "--run", "--resume-setup", "--resume-token"].includes(mode),
+    "Use --compile, --prepare, --status DIR, --run DIR, --resume-setup DIR, or --resume-token DIR");
   if (mode === "--compile") {
     const compiled = compile();
     for (const name of ["ProofToken", "ProofEscrow"])
@@ -86,17 +86,26 @@ async function main() {
   console.log(JSON.stringify(status, null, 2));
   if (mode === "--status") return;
   assert(balances.sponsor.balanceSun >= 1_800_000_000,
-    "FUNDING_REQUIRED: sponsor needs 1,800 test TRX (request 2,000); never fund the players.");
+    "FUNDING_REQUIRED: insufficient liquid setup budget; this does not guarantee resource capacity.");
   assert.equal(balances.playerA.balanceSun, 0, "Player A must start at zero TRX");
   assert.equal(balances.playerB.balanceSun, 0, "Player B must start at zero TRX");
   const keys = deriveRoles(process.env.SHASTA_TEST_SPONSOR_PRIVATE_KEY, manifest.runId);
   assert.deepEqual(publicAddresses(keys), manifest.addresses, "Test secret does not match this session");
   const compiled = compile();
-  // An interrupted run is NOT retried automatically. Reconcile every journalled txID.
-  fs.writeFileSync(path.join(dir, "execution-started.json"),
+  const resumeSetup = mode === "--resume-setup" || mode === "--resume-token";
+  // Only the known setup-only checkpoint can resume, after receipt reconciliation.
+  // An interrupted continuation is not automatically replayed.
+  if (resumeSetup) {
+    const prior = JSON.parse(fs.readFileSync(path.join(dir, "results.json"), "utf8"));
+    require("./support.cjs").assertSetupCheckpoint(prior, manifest);
+    assert.equal(prior.transactions.length, mode === "--resume-token" ? 11 : 10,
+      "Continuation mode does not match checkpoint");
+  }
+  fs.writeFileSync(path.join(dir, mode === "--resume-token" ? "token-continuation-started.json" :
+    resumeSetup ? "continuation-started.json" : "execution-started.json"),
     JSON.stringify({ started: new Date().toISOString(), host: HOST }),
     { mode: 0o600, flag: "wx" });
-  await require("./run-flow.cjs").runFlow({ keys, manifest, compiled, dir });
+  await require("./run-flow.cjs").runFlow({ keys, manifest, compiled, dir, resumeSetup });
 }
 main().catch((error) => {
   // Do not dump SDK error objects, signed transactions, or private test-wallet state.

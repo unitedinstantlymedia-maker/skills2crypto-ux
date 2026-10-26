@@ -7,6 +7,7 @@ const { deriveRoles, publicAddresses, ROLES } = require("./wallets.cjs");
 const {
   CHAIN_ID, DEPOSIT_TYPES, compile, requiredEnergy,
   assertResources, assertReceipt, expectedDeltas,
+  assertSetupCheckpoint, stakeForResources,
 } = require("./support.cjs");
 
 test("both test fixtures compile with the existing TRON-scoped dependencies", () => {
@@ -84,4 +85,29 @@ test("test wallets reconstruct from the secure root and public run ID without a 
   assert.throws(() => deriveRoles(undefined, "run-a"));
   assert.throws(() => deriveRoles("bad-key", "run-a"));
   assert.throws(() => deriveRoles(secret, "../escape"));
+});
+
+test("resource stake estimates use live weights, round up and reject invalid inputs", () => {
+  assert.equal(stakeForResources(28_000, 12_810_815_163, 180_000_000_000),
+    2_033_000_000);
+  assert.throws(() => stakeForResources(0, 10, 100));
+  assert.throws(() => stakeForResources(10, 0, 100));
+  assert.throws(() => stakeForResources(10, 100, NaN));
+});
+
+test("setup continuation refuses partial contract work, changed wallets and unexpected transactions", () => {
+  const manifest = { runId: "unit-test" };
+  const labels = [
+    "activate playerA", "activate playerB", "activate platform", "activate resourceTreasury",
+    "stake Energy", "stake Bandwidth", "delegate Energy playerA", "delegate Bandwidth playerA",
+    "delegate Energy playerB", "delegate Bandwidth playerB",
+  ];
+  const setup = { manifest, measurements: [],
+    transactions: labels.map((label) => ({ label, txID: "a".repeat(64) })) };
+  assertSetupCheckpoint(setup, manifest);
+  assert.throws(() => assertSetupCheckpoint({ ...setup, contracts: { token: "unexpected" } }, manifest));
+  assert.throws(() => assertSetupCheckpoint({ ...setup, completed: true }, manifest));
+  assert.throws(() => assertSetupCheckpoint({ ...setup, measurements: [{}] }, manifest));
+  assert.throws(() => assertSetupCheckpoint({ ...setup, transactions: setup.transactions.slice(1) }, manifest));
+  assert.throws(() => assertSetupCheckpoint(setup, { runId: "different" }));
 });

@@ -75,7 +75,32 @@ const expectedDeltas = (reason) => [
   [-50_000n, -50_000n, 0n, 100_000n],
 ][reason];
 
+function assertSetupCheckpoint(results, manifest) {
+  assert.deepEqual(results.manifest, manifest, "Manifest changed since setup");
+  assert(!results.completed && !results.contracts && results.measurements.length === 0,
+    "Resume is only allowed before fixture deployment or measured calls");
+  const labels = [
+    "activate playerA", "activate playerB", "activate platform", "activate resourceTreasury",
+    "stake Energy", "stake Bandwidth", "delegate Energy playerA",
+    "delegate Bandwidth playerA", "delegate Energy playerB", "delegate Bandwidth playerB",
+  ];
+  if (results.transactions.length === 11) labels.push("deploy ProofToken");
+  assert.deepEqual(results.transactions.map((t) => t.label), labels,
+    "Unexpected prior transactions; manual reconciliation required");
+  assert(results.transactions.every((t) => /^[a-f0-9]{64}$/.test(t.txID)),
+    "Invalid prior transaction ID");
+}
+
+function stakeForResources(deficit, totalWeight, totalLimit) {
+  assert([deficit, totalWeight, totalLimit].every((v) => Number.isSafeInteger(v) && v > 0),
+    "Invalid live resource weights");
+  // Round up to whole test TRX, with 2% capacity margin in addition to the
+  // transaction's existing 25% Energy margin. Never use this as a rental quote.
+  return Math.ceil(deficit * totalWeight / totalLimit * 1.02) * 1_000_000;
+}
+
 module.exports = {
   HOST, CHAIN_ID, SOURCE, DEPOSIT_TYPES, OUTCOME_TYPES, compile,
   requiredEnergy, assertResources, assertReceipt, evm, expectedDeltas,
+  assertSetupCheckpoint, stakeForResources,
 };

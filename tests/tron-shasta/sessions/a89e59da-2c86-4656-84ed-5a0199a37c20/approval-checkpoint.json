@@ -1,0 +1,56 @@
+{
+  "status": "partial-proof-playerA-approved-playerB-resource-blocked",
+  "completed": false,
+  "network": "Shasta",
+  "solidifiedTransactionCount": 18,
+  "contracts": {
+    "token": "TJkaWE7F5jHe6J3TRpsLuSDwumZqj2GoNE",
+    "escrow": "TXyrLTsRXrkjzdg1dvsJCxrFpPB4rFhDaZ"
+  },
+  "verifiedApproval": {
+    "role": "playerA",
+    "txID": "24848e1fd643578dd11370b79c73d9fc4b75e3012e0912d4de6efb6619f70dc5",
+    "result": "SUCCESS",
+    "energyUsage": 22617,
+    "bandwidthUsage": 346,
+    "feeSun": 0,
+    "trxBeforeSun": 0,
+    "trxAfterSun": 0,
+    "energyBudget": 28272,
+    "allowanceVerified": true
+  },
+  "fundAccountingSun": {
+    "totalReceived": 4000000000,
+    "currentlyStakedEnergy": 2849000000,
+    "currentlyStakedBandwidth": 100000000,
+    "totalTransactionFees": 188902200,
+    "remainingLiquid": 862097800
+  },
+  "playerBalancesSun": {"playerA": 0, "playerB": 0},
+  "blockedPlayerBRequest": {
+    "energyEstimate": 22617,
+    "energyBudget": 28272,
+    "bandwidthBudget": 407,
+    "additionalStakeRequiredSunAtCheck": 1849000000,
+    "sponsorLiquidSunAtCheck": 862097800,
+    "reserveSun": 25000000,
+    "broadcast": false
+  },
+  "observedSponsorResourceState": {
+    "EnergyLimit": 37220,
+    "EnergyUsed": 37179,
+    "NetLimit": 5,
+    "freeNetLimit": 600,
+    "freeNetUsed": 419,
+    "delegatableEnergyStakeSun": 1074882
+  },
+  "limitations": [
+    "One mock-token approval proves a zero-TRX player can approve with delegated Energy and free Bandwidth, not an entire match.",
+    "Player B approval, deposits and settlements remain unexecuted.",
+    "Setup deployment and minting burned sponsor test TRX; measured Player A approval did not.",
+    "This is sponsor delegation, not a live rental-provider API test.",
+    "Mainnet USDT costs, wallet UI compatibility and provider recharge economics remain unverified.",
+    "Preflight broadcast=false fields describe the pre-broadcast snapshot; transaction receipts are authoritative for subsequent execution."
+  ],
+  "continuationPolicy": "Do not replay either continuation mode. Reconcile all 18 transactions and reuse existing contracts and allowance. Resource sizing must include already consumed setup Energy and Bandwidth."
+}
